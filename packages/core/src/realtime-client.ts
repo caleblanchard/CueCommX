@@ -311,6 +311,10 @@ export class CueCommXRealtimeClient {
       this.options.onMessage?.(parsed);
 
       if (parsed.type === "signal:error") {
+        if (parsed.payload.requestId) {
+          this.rejectPendingRequestById(parsed.payload.requestId, new Error(parsed.payload.message));
+        }
+
         this.options.onError?.(new Error(parsed.payload.message));
       }
     } catch (error) {
@@ -342,6 +346,18 @@ export class CueCommXRealtimeClient {
       request.reject(error);
       this.pendingRequests.delete(requestId);
     }
+  }
+
+  private rejectPendingRequestById(requestId: string, error: Error): void {
+    const pending = this.pendingRequests.get(requestId);
+
+    if (!pending) {
+      return;
+    }
+
+    (this.options.clearTimeout ?? globalThis.clearTimeout)(pending.timer);
+    this.pendingRequests.delete(requestId);
+    pending.reject(error);
   }
 
   private resolvePendingRequest(message: ServerSignalingMessage): void {

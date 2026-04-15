@@ -609,12 +609,25 @@ export class RealtimeService {
       }
 
       if (this.isMediaRequestMessage(parsed)) {
-        await this.dispatchMediaMessages(
-          (await this.options.mediaService?.handleRequest(
-            this.buildMediaSessionContext(connection.authenticated),
-            parsed,
-          )) ?? [],
-        );
+        try {
+          await this.dispatchMediaMessages(
+            (await this.options.mediaService?.handleRequest(
+              this.buildMediaSessionContext(connection.authenticated),
+              parsed,
+            )) ?? [],
+          );
+        } catch (mediaError) {
+          const requestId = "payload" in parsed && "requestId" in parsed.payload
+            ? (parsed.payload as { requestId: string }).requestId
+            : undefined;
+
+          this.sendSignalError(
+            connection.socket,
+            "media-error",
+            mediaError instanceof Error ? mediaError.message : "Media request failed.",
+            requestId,
+          );
+        }
         return;
       }
 
@@ -663,7 +676,7 @@ export class RealtimeService {
     );
   }
 
-  private sendSignalError(target: AuthenticatedConnection | WebSocket, code: string, message: string): void {
+  private sendSignalError(target: AuthenticatedConnection | WebSocket, code: string, message: string, requestId?: string): void {
     const socket = target instanceof WebSocket ? target : this.findSocket(target);
 
     this.sendMessage(socket, {
@@ -671,6 +684,7 @@ export class RealtimeService {
       payload: {
         code,
         message,
+        ...(requestId ? { requestId } : {}),
       },
     });
   }

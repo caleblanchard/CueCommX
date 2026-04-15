@@ -83,6 +83,7 @@ export const SignalErrorMessageSchema = z.object({
   payload: z.object({
     code: z.string().min(1).optional(),
     message: z.string().min(1),
+    requestId: z.string().min(1).optional(),
   }),
 });
 export type SignalErrorMessage = z.infer<typeof SignalErrorMessageSchema>;

@@ -276,6 +276,8 @@ function toMediasoupRtpParameters(rtpParameters: MediaProducerCreateRequestMessa
 }
 
 export class CueCommXMediaService implements RealtimeMediaService {
+  private operationLock: Promise<unknown> = Promise.resolve();
+
   private readyPromise: Promise<void>;
 
   private router: Router | undefined;
@@ -286,6 +288,12 @@ export class CueCommXMediaService implements RealtimeMediaService {
 
   constructor(private readonly options: CueCommXMediaServiceOptions) {
     this.readyPromise = this.initialize();
+  }
+
+  private serialize<T>(fn: () => Promise<T>): Promise<T> {
+    const result = this.operationLock.then(fn, fn);
+    this.operationLock = result.then(() => undefined, () => undefined);
+    return result;
   }
 
   async close(): Promise<void> {
@@ -303,6 +311,54 @@ export class CueCommXMediaService implements RealtimeMediaService {
   }
 
   async handleRequest(
+    sessionContext: MediaSessionContext,
+    message: MediaRequestMessage,
+  ): Promise<TargetedServerMessage[]> {
+    return this.serialize(() => this.doHandleRequest(sessionContext, message));
+  }
+
+  async refreshSession(sessionContext: MediaSessionContext): Promise<TargetedServerMessage[]> {
+    return this.serialize(async () => {
+      await this.ensureReady();
+      this.upsertSession(sessionContext);
+      return await this.reconcileConsumers();
+    });
+  }
+
+  async registerSession(sessionContext: MediaSessionContext): Promise<TargetedServerMessage[]> {
+    return this.serialize(async () => {
+      await this.ensureReady();
+      this.upsertSession(sessionContext);
+      return [];
+    });
+  }
+
+  async unregisterSession(sessionToken: string): Promise<TargetedServerMessage[]> {
+    return this.serialize(async () => {
+      await this.ensureReady();
+      const session = this.sessions.get(sessionToken);
+
+      if (!session) {
+        return [];
+      }
+
+      this.closeSendTransport(session);
+      this.closeRecvTransport(session);
+      this.sessions.delete(sessionToken);
+
+      return await this.reconcileConsumers();
+    });
+  }
+
+  async updateOperatorState(sessionContext: MediaSessionContext): Promise<TargetedServerMessage[]> {
+    return this.serialize(async () => {
+      await this.ensureReady();
+      this.upsertSession(sessionContext);
+      return await this.reconcileConsumers();
+    });
+  }
+
+  private async doHandleRequest(
     sessionContext: MediaSessionContext,
     message: MediaRequestMessage,
   ): Promise<TargetedServerMessage[]> {
@@ -331,39 +387,6 @@ export class CueCommXMediaService implements RealtimeMediaService {
     }
 
     return await this.handleConsumerResume(session, message);
-  }
-
-  async refreshSession(sessionContext: MediaSessionContext): Promise<TargetedServerMessage[]> {
-    await this.ensureReady();
-    this.upsertSession(sessionContext);
-    return await this.reconcileConsumers();
-  }
-
-  async registerSession(sessionContext: MediaSessionContext): Promise<TargetedServerMessage[]> {
-    await this.ensureReady();
-    this.upsertSession(sessionContext);
-    return [];
-  }
-
-  async unregisterSession(sessionToken: string): Promise<TargetedServerMessage[]> {
-    await this.ensureReady();
-    const session = this.sessions.get(sessionToken);
-
-    if (!session) {
-      return [];
-    }
-
-    this.closeSendTransport(session);
-    this.closeRecvTransport(session);
-    this.sessions.delete(sessionToken);
-
-    return await this.reconcileConsumers();
-  }
-
-  async updateOperatorState(sessionContext: MediaSessionContext): Promise<TargetedServerMessage[]> {
-    await this.ensureReady();
-    this.upsertSession(sessionContext);
-    return await this.reconcileConsumers();
   }
 
   private async ensureReady(): Promise<void> {
