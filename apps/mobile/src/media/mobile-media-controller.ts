@@ -303,6 +303,8 @@ export class MobileMediaController {
 
   private lastEnergySnapshot: AudioEnergySnapshot | undefined;
 
+  private lastBytesSent: number | undefined;
+
   private localLevelTimer: ReturnType<typeof setInterval> | undefined;
 
   private localStream: MediaStream | undefined;
@@ -598,7 +600,9 @@ export class MobileMediaController {
     }
 
     this.lastEnergySnapshot = undefined;
+    this.lastBytesSent = undefined;
     let reading = false;
+    let statsLogCount = 0;
 
     this.localLevelTimer = setInterval(() => {
       if (reading || !this.producer) {
@@ -609,7 +613,21 @@ export class MobileMediaController {
       void this.producer
         .getStats()
         .then((stats) => {
-          // Try direct audioLevel first (works in browsers)
+          // One-time diagnostic dump of stats structure
+          if (statsLogCount < 3) {
+            statsLogCount++;
+            const entries: Record<string, unknown>[] = [];
+
+            if (stats instanceof Map) {
+              for (const [key, value] of stats) {
+                entries.push({ key, ...(typeof value === "object" ? value : {}) } as Record<string, unknown>);
+              }
+            }
+
+            console.log(`[CueCommX] mic stats dump #${statsLogCount}:`, JSON.stringify(entries, null, 2));
+          }
+
+          // Strategy 1: direct audioLevel (browsers)
           const directLevel = extractAudioLevelFromStats(stats);
 
           if (directLevel !== undefined) {
@@ -617,28 +635,65 @@ export class MobileMediaController {
             return;
           }
 
-          // Fall back to energy-based RMS (works in react-native-webrtc)
+          // Strategy 2: energy-based RMS (react-native-webrtc media-source stats)
           const snapshot = extractEnergySnapshot(stats);
 
-          if (!snapshot) {
+          if (snapshot) {
+            if (this.lastEnergySnapshot) {
+              const rms = computeRmsLevel(this.lastEnergySnapshot, snapshot);
+
+              if (rms !== undefined) {
+                this.options.onLocalLevelChange?.(Math.min(100, Math.round(rms * 100)));
+              }
+            }
+
+            this.lastEnergySnapshot = snapshot;
             return;
           }
 
-          if (this.lastEnergySnapshot) {
-            const rms = computeRmsLevel(this.lastEnergySnapshot, snapshot);
+          // Strategy 3: bytes-sent delta as crude activity indicator
+          const bytesSent = this.extractBytesSent(stats);
 
-            if (rms !== undefined) {
-              this.options.onLocalLevelChange?.(Math.min(100, Math.round(rms * 100)));
+          if (bytesSent !== undefined) {
+            if (this.lastBytesSent !== undefined) {
+              const delta = bytesSent - this.lastBytesSent;
+              // Rough heuristic: ~6000 bytes/150ms at 48kHz mono Opus = active speech
+              const level = Math.min(100, Math.round((delta / 6000) * 60));
+
+              this.options.onLocalLevelChange?.(Math.max(0, level));
             }
-          }
 
-          this.lastEnergySnapshot = snapshot;
+            this.lastBytesSent = bytesSent;
+          }
         })
-        .catch(() => undefined)
+        .catch((err) => {
+          if (statsLogCount < 5) {
+            console.warn("[CueCommX] mic stats error:", err);
+          }
+        })
         .finally(() => {
           reading = false;
         });
     }, 150);
+  }
+
+  private extractBytesSent(stats: unknown): number | undefined {
+    if (!(stats instanceof Map)) {
+      return undefined;
+    }
+
+    for (const value of stats.values()) {
+      if (
+        typeof value === "object" &&
+        value !== null &&
+        (value as Record<string, unknown>).type === "outbound-rtp" &&
+        typeof (value as Record<string, unknown>).bytesSent === "number"
+      ) {
+        return (value as Record<string, unknown>).bytesSent as number;
+      }
+    }
+
+    return undefined;
   }
 
   private stopLocalLevelPolling(): void {
@@ -649,6 +704,7 @@ export class MobileMediaController {
     clearInterval(this.localLevelTimer);
     this.localLevelTimer = undefined;
     this.lastEnergySnapshot = undefined;
+    this.lastBytesSent = undefined;
     this.options.onLocalLevelChange?.(0);
   }
 
