@@ -1,0 +1,8 @@
+{
+  "android": {
+    "package": "com.anonymous.cuecommx"
+  },
+  "ios": {
+    "bundleIdentifier": "com.anonymous.cuecommx"
+  }
+}

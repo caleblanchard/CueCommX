@@ -21,7 +21,9 @@
     "test:e2e:web": "playwright test",
     "test:e2e:web:install": "playwright install chromium",
     "test:watch": "turbo run test:watch --parallel",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
@@ -30,5 +32,10 @@
     "turbo": "^2.5.0",
     "typescript": "^5.8.3",
     "vitest": "^3.1.2"
+  },
+  "dependencies": {
+    "expo": "~54.0.33",
+    "react": "19.1.0",
+    "react-native": "0.81.5"
   }
 }
