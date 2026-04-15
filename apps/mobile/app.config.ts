@@ -41,6 +41,13 @@ const config: ExpoConfig = {
     "expo-dev-client",
     "expo-notifications",
     [
+      "expo-audio",
+      {
+        microphonePermission:
+          "Allow CueCommX to access your microphone for local intercom communication.",
+      },
+    ],
+    [
       "@config-plugins/react-native-webrtc",
       {
         microphonePermission:

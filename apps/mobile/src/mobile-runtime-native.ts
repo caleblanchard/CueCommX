@@ -1,4 +1,8 @@
-import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from "expo-av";
+import {
+  getRecordingPermissionsAsync,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+} from "expo-audio";
 import * as Haptics from "expo-haptics";
 import * as IntentLauncher from "expo-intent-launcher";
 import * as Notifications from "expo-notifications";
@@ -28,23 +32,21 @@ export function ensureMobileNotificationHandlerRegistered(): void {
 }
 
 export async function configureMobileAudioSession(): Promise<void> {
-  const existingPermissions = await Audio.getPermissionsAsync();
+  const existingPermissions = await getRecordingPermissionsAsync();
   const microphonePermissions = existingPermissions.granted
     ? existingPermissions
-    : await Audio.requestPermissionsAsync();
+    : await requestRecordingPermissionsAsync();
 
   if (!microphonePermissions.granted) {
     throw new Error("CueCommX needs microphone permission before mobile audio can start.");
   }
 
-  await Audio.setAudioModeAsync({
-    allowsRecordingIOS: true,
-    interruptionModeIOS: InterruptionModeIOS.DoNotMix,
-    playsInSilentModeIOS: true,
-    staysActiveInBackground: true,
-    interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
-    shouldDuckAndroid: false,
-    playThroughEarpieceAndroid: false,
+  await setAudioModeAsync({
+    allowsRecording: true,
+    interruptionMode: "doNotMix",
+    playsInSilentMode: true,
+    shouldPlayInBackground: true,
+    shouldRouteThroughEarpiece: false,
   });
 
   if (Platform.OS === "ios") {
@@ -57,14 +59,12 @@ export async function resetMobileAudioSession(): Promise<void> {
     RTCAudioSession.audioSessionDidDeactivate();
   }
 
-  await Audio.setAudioModeAsync({
-    allowsRecordingIOS: false,
-    interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
-    playsInSilentModeIOS: false,
-    staysActiveInBackground: false,
-    interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
-    shouldDuckAndroid: true,
-    playThroughEarpieceAndroid: false,
+  await setAudioModeAsync({
+    allowsRecording: false,
+    interruptionMode: "mixWithOthers",
+    playsInSilentMode: false,
+    shouldPlayInBackground: false,
+    shouldRouteThroughEarpiece: false,
   });
 }
 
