@@ -27,7 +27,12 @@ import {
   type MediaStreamTrack as ReactNativeMediaStreamTrack,
 } from "react-native-webrtc";
 
-import { extractAudioLevelFromStats } from "./audio-stats";
+import {
+  type AudioEnergySnapshot,
+  computeRmsLevel,
+  extractAudioLevelFromStats,
+  extractEnergySnapshot,
+} from "./audio-stats";
 
 export interface MobileRemoteTalkerSnapshot {
   activeChannelIds: string[];
@@ -295,6 +300,8 @@ function toMediasoupTransportOptions(
 
 export class MobileMediaController {
   private device: Device | undefined;
+
+  private lastEnergySnapshot: AudioEnergySnapshot | undefined;
 
   private localLevelTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -590,6 +597,7 @@ export class MobileMediaController {
       return;
     }
 
+    this.lastEnergySnapshot = undefined;
     let reading = false;
 
     this.localLevelTimer = setInterval(() => {
@@ -601,13 +609,30 @@ export class MobileMediaController {
       void this.producer
         .getStats()
         .then((stats) => {
-          const level = extractAudioLevelFromStats(stats);
+          // Try direct audioLevel first (works in browsers)
+          const directLevel = extractAudioLevelFromStats(stats);
 
-          if (level === undefined) {
+          if (directLevel !== undefined) {
+            this.options.onLocalLevelChange?.(Math.min(100, Math.round(directLevel * 100)));
             return;
           }
 
-          this.options.onLocalLevelChange?.(Math.min(100, Math.round(level * 100)));
+          // Fall back to energy-based RMS (works in react-native-webrtc)
+          const snapshot = extractEnergySnapshot(stats);
+
+          if (!snapshot) {
+            return;
+          }
+
+          if (this.lastEnergySnapshot) {
+            const rms = computeRmsLevel(this.lastEnergySnapshot, snapshot);
+
+            if (rms !== undefined) {
+              this.options.onLocalLevelChange?.(Math.min(100, Math.round(rms * 100)));
+            }
+          }
+
+          this.lastEnergySnapshot = snapshot;
         })
         .catch(() => undefined)
         .finally(() => {
@@ -623,6 +648,7 @@ export class MobileMediaController {
 
     clearInterval(this.localLevelTimer);
     this.localLevelTimer = undefined;
+    this.lastEnergySnapshot = undefined;
     this.options.onLocalLevelChange?.(0);
   }
 
