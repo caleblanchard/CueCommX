@@ -16,4 +16,11 @@ config.resolver.nodeModulesPaths = [
   path.resolve(monorepoRoot, "node_modules"),
 ];
 
+// Force single copies of React to prevent "Invalid hook call" errors
+// caused by two React instances (workspace vs root hoisted)
+config.resolver.extraNodeModules = {
+  react: path.resolve(monorepoRoot, "node_modules/react"),
+  "react-native": path.resolve(monorepoRoot, "node_modules/react-native"),
+};
+
 module.exports = withNativeWind(config, { input: "./global.css" });
