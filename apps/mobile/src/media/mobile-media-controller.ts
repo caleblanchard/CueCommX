@@ -602,7 +602,6 @@ export class MobileMediaController {
     this.lastEnergySnapshot = undefined;
     this.lastBytesSent = undefined;
     let reading = false;
-    let statsLogCount = 0;
 
     this.localLevelTimer = setInterval(() => {
       if (reading || !this.producer) {
@@ -613,21 +612,7 @@ export class MobileMediaController {
       void this.producer
         .getStats()
         .then((stats) => {
-          // One-time diagnostic dump of stats structure
-          if (statsLogCount < 3) {
-            statsLogCount++;
-            const entries: Record<string, unknown>[] = [];
-
-            if (stats instanceof Map) {
-              for (const [key, value] of stats) {
-                entries.push({ key, ...(typeof value === "object" ? value : {}) } as Record<string, unknown>);
-              }
-            }
-
-            console.log(`[CueCommX] mic stats dump #${statsLogCount}:`, JSON.stringify(entries, null, 2));
-          }
-
-          // Strategy 1: direct audioLevel (browsers)
+          // Strategy 1: direct audioLevel (browsers + react-native-webrtc media-source)
           const directLevel = extractAudioLevelFromStats(stats);
 
           if (directLevel !== undefined) {
@@ -635,7 +620,7 @@ export class MobileMediaController {
             return;
           }
 
-          // Strategy 2: energy-based RMS (react-native-webrtc media-source stats)
+          // Strategy 2: energy-based RMS (totalAudioEnergy delta)
           const snapshot = extractEnergySnapshot(stats);
 
           if (snapshot) {
@@ -666,11 +651,7 @@ export class MobileMediaController {
             this.lastBytesSent = bytesSent;
           }
         })
-        .catch((err) => {
-          if (statsLogCount < 5) {
-            console.warn("[CueCommX] mic stats error:", err);
-          }
-        })
+        .catch(() => undefined)
         .finally(() => {
           reading = false;
         });

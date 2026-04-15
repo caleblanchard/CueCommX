@@ -7,7 +7,6 @@ import * as Haptics from "expo-haptics";
 import * as IntentLauncher from "expo-intent-launcher";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
-import { RTCAudioSession } from "react-native-webrtc";
 
 import { createAndroidLiveAudioNotificationContent } from "./mobile-runtime";
 
@@ -41,31 +40,38 @@ export async function configureMobileAudioSession(): Promise<void> {
     throw new Error("CueCommX needs microphone permission before mobile audio can start.");
   }
 
-  await setAudioModeAsync({
-    allowsRecording: true,
-    interruptionMode: "doNotMix",
-    playsInSilentMode: true,
-    shouldPlayInBackground: true,
-    shouldRouteThroughEarpiece: false,
-  });
-
-  if (Platform.OS === "ios") {
-    RTCAudioSession.audioSessionDidActivate();
+  // On Android, configure the audio mode explicitly since react-native-webrtc
+  // doesn't fully manage the audio session on that platform.
+  if (Platform.OS === "android") {
+    await setAudioModeAsync({
+      allowsRecording: true,
+      interruptionMode: "doNotMix",
+      playsInSilentMode: true,
+      shouldPlayInBackground: true,
+      shouldRouteThroughEarpiece: false,
+    });
   }
+
+  // On iOS, react-native-webrtc manages the AVAudioSession automatically
+  // when getUserMedia is called. Do NOT call setAudioModeAsync or
+  // RTCAudioSession.audioSessionDidActivate here — doing so conflicts with
+  // WebRTC's internal session management and results in a silent mic track.
 }
 
 export async function resetMobileAudioSession(): Promise<void> {
-  if (Platform.OS === "ios") {
-    RTCAudioSession.audioSessionDidDeactivate();
+  // On Android, reset the audio mode since we configured it manually.
+  if (Platform.OS === "android") {
+    await setAudioModeAsync({
+      allowsRecording: false,
+      interruptionMode: "mixWithOthers",
+      playsInSilentMode: false,
+      shouldPlayInBackground: false,
+      shouldRouteThroughEarpiece: false,
+    });
   }
 
-  await setAudioModeAsync({
-    allowsRecording: false,
-    interruptionMode: "mixWithOthers",
-    playsInSilentMode: false,
-    shouldPlayInBackground: false,
-    shouldRouteThroughEarpiece: false,
-  });
+  // On iOS, react-native-webrtc cleans up the AVAudioSession when
+  // transports and tracks are closed. No manual intervention needed.
 }
 
 export async function ensureAndroidRuntimeSupport(): Promise<boolean> {
