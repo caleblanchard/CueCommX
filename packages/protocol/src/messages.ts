@@ -1,0 +1,195 @@
+import { z } from "zod";
+
+import { AdminDashboardSnapshotSchema } from "./admin.js";
+import { AuthCredentialsSchema } from "./auth.js";
+import {
+  MediaCapabilitiesMessageSchema,
+  MediaCapabilitiesRequestMessageSchema,
+  MediaConsumerAvailableMessageSchema,
+  MediaConsumerClosedMessageSchema,
+  MediaConsumerResumeRequestMessageSchema,
+  MediaConsumerResumedMessageSchema,
+  MediaConsumerStateMessageSchema,
+  MediaProducerCloseRequestMessageSchema,
+  MediaProducerClosedMessageSchema,
+  MediaProducerCreateRequestMessageSchema,
+  MediaProducerCreatedMessageSchema,
+  MediaTransportConnectRequestMessageSchema,
+  MediaTransportConnectedMessageSchema,
+  MediaTransportCreateRequestMessageSchema,
+  MediaTransportCreatedMessageSchema,
+} from "./media.js";
+import {
+  ChannelInfoSchema,
+  OperatorStateSchema,
+  PROTOCOL_VERSION,
+  UserInfoSchema,
+} from "./models.js";
+
+export const AuthRequestSchema = z.object({
+  type: z.literal("auth"),
+  payload: AuthCredentialsSchema,
+});
+export type AuthRequest = z.infer<typeof AuthRequestSchema>;
+
+export const AuthResponseSchema = z.object({
+  type: z.literal("auth:result"),
+  payload: z.object({
+    success: z.boolean(),
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    user: UserInfoSchema.optional(),
+    channels: z.array(ChannelInfoSchema).optional(),
+    error: z.string().min(1).optional(),
+  }),
+});
+export type AuthResponse = z.infer<typeof AuthResponseSchema>;
+
+export const SessionAuthenticateMessageSchema = z.object({
+  type: z.literal("session:authenticate"),
+  payload: z.object({
+    sessionToken: z.string().min(1),
+  }),
+});
+export type SessionAuthenticateMessage = z.infer<typeof SessionAuthenticateMessageSchema>;
+
+export const SessionReadyMessageSchema = z.object({
+  type: z.literal("session:ready"),
+  payload: z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    connectedUsers: z.number().int().nonnegative(),
+    user: UserInfoSchema,
+    channels: z.array(ChannelInfoSchema),
+    operatorState: OperatorStateSchema,
+  }),
+});
+export type SessionReadyMessage = z.infer<typeof SessionReadyMessageSchema>;
+
+export const PresenceUpdateMessageSchema = z.object({
+  type: z.literal("presence:update"),
+  payload: z.object({
+    connectedUsers: z.number().int().nonnegative(),
+  }),
+});
+export type PresenceUpdateMessage = z.infer<typeof PresenceUpdateMessageSchema>;
+
+export const OperatorStateMessageSchema = z.object({
+  type: z.literal("operator-state"),
+  payload: OperatorStateSchema,
+});
+export type OperatorStateMessage = z.infer<typeof OperatorStateMessageSchema>;
+
+export const SignalErrorMessageSchema = z.object({
+  type: z.literal("signal:error"),
+  payload: z.object({
+    code: z.string().min(1).optional(),
+    message: z.string().min(1),
+  }),
+});
+export type SignalErrorMessage = z.infer<typeof SignalErrorMessageSchema>;
+
+export const AdminDashboardMessageSchema = z.object({
+  type: z.literal("admin:dashboard"),
+  payload: AdminDashboardSnapshotSchema,
+});
+export type AdminDashboardMessage = z.infer<typeof AdminDashboardMessageSchema>;
+
+export const TalkStartMessageSchema = z.object({
+  type: z.literal("talk:start"),
+  payload: z.object({
+    channelIds: z.array(z.string().min(1)).min(1),
+  }),
+});
+export type TalkStartMessage = z.infer<typeof TalkStartMessageSchema>;
+
+export const TalkStopMessageSchema = z.object({
+  type: z.literal("talk:stop"),
+  payload: z.object({
+    channelIds: z.array(z.string().min(1)).min(1),
+  }),
+});
+export type TalkStopMessage = z.infer<typeof TalkStopMessageSchema>;
+
+export const ListenToggleMessageSchema = z.object({
+  type: z.literal("listen:toggle"),
+  payload: z.object({
+    channelId: z.string().min(1),
+    listening: z.boolean(),
+  }),
+});
+export type ListenToggleMessage = z.infer<typeof ListenToggleMessageSchema>;
+
+export const ClientSignalingMessageSchema = z.discriminatedUnion("type", [
+  AuthRequestSchema,
+  SessionAuthenticateMessageSchema,
+  TalkStartMessageSchema,
+  TalkStopMessageSchema,
+  ListenToggleMessageSchema,
+  MediaCapabilitiesRequestMessageSchema,
+  MediaTransportCreateRequestMessageSchema,
+  MediaTransportConnectRequestMessageSchema,
+  MediaProducerCreateRequestMessageSchema,
+  MediaProducerCloseRequestMessageSchema,
+  MediaConsumerResumeRequestMessageSchema,
+]);
+export type ClientSignalingMessage = z.infer<typeof ClientSignalingMessageSchema>;
+
+export const ServerSignalingMessageSchema = z.discriminatedUnion("type", [
+  AuthResponseSchema,
+  SessionReadyMessageSchema,
+  PresenceUpdateMessageSchema,
+  OperatorStateMessageSchema,
+  SignalErrorMessageSchema,
+  AdminDashboardMessageSchema,
+  MediaCapabilitiesMessageSchema,
+  MediaTransportCreatedMessageSchema,
+  MediaTransportConnectedMessageSchema,
+  MediaProducerCreatedMessageSchema,
+  MediaProducerClosedMessageSchema,
+  MediaConsumerAvailableMessageSchema,
+  MediaConsumerStateMessageSchema,
+  MediaConsumerClosedMessageSchema,
+  MediaConsumerResumedMessageSchema,
+]);
+export type ServerSignalingMessage = z.infer<typeof ServerSignalingMessageSchema>;
+
+export const SignalingMessageSchema = z.discriminatedUnion("type", [
+  AuthRequestSchema,
+  AuthResponseSchema,
+  SessionAuthenticateMessageSchema,
+  SessionReadyMessageSchema,
+  PresenceUpdateMessageSchema,
+  OperatorStateMessageSchema,
+  SignalErrorMessageSchema,
+  AdminDashboardMessageSchema,
+  TalkStartMessageSchema,
+  TalkStopMessageSchema,
+  ListenToggleMessageSchema,
+  MediaCapabilitiesRequestMessageSchema,
+  MediaCapabilitiesMessageSchema,
+  MediaTransportCreateRequestMessageSchema,
+  MediaTransportCreatedMessageSchema,
+  MediaTransportConnectRequestMessageSchema,
+  MediaTransportConnectedMessageSchema,
+  MediaProducerCreateRequestMessageSchema,
+  MediaProducerCreatedMessageSchema,
+  MediaProducerCloseRequestMessageSchema,
+  MediaProducerClosedMessageSchema,
+  MediaConsumerAvailableMessageSchema,
+  MediaConsumerStateMessageSchema,
+  MediaConsumerClosedMessageSchema,
+  MediaConsumerResumeRequestMessageSchema,
+  MediaConsumerResumedMessageSchema,
+]);
+export type SignalingMessage = z.infer<typeof SignalingMessageSchema>;
+
+export function parseSignalingMessage(input: unknown): SignalingMessage {
+  return SignalingMessageSchema.parse(input);
+}
+
+export function parseClientSignalingMessage(input: unknown): ClientSignalingMessage {
+  return ClientSignalingMessageSchema.parse(input);
+}
+
+export function parseServerSignalingMessage(input: unknown): ServerSignalingMessage {
+  return ServerSignalingMessageSchema.parse(input);
+}

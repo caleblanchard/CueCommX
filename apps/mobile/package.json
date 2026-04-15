@@ -1,0 +1,50 @@
+{
+  "name": "@cuecommx/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "dev": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "native:prebuild": "expo prebuild",
+    "build": "tsc -p tsconfig.build.json",
+    "build:e2e:android": "detox build -c android.emu.debug",
+    "build:e2e:ios": "detox build -c ios.sim.debug",
+    "test": "vitest run --coverage",
+    "test:e2e:android": "detox test -c android.emu.debug",
+    "test:e2e:ios": "detox test -c ios.sim.debug",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@config-plugins/react-native-webrtc": "13.0.0",
+    "@cuecommx/core": "0.1.0",
+    "@cuecommx/design-tokens": "0.1.0",
+    "@cuecommx/protocol": "0.1.0",
+    "@react-native-community/slider": "5.1.2",
+    "expo": "~54.0.33",
+    "expo-av": "~16.0.8",
+    "expo-dev-client": "~6.0.16",
+    "expo-haptics": "~15.0.8",
+    "expo-intent-launcher": "~13.0.8",
+    "expo-keep-awake": "~15.0.7",
+    "expo-notifications": "~0.32.16",
+    "expo-status-bar": "~3.0.9",
+    "mediasoup-client": "^3.18.7",
+    "nativewind": "^4.1.23",
+    "react": "^19.2.5",
+    "react-native": "0.81.5",
+    "react-native-reanimated": "~4.1.1",
+    "react-native-safe-area-context": "5.6.0",
+    "react-native-webrtc": "124.0.6"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.2",
+    "detox": "^20.50.1",
+    "jest": "^30.3.0",
+    "tailwindcss": "^4.1.4",
+    "typescript": "~5.9.2"
+  }
+}

@@ -1,0 +1,19 @@
+services:
+  cuecommx:
+    build:
+      context: .
+    image: cuecommx:local
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      CUECOMMX_SERVER_NAME: CueCommX
+      # Replace with the Linux host's LAN IP so WebRTC clients receive a reachable candidate.
+      CUECOMMX_ANNOUNCED_IP: 192.168.1.50
+      CUECOMMX_PORT: 3000
+      CUECOMMX_RTC_MIN_PORT: 40000
+      CUECOMMX_RTC_MAX_PORT: 41000
+    volumes:
+      - cuecommx-data:/var/lib/cuecommx/data
+
+volumes:
+  cuecommx-data:
