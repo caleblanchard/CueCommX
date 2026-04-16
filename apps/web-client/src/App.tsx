@@ -1073,7 +1073,7 @@ export default function App() {
                           <div className="h-1.5 w-full" style={{ backgroundColor: channel.color }} />
                           <CardHeader className="space-y-3">
                             <div className="flex items-start justify-between gap-3">
-                              <div className="space-y-1">
+                              <div className="min-w-0 space-y-1">
                                 <CardTitle>{channel.name}</CardTitle>
                                 <p className="text-sm leading-6 text-muted-foreground">
                                   {controlsReady
@@ -1081,7 +1081,10 @@ export default function App() {
                                     : "Arm browser audio to enable live talk and listen on this channel."}
                                 </p>
                               </div>
-                              <Badge variant={talking ? "success" : listening ? "accent" : "neutral"}>
+                              <Badge
+                                className="min-w-[6.5rem] shrink-0 justify-center"
+                                variant={talking ? "success" : listening ? "accent" : "neutral"}
+                              >
                                 {talking ? "Talking" : listening ? "Listening" : "Idle"}
                               </Badge>
                             </div>

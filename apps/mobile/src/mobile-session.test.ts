@@ -11,6 +11,12 @@ describe("normalizeMobileServerUrl", () => {
     expect(normalizeMobileServerUrl("10.0.0.25:3000/admin?x=1")).toBe("http://10.0.0.25:3000/");
   });
 
+  it("preserves explicit https server URLs", () => {
+    expect(normalizeMobileServerUrl("https://cuecommx.local:3443/admin?x=1")).toBe(
+      "https://cuecommx.local:3443/",
+    );
+  });
+
   it("rejects unsupported protocols", () => {
     expect(() => normalizeMobileServerUrl("ftp://10.0.0.25:3000")).toThrow(
       "CueCommX mobile requires an http:// or https:// server URL.",

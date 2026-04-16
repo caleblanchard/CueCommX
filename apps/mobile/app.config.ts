@@ -1,6 +1,12 @@
 import type { ExpoConfig } from "expo/config";
 
-const config: ExpoConfig = {
+type CueCommXExpoConfig = ExpoConfig & {
+  android?: ExpoConfig["android"] & {
+    usesCleartextTraffic?: boolean;
+  };
+};
+
+const config: CueCommXExpoConfig = {
   name: "CueCommX Mobile",
   slug: "cuecommx-mobile",
   version: "0.1.0",
@@ -18,11 +24,16 @@ const config: ExpoConfig = {
     bundleIdentifier: "com.cuecommx.mobile",
     supportsTablet: false,
     infoPlist: {
+      NSAppTransportSecurity: {
+        NSAllowsArbitraryLoads: true,
+        NSAllowsLocalNetworking: true,
+      },
       UIBackgroundModes: ["audio"],
     },
   },
   android: {
     package: "com.cuecommx.mobile",
+    usesCleartextTraffic: true,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
       backgroundColor: "#020617",
