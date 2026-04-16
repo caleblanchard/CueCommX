@@ -18,7 +18,7 @@ const buttonVariants = cva(
         default: "h-10 px-4 py-2",
         sm: "h-9 px-3",
         lg: "h-12 px-5",
-        talk: "h-[60px] px-6 text-base font-semibold uppercase tracking-[0.16em]",
+        talk: "h-[60px] px-6 text-base font-semibold uppercase tracking-[0.16em] select-none touch-manipulation",
       },
     },
     defaultVariants: {

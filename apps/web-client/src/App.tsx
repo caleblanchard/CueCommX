@@ -1104,7 +1104,6 @@ export default function App() {
                               <Button
                                 aria-pressed={talking}
                                 disabled={!controlsReady || !permission?.canTalk}
-                                onBlur={() => stopTalk(channel.id)}
                                 onClick={() => {
                                   if (!latchModeEnabled) {
                                     return;
@@ -1137,14 +1136,25 @@ export default function App() {
                                     stopTalk(channel.id);
                                   }
                                 }}
-                                onPointerCancel={() => stopTalk(channel.id)}
-                                onPointerDown={() => {
+                                onPointerCancel={(event) => {
                                   if (!latchModeEnabled) {
+                                    (event.target as HTMLElement).releasePointerCapture?.(event.pointerId);
+                                    stopTalk(channel.id);
+                                  }
+                                }}
+                                onPointerDown={(event) => {
+                                  if (!latchModeEnabled) {
+                                    event.preventDefault();
+                                    (event.target as HTMLElement).setPointerCapture?.(event.pointerId);
                                     startTalk(channel.id);
                                   }
                                 }}
-                                onPointerLeave={() => stopTalk(channel.id)}
-                                onPointerUp={() => stopTalk(channel.id)}
+                                onPointerUp={(event) => {
+                                  if (!latchModeEnabled) {
+                                    (event.target as HTMLElement).releasePointerCapture?.(event.pointerId);
+                                    stopTalk(channel.id);
+                                  }
+                                }}
                                 size="talk"
                                 type="button"
                               >
