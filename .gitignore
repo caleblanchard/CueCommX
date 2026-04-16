@@ -5,3 +5,6 @@ coverage/
 .DS_Store
 data/
 apps/server/data/
+
+# TLS private keys (certs are OK to commit)
+certs/*.key
