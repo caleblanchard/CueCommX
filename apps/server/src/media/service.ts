@@ -494,6 +494,7 @@ export class CueCommXMediaService implements RealtimeMediaService {
 
     await consumerRecord.consumer.resume();
 
+    console.log(`[CueCommX media] consumer resumed: ${message.payload.consumerId.slice(0, 8)} for ${session.user.username}`);
     const response: MediaConsumerResumedMessage = {
       type: "media:consumer:resumed",
       payload: {
@@ -556,6 +557,8 @@ export class CueCommXMediaService implements RealtimeMediaService {
       },
     });
 
+    console.log(`[CueCommX media] producer created for ${session.user.username} (${session.sessionToken.slice(0, 8)})`);
+
     const response: MediaProducerCreatedMessage = {
       type: "media:producer:created",
       payload: {
@@ -614,6 +617,8 @@ export class CueCommXMediaService implements RealtimeMediaService {
     message: MediaTransportCreateRequestMessage,
   ): Promise<TargetedServerMessage[]> {
     const announcedHost = session.connectHost ?? this.options.announcedIp;
+
+    console.log(`[CueCommX media] transport:create ${message.payload.direction} for ${session.user.username}, announcedHost=${announcedHost ?? "(none)"}, connectHost=${session.connectHost ?? "(none)"}, configIp=${this.options.announcedIp ?? "(none)"}`);
 
     if (message.payload.direction === "send") {
       this.closeSendTransport(session);
@@ -725,16 +730,21 @@ export class CueCommXMediaService implements RealtimeMediaService {
     }
 
     const notifications: TargetedServerMessage[] = [];
-    const desiredRoutes = buildDesiredMediaRoutes(
-      [...this.sessions.values()].map((session) => ({
-        sessionToken: session.sessionToken,
-        userId: session.user.id,
-        talkChannelIds: session.state.talkChannelIds,
-        listenChannelIds: session.state.listenChannelIds,
-        hasProducer: !!session.producer,
-        hasRecvTransport: !!session.recvTransport,
-      })),
-    );
+    const sessionSnapshots = [...this.sessions.values()].map((session) => ({
+      sessionToken: session.sessionToken,
+      userId: session.user.id,
+      talkChannelIds: session.state.talkChannelIds,
+      listenChannelIds: session.state.listenChannelIds,
+      hasProducer: !!session.producer,
+      hasRecvTransport: !!session.recvTransport,
+    }));
+
+    console.log(`[CueCommX media] reconcile: ${sessionSnapshots.length} sessions`, sessionSnapshots.map((s) => `${s.userId.slice(0, 8)}(prod=${s.hasProducer},recv=${s.hasRecvTransport},talk=[${s.talkChannelIds}],listen=[${s.listenChannelIds}])`).join(", "));
+
+    const desiredRoutes = buildDesiredMediaRoutes(sessionSnapshots);
+
+    console.log(`[CueCommX media] reconcile: ${desiredRoutes.length} desired route(s)`, desiredRoutes.map((r) => `${r.producerUserId.slice(0, 8)}->[${r.activeChannelIds}]->${r.listenerSessionToken.slice(0, 8)}`).join(", "));
+
     const desiredRoutesByListener = new Map<string, Map<string, (typeof desiredRoutes)[number]>>();
 
     for (const route of desiredRoutes) {
@@ -840,6 +850,8 @@ export class CueCommXMediaService implements RealtimeMediaService {
         consumer.on("transportclose", () => {
           session.consumersByProducerSession.delete(route.producerSessionToken);
         });
+
+        console.log(`[CueCommX media] consumer created: ${producerSession.user.username} -> ${session.user.username} on [${route.activeChannelIds}] (consumer ${consumer.id.slice(0, 8)})`);
 
         const availableMessage: MediaConsumerAvailableMessage = {
           type: "media:consumer:available",

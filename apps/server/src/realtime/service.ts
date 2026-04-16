@@ -1,3 +1,4 @@
+import { lookup } from "node:dns/promises";
 import type { IncomingMessage, Server as HttpServer } from "node:http";
 import type { Server as HttpsServer } from "node:https";
 import { isIP } from "node:net";
@@ -60,7 +61,20 @@ function isUsableMediaHost(host?: string): host is string {
     return false;
   }
 
-  return isIP(host) > 0;
+  return true;
+}
+
+async function resolveMediaHost(host: string): Promise<string> {
+  if (isIP(host) > 0) {
+    return host;
+  }
+
+  try {
+    const result = await lookup(host, { family: 4 });
+    return result.address;
+  } catch {
+    return host;
+  }
 }
 
 export interface RealtimeServiceOptions {
@@ -375,9 +389,12 @@ export class RealtimeService {
     const channels = this.options.database.listAssignedChannels(user.id);
     const nextState = this.buildOperatorState(user, sessionToken);
 
+    const rawHost = connection.requestHost;
+    const resolvedHost = isUsableMediaHost(rawHost) ? await resolveMediaHost(rawHost) : undefined;
+
     const authenticated: AuthenticatedConnection = {
       channels,
-      connectHost: isUsableMediaHost(connection.requestHost) ? connection.requestHost : undefined,
+      connectHost: resolvedHost,
       sessionToken,
       state: nextState,
       user,
