@@ -27,6 +27,7 @@ const environmentSchema = z.object({
   CUECOMMX_SERVER_NAME: z.string().min(1).default("CueCommX"),
   CUECOMMX_HOST: z.string().min(1).default("0.0.0.0"),
   CUECOMMX_PORT: integerFromEnv(3000),
+  CUECOMMX_HTTPS_PORT: integerFromEnv(3443),
   CUECOMMX_TLS_CERT_FILE: optionalStringFromEnv,
   CUECOMMX_TLS_KEY_FILE: optionalStringFromEnv,
   CUECOMMX_RTC_MIN_PORT: integerFromEnv(40000),
@@ -43,6 +44,7 @@ export interface CueCommXConfig {
   serverName: string;
   host: string;
   port: number;
+  httpsPort: number;
   tls?: {
     certPath: string;
     keyPath: string;
@@ -85,6 +87,7 @@ export function loadConfig(
     serverName: parsed.CUECOMMX_SERVER_NAME,
     host: parsed.CUECOMMX_HOST,
     port: parsed.CUECOMMX_PORT,
+    httpsPort: parsed.CUECOMMX_HTTPS_PORT,
     tls:
       parsed.CUECOMMX_TLS_CERT_FILE && parsed.CUECOMMX_TLS_KEY_FILE
         ? {

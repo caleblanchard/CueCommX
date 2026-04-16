@@ -8,6 +8,7 @@ describe("loadConfig", () => {
 
     expect(config.serverName).toBe("CueCommX");
     expect(config.port).toBe(3000);
+    expect(config.httpsPort).toBe(3443);
     expect(config.rtcMinPort).toBe(40000);
     expect(config.rtcMaxPort).toBe(41000);
     expect(config.dbPath).toBe("/tmp/cuecommx/data/cuecommx.db");

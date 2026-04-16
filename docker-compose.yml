@@ -12,9 +12,10 @@ services:
       CUECOMMX_PORT: 3000
       CUECOMMX_RTC_MIN_PORT: 40000
       CUECOMMX_RTC_MAX_PORT: 41000
-      # Uncomment to enable HTTPS (mount certs volume below)
+      # Uncomment to enable HTTPS on a second port (both HTTP and HTTPS run simultaneously)
       # CUECOMMX_TLS_CERT_FILE: /etc/cuecommx/certs/server.crt
       # CUECOMMX_TLS_KEY_FILE: /etc/cuecommx/certs/server.key
+      # CUECOMMX_HTTPS_PORT: 3443
     volumes:
       - cuecommx-data:/var/lib/cuecommx/data
       # Uncomment to mount TLS certificates

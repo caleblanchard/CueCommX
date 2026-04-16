@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import type { Server as HttpServer } from "node:http";
 import type { Server as HttpsServer } from "node:https";
 import { fileURLToPath } from "node:url";
@@ -576,21 +576,15 @@ export function createApp(options: CreateAppOptions) {
     return configuredApp;
   };
 
-  if (options.config.tls) {
-    return configureApp(
-      Fastify<HttpsServer>({
-        https: {
-          cert: readFileSync(options.config.tls.certPath),
-          key: readFileSync(options.config.tls.keyPath),
-        },
-        logger: false,
-      }),
-    );
-  }
-
-  return configureApp(
+  const app = configureApp(
     Fastify<HttpServer>({
       logger: false,
     }),
   );
+
+  return Object.assign(app, {
+    attachWebSocketServer: (server: HttpServer | HttpsServer) => {
+      realtimeService.attach(server);
+    },
+  });
 }
