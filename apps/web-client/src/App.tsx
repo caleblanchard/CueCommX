@@ -41,8 +41,11 @@ import {
 } from "./media/web-media-controller.js";
 import { formatLatencyIndicator, readNetworkRtt } from "./network-latency.js";
 import {
+  clearStoredSession,
   hasStoredPreferredListenChannelIds,
+  loadStoredSession,
   loadWebClientPreferences,
+  saveStoredSession,
   saveWebClientPreferences,
   type StorageLike,
   WEB_CLIENT_PREFERENCES_KEY,
@@ -276,13 +279,54 @@ export default function App() {
         const status = StatusResponseSchema.parse(await statusResponse.json());
         const discovery = DiscoveryResponseSchema.parse(await discoveryResponse.json());
 
-        setState({
-          discovery,
-          loading: false,
-          loginPending: false,
-          realtimeState: "idle",
-          status,
-        });
+        const storedSession = loadStoredSession(getBrowserStorage());
+        let restoredSession: AuthSuccessResponse | undefined;
+
+        if (storedSession) {
+          try {
+            const sessionResponse = await fetch("/api/auth/session", {
+              headers: { Authorization: `Bearer ${storedSession.sessionToken}` },
+              signal: abortController.signal,
+            });
+
+            if (sessionResponse.ok) {
+              const payload = LoginResponseSchema.parse(await sessionResponse.json());
+
+              if (payload.success) {
+                restoredSession = payload;
+              }
+            }
+          } catch {
+            // Session restore failed — fall through to login screen
+          }
+
+          if (!restoredSession) {
+            clearStoredSession(getBrowserStorage());
+          }
+        }
+
+        if (restoredSession) {
+          setState({
+            discovery,
+            loading: false,
+            loginPending: false,
+            realtimeState: "connecting",
+            session: restoredSession,
+            status,
+          });
+        } else {
+          setState({
+            discovery,
+            loading: false,
+            loginPending: false,
+            realtimeState: "idle",
+            status,
+          });
+
+          if (storedSession?.username) {
+            setUsername(storedSession.username);
+          }
+        }
       } catch (error) {
         if (abortController.signal.aborted) {
           return;
@@ -413,6 +457,10 @@ export default function App() {
           }
 
           if (message.type === "signal:error") {
+            if (message.payload.code === "unauthorized") {
+              clearStoredSession(getBrowserStorage());
+            }
+
             return {
               ...current,
               realtimeError: message.payload.message,
@@ -683,6 +731,11 @@ export default function App() {
       if (!response.ok || !payload.success) {
         throw new Error(payload.success ? "Unable to sign in to CueCommX." : payload.error);
       }
+
+      saveStoredSession(getBrowserStorage(), {
+        sessionToken: payload.sessionToken,
+        username: payload.user.displayName,
+      });
 
       setState((current) => ({
         ...current,

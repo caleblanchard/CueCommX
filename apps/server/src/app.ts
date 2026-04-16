@@ -237,6 +237,42 @@ export function createApp(options: CreateAppOptions) {
       );
     }
 
+    configuredApp.get("/api/auth/session", async (request, reply) => {
+      const authorization = request.headers.authorization;
+
+      if (typeof authorization !== "string") {
+        return reply.code(401).send(createFailureResponse("Bearer session token is required."));
+      }
+
+      const [scheme, token] = authorization.split(" ");
+
+      if (scheme !== "Bearer" || !token) {
+        return reply.code(401).send(createFailureResponse("Bearer session token is required."));
+      }
+
+      const session = sessionStore.get(token);
+
+      if (!session) {
+        return reply.code(401).send(createFailureResponse("Session token is invalid or expired."));
+      }
+
+      const user = database.getUser(session.userId);
+
+      if (!user) {
+        return reply.code(401).send(createFailureResponse("Session user was not found."));
+      }
+
+      return reply.code(200).send(
+        AuthSuccessResponseSchema.parse({
+          success: true,
+          protocolVersion: PROTOCOL_VERSION,
+          sessionToken: token,
+          user,
+          channels: database.listAssignedChannels(user.id),
+        }),
+      );
+    });
+
     configuredApp.post("/api/auth/login", async (request, reply) => {
       const parsed = LoginRequestSchema.safeParse(request.body);
 

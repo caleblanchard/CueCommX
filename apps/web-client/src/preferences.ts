@@ -12,6 +12,12 @@ export interface StorageLike {
 }
 
 export const WEB_CLIENT_PREFERENCES_KEY = "cuecommx.web-client.preferences";
+export const WEB_CLIENT_SESSION_KEY = "cuecommx.web-client.session";
+
+export interface StoredSession {
+  sessionToken: string;
+  username: string;
+}
 
 export const DEFAULT_WEB_CLIENT_PREFERENCES: WebClientPreferences = {
   channelVolumes: {},
@@ -110,4 +116,54 @@ export function saveWebClientPreferences(
   }
 
   storage.setItem(WEB_CLIENT_PREFERENCES_KEY, JSON.stringify(preferences));
+}
+
+export function loadStoredSession(storage: StorageLike | undefined): StoredSession | undefined {
+  if (!storage) {
+    return undefined;
+  }
+
+  try {
+    const raw = storage.getItem(WEB_CLIENT_SESSION_KEY);
+
+    if (!raw) {
+      return undefined;
+    }
+
+    const parsed = JSON.parse(raw) as { sessionToken?: unknown; username?: unknown };
+
+    if (typeof parsed.sessionToken !== "string" || !parsed.sessionToken.trim()) {
+      return undefined;
+    }
+
+    return {
+      sessionToken: parsed.sessionToken,
+      username: typeof parsed.username === "string" ? parsed.username : "",
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export function saveStoredSession(
+  storage: StorageLike | undefined,
+  session: StoredSession,
+): void {
+  if (!storage) {
+    return;
+  }
+
+  storage.setItem(WEB_CLIENT_SESSION_KEY, JSON.stringify(session));
+}
+
+export function clearStoredSession(storage: StorageLike | undefined): void {
+  if (!storage) {
+    return;
+  }
+
+  try {
+    storage.setItem(WEB_CLIENT_SESSION_KEY, "");
+  } catch {
+    // Ignore storage errors during cleanup
+  }
 }

@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  clearStoredSession,
   DEFAULT_WEB_CLIENT_PREFERENCES,
   hasStoredPreferredListenChannelIds,
-  WEB_CLIENT_PREFERENCES_KEY,
+  loadStoredSession,
   loadWebClientPreferences,
   parseWebClientPreferences,
+  saveStoredSession,
   saveWebClientPreferences,
+  WEB_CLIENT_PREFERENCES_KEY,
+  WEB_CLIENT_SESSION_KEY,
 } from "./preferences.js";
 
 describe("parseWebClientPreferences", () => {
@@ -79,5 +83,54 @@ describe("load/saveWebClientPreferences", () => {
       preferredListenChannelIds: ["ch-1"],
       selectedInputDeviceId: "usb-mic",
     });
+  });
+});
+
+describe("stored session persistence", () => {
+  it("round-trips session token and username through storage", () => {
+    const storage = new Map<string, string>();
+    const storageLike = {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value);
+      },
+    };
+
+    expect(loadStoredSession(storageLike)).toBeUndefined();
+
+    saveStoredSession(storageLike, {
+      sessionToken: "sess-abc-123",
+      username: "Stage",
+    });
+
+    expect(storage.has(WEB_CLIENT_SESSION_KEY)).toBe(true);
+
+    const restored = loadStoredSession(storageLike);
+
+    expect(restored).toEqual({
+      sessionToken: "sess-abc-123",
+      username: "Stage",
+    });
+
+    clearStoredSession(storageLike);
+
+    expect(loadStoredSession(storageLike)).toBeUndefined();
+  });
+
+  it("returns undefined for invalid or empty stored session data", () => {
+    const storageLike = {
+      getItem: () => null,
+      setItem: () => undefined,
+    };
+
+    expect(loadStoredSession(storageLike)).toBeUndefined();
+    expect(loadStoredSession(undefined)).toBeUndefined();
+
+    const badStorage = {
+      getItem: () => "{bad json",
+      setItem: () => undefined,
+    };
+
+    expect(loadStoredSession(badStorage)).toBeUndefined();
   });
 });

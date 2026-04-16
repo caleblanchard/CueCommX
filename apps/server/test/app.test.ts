@@ -676,6 +676,89 @@ describe("createApp", () => {
     await app.close();
   });
 
+  it("resumes an existing session via GET /api/auth/session with a valid Bearer token", async () => {
+    const userId = database.createUser({
+      username: "Stage",
+      role: "operator",
+      pinHash: hashPin("1234"),
+    });
+    database.grantChannelPermissions(userId, [
+      {
+        channelId: "ch-production",
+        canTalk: true,
+        canListen: true,
+      },
+    ]);
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church",
+        host: "0.0.0.0",
+        port: 3000,
+        rtcMinPort: 40000,
+        rtcMaxPort: 41000,
+        announcedIp: undefined,
+        dataDir: workingDirectory,
+        dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"),
+        maxUsers: 30,
+        maxChannels: 16,
+        logLevel: "info",
+      },
+      database,
+    });
+
+    const loginResponse = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { username: "Stage", pin: "1234" },
+    });
+
+    expect(loginResponse.statusCode).toBe(200);
+
+    const loginPayload = loginResponse.json() as { sessionToken: string };
+    const sessionToken = loginPayload.sessionToken;
+
+    const resumeResponse = await app.inject({
+      method: "GET",
+      url: "/api/auth/session",
+      headers: { authorization: `Bearer ${sessionToken}` },
+    });
+
+    expect(resumeResponse.statusCode).toBe(200);
+    expect(resumeResponse.json()).toMatchObject({
+      success: true,
+      protocolVersion: PROTOCOL_VERSION,
+      sessionToken,
+      user: {
+        username: "Stage",
+        role: "operator",
+      },
+      channels: [{ id: "ch-production", name: "Production" }],
+    });
+
+    const invalidResponse = await app.inject({
+      method: "GET",
+      url: "/api/auth/session",
+      headers: { authorization: "Bearer sess-bogus-token" },
+    });
+
+    expect(invalidResponse.statusCode).toBe(401);
+    expect(invalidResponse.json()).toMatchObject({
+      success: false,
+      error: "Session token is invalid or expired.",
+    });
+
+    const noHeaderResponse = await app.inject({
+      method: "GET",
+      url: "/api/auth/session",
+    });
+
+    expect(noHeaderResponse.statusCode).toBe(401);
+
+    await app.close();
+  });
+
   it("authenticates websocket sessions and updates live operator state", async () => {
     const userId = database.createUser({
       username: "A2",
