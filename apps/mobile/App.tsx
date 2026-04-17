@@ -1399,10 +1399,13 @@ export default function App() {
                             }
                             onTalkPress={(phase) => handleTalkGesture(channel.id, phase)}
                             onVolumeChange={(value) =>
-                              setChannelVolumes((current) => ({
-                                ...current,
-                                [channel.id]: value,
-                              }))
+                              setChannelVolumes((current) => {
+                                const rounded = Math.round(value);
+                                if ((current[channel.id] ?? 100) === rounded) {
+                                  return current;
+                                }
+                                return { ...current, [channel.id]: rounded };
+                              })
                             }
                             talkReady={audioReady}
                             talkMode={talkMode}
