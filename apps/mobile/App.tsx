@@ -27,11 +27,6 @@ import type {
   StatusResponse,
 } from "@cuecommx/protocol";
 
-import {
-  buildMobileFoundationState,
-  previewChannels,
-  previewStatus,
-} from "./src/mobile-foundation";
 import { resolveTalkGesture, type MobileTalkMode } from "./src/mobile-controls";
 import { deferMobileOperation } from "./src/mobile-feedback";
 import {
@@ -41,7 +36,6 @@ import {
 import {
   loadMobileServerShell,
   loginMobileOperator,
-  resolveMobileServerBaseUrls,
 } from "./src/mobile-session";
 import { loadPersistedServerUrl, persistServerUrl } from "./src/server-url-storage";
 import {
@@ -338,7 +332,6 @@ function ChannelPermissionCard({
 }
 
 export default function App() {
-  const foundation = buildMobileFoundationState(previewStatus, previewChannels);
   const [state, setState] = useState<ViewState>(initialState);
   const [serverUrlInput, setServerUrlInput] = useState("");
   const [username, setUsername] = useState("");
@@ -363,8 +356,6 @@ export default function App() {
   const connectionBadge = getConnectionBadge(state.realtimeState);
   const assignedPermissions = state.session?.user.channelPermissions ?? [];
   const activeChannels = state.session?.channels ?? [];
-  const activeTalkCount = state.operatorState?.talkChannelIds.length ?? 0;
-  const activeListenCount = state.operatorState?.listenChannelIds.length ?? 0;
   const showAndroidRuntimeSupport = shouldShowAndroidRuntimeTools({
     hasSession: !!state.session,
     platformOs: Platform.OS,
@@ -382,21 +373,6 @@ export default function App() {
     [activeChannels, channelVolumes],
   );
   const listenChannelIds = state.operatorState?.listenChannelIds ?? [];
-  const serverHint =
-    state.discovery?.connectTargets.find((target) => target.id === state.discovery?.primaryTargetId)?.url ??
-    state.discovery?.primaryUrl ??
-    state.serverBaseUrl;
-  const manualTargetCandidates = useMemo(() => {
-    if (!serverUrlInput.trim()) {
-      return undefined;
-    }
-
-    try {
-      return resolveMobileServerBaseUrls(serverUrlInput);
-    } catch {
-      return undefined;
-    }
-  }, [serverUrlInput]);
 
   function getRuntimeMessage(error: unknown, fallback: string): string {
     return error instanceof Error ? error.message : fallback;
@@ -880,6 +856,17 @@ export default function App() {
     setRuntimeNotice(undefined);
   }
 
+  function handleDisconnect(): void {
+    handleSignOut();
+    setState((current) => ({
+      ...current,
+      discovery: undefined,
+      serverBaseUrl: undefined,
+      serverError: undefined,
+      status: undefined,
+    }));
+  }
+
   async function handleArmAudio(): Promise<void> {
     if (
       !canArmMobileAudio({
@@ -1008,6 +995,9 @@ export default function App() {
     }
   }
 
+
+  const screen = state.session ? "intercom" : state.status ? "login" : "connect";
+
   return (
     <SafeAreaProvider>
       <SafeAreaView className="flex-1 bg-background">
@@ -1016,165 +1006,136 @@ export default function App() {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
           className="flex-1"
         >
-          <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
-            <View className="gap-5 px-5 pb-10 pt-4">
-              <View className="gap-4">
-                <View className="self-start rounded-full border border-primary/30 bg-primary/10 px-4 py-2">
-                  <Text className="text-[11px] font-semibold uppercase tracking-control text-primary">
-                    Mobile live controls
+          {screen === "connect" ? (
+            <ScrollView
+              className="flex-1"
+              contentContainerStyle={{ flexGrow: 1, justifyContent: "center" }}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <View className="gap-8 px-6 py-10">
+                <View className="items-center gap-4">
+                  <View className="h-16 w-16 items-center justify-center rounded-2xl bg-primary/15">
+                    <Text className="text-3xl">{String.fromCodePoint(0x1f399)}</Text>
+                  </View>
+                  <Text className="text-3xl font-bold tracking-tight text-foreground">
+                    CueCommX
+                  </Text>
+                  <Text className="max-w-xs text-center text-base leading-6 text-muted-foreground">
+                    Connect to your local intercom server to get started.
                   </Text>
                 </View>
 
-                <View className="gap-3">
-                  <Text className="text-4xl font-semibold tracking-tight text-foreground">
-                    CueCommX Mobile
-                  </Text>
-                  <Text className="text-base leading-7 text-muted-foreground">
-                    Manual local-server handoff, operator sign-in, and mobile listen/talk state
-                    controls are now wired for iPhone and Android. Native audio arming, remote
-                    playback, and wake-lock behavior are layered onto the same session flow.
-                  </Text>
-                </View>
-              </View>
-
-              <SectionCard>
-                <View className="flex-row items-start justify-between gap-4">
-                  <View className="flex-1 gap-1">
+                <View className="gap-4">
+                  <View className="gap-2">
                     <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                      Local server handoff
+                      Server address
                     </Text>
-                    <Text className="text-xl font-semibold text-foreground">
-                      {state.status?.name ?? "Enter the CueCommX server URL"}
-                    </Text>
+                    <TextInput
+                      accessibilityLabel="Server URL"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      className={inputClassName}
+                      keyboardType="url"
+                      onChangeText={updateServerUrlInput}
+                      onSubmitEditing={() => void handleCheckServer()}
+                      placeholder="192.168.1.100:3000"
+                      placeholderTextColor="#738094"
+                      returnKeyType="go"
+                      value={serverUrlInput}
+                    />
                   </View>
-                  <View className={`rounded-full px-3 py-1 ${connectionBadge.toneClassName}`}>
-                    <Text className="text-[10px] font-semibold uppercase tracking-control">
-                      {connectionBadge.label}
-                    </Text>
-                  </View>
-                </View>
 
-                <Text className="text-sm leading-6 text-muted-foreground">
-                  Use the admin QR/manual-connect screen to paste a local URL here. Mobile stays
-                  LAN-only and does not depend on any cloud relay.
-                </Text>
-
-                <View className="gap-3">
-                  <TextInput
-                    accessibilityLabel="Server URL"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    className={inputClassName}
-                    keyboardType="url"
-                    onChangeText={updateServerUrlInput}
-                    placeholder="10.0.0.25:3000"
-                    placeholderTextColor="#738094"
-                    value={serverUrlInput}
-                  />
                   <ActionButton
                     disabled={state.serverLoading || !serverUrlInput.trim()}
-                    label={state.serverLoading ? "Checking..." : "Check local server"}
-                    onPress={() => {
-                      void handleCheckServer();
-                    }}
-                    tone="secondary"
+                    label={state.serverLoading ? "Connecting..." : "Connect"}
+                    onPress={() => void handleCheckServer()}
                   />
                 </View>
-
-                {manualTargetCandidates ? (
-                  <DetailRow
-                    label={manualTargetCandidates.length === 1 ? "Normalized target" : "Manual target order"}
-                    value={manualTargetCandidates.join(" -> ")}
-                  />
-                ) : null}
-                {serverHint ? <DetailRow label="Primary connect URL" value={serverHint} /> : null}
-                {state.discovery?.announcedHost ? (
-                  <DetailRow label="Announced host" value={state.discovery.announcedHost} />
-                ) : null}
-                {state.status ? (
-                  <>
-                    <DetailRow label="Connected users" value={`${state.status.connectedUsers}/${state.status.maxUsers}`} />
-                    <DetailRow label="Channels loaded" value={`${state.status.channels}`} />
-                    <DetailRow label="Protocol" value={`v${state.status.protocolVersion}`} />
-                  </>
-                ) : null}
-                {state.discovery?.mdns ? (
-                  <DetailRow
-                    label="mDNS"
-                    value={
-                      state.discovery.mdns.enabled
-                        ? `${state.discovery.mdns.serviceType} on ${state.discovery.mdns.port}`
-                        : state.discovery.mdns.error || "Unavailable"
-                    }
-                  />
-                ) : null}
-
-                {state.discovery?.detectedInterfaces.length ? (
-                  <View className="gap-2 rounded-xl border border-border bg-background/60 p-4">
-                    <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                      Detected interfaces
-                    </Text>
-                    {state.discovery.detectedInterfaces.map((entry) => (
-                      <Text className="text-sm leading-6 text-foreground" key={`${entry.name}-${entry.address}`}>
-                        {entry.name}: {entry.address}
-                      </Text>
-                    ))}
-                  </View>
-                ) : null}
 
                 {state.serverError ? (
                   <View className="rounded-xl border border-destructive/30 bg-destructive/10 p-4">
                     <Text className="text-sm leading-6 text-destructive">{state.serverError}</Text>
                   </View>
                 ) : null}
-              </SectionCard>
 
-              <SectionCard>
-                <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                  Operator sign-in
+                <Text className="text-center text-xs leading-5 text-muted-foreground">
+                  Enter the IP address or hostname of your CueCommX server.{"\n"}
+                  LAN-only — no cloud relay required.
                 </Text>
-                <View className="gap-3">
-                  <TextInput
-                    accessibilityLabel="Username"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    className={inputClassName}
-                    onChangeText={setUsername}
-                    placeholder="audio1"
-                    placeholderTextColor="#738094"
-                    value={username}
-                  />
-                  <TextInput
-                    accessibilityLabel="PIN"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    className={inputClassName}
-                    onChangeText={setPin}
-                    placeholder="PIN"
-                    placeholderTextColor="#738094"
-                    secureTextEntry
-                    value={pin}
-                  />
+              </View>
+            </ScrollView>
+          ) : screen === "login" ? (
+            <ScrollView
+              className="flex-1"
+              contentContainerStyle={{ flexGrow: 1, justifyContent: "center" }}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <View className="gap-8 px-6 py-10">
+                <View className="items-center gap-4">
+                  <View className="rounded-full border border-success/30 bg-success/10 px-4 py-2">
+                    <Text className="text-xs font-semibold text-success">
+                      {String.fromCodePoint(0x25cf)} {state.status?.name ?? "Server connected"}
+                    </Text>
+                  </View>
+                  <Text className="text-2xl font-bold tracking-tight text-foreground">
+                    Sign in
+                  </Text>
+                  <Text className="max-w-xs text-center text-base leading-6 text-muted-foreground">
+                    Enter your operator credentials to join the intercom.
+                  </Text>
                 </View>
 
-                <View className="gap-3">
+                <View className="gap-4">
+                  <View className="gap-2">
+                    <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                      Username
+                    </Text>
+                    <TextInput
+                      accessibilityLabel="Username"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      className={inputClassName}
+                      onChangeText={setUsername}
+                      placeholder="audio1"
+                      placeholderTextColor="#738094"
+                      returnKeyType="next"
+                      value={username}
+                    />
+                  </View>
+
+                  <View className="gap-2">
+                    <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                      PIN (optional)
+                    </Text>
+                    <TextInput
+                      accessibilityLabel="PIN"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      className={inputClassName}
+                      onChangeText={setPin}
+                      onSubmitEditing={() => void handleLogin()}
+                      placeholder="PIN"
+                      placeholderTextColor="#738094"
+                      returnKeyType="go"
+                      secureTextEntry
+                      value={pin}
+                    />
+                  </View>
+
                   <ActionButton
-                    disabled={state.loginPending || state.serverLoading || !username.trim() || !serverUrlInput.trim()}
-                    label={state.loginPending ? "Joining..." : "Join local intercom"}
-                    onPress={() => {
-                      void handleLogin();
-                    }}
+                    disabled={state.loginPending || !username.trim()}
+                    label={state.loginPending ? "Joining..." : "Join intercom"}
+                    onPress={() => void handleLogin()}
                   />
-                  {state.session ? (
-                    <ActionButton label="Sign out" onPress={handleSignOut} tone="secondary" />
-                  ) : null}
                 </View>
 
                 {state.loginPending ? (
                   <View className="flex-row items-center gap-3 rounded-xl border border-border bg-background/60 p-4">
                     <ActivityIndicator color="#5eead4" />
                     <Text className="flex-1 text-sm leading-6 text-muted-foreground">
-                      Authenticating the operator and opening the realtime session.
+                      Authenticating and opening the realtime session\u2026
                     </Text>
                   </View>
                 ) : null}
@@ -1184,254 +1145,239 @@ export default function App() {
                     <Text className="text-sm leading-6 text-destructive">{state.loginError}</Text>
                   </View>
                 ) : null}
-              </SectionCard>
 
-              <SectionCard>
-                <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                  Live session controls
-                </Text>
+                <Pressable className="items-center py-2" onPress={handleDisconnect}>
+                  <Text className="text-sm font-medium text-muted-foreground">
+                    {String.fromCodePoint(0x2190)} Change server
+                  </Text>
+                </Pressable>
+              </View>
+            </ScrollView>
+          ) : (
+            <View className="flex-1">
+              <View className="border-b border-border bg-card/90 px-5 py-3">
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-1 gap-0.5">
+                    <Text className="text-lg font-semibold text-foreground">
+                      {state.session!.user.username}
+                    </Text>
+                    <Text className="text-xs text-muted-foreground">
+                      {state.status?.name ?? "CueCommX"}
+                    </Text>
+                  </View>
+                  <View className={`rounded-full px-3 py-1 ${connectionBadge.toneClassName}`}>
+                    <Text className="text-[10px] font-semibold uppercase tracking-control">
+                      {connectionBadge.label}
+                    </Text>
+                  </View>
+                </View>
+              </View>
 
-                {state.session ? (
-                  <View className="gap-4">
-                    <View className="gap-2">
-                      <Text className="text-2xl font-semibold text-foreground">
-                        {state.session.user.username}
-                      </Text>
-                      <Text className="text-sm leading-6 text-muted-foreground">
-                        Session token issued, assigned channels loaded, and realtime listen/talk
-                        state is live.
-                      </Text>
+              <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
+                <View className="gap-4 px-5 pb-10 pt-4">
+                  {state.realtimeError ? (
+                    <View className="rounded-xl border border-warning/30 bg-warning/10 p-4">
+                      <Text className="text-sm leading-6 text-warning">{state.realtimeError}</Text>
                     </View>
+                  ) : null}
 
-                    <View className="gap-3 rounded-xl border border-border bg-background/60 p-4">
-                      <DetailRow label="Realtime" value={connectionBadge.label} />
-                      <DetailRow label="Audio runtime" value={audioStatusLabel} />
-                      <DetailRow label="App state" value={appLifecycleState} />
-                      <DetailRow
-                        label="Listen-enabled"
-                        value={`${countPermissions(assignedPermissions, "listen")}`}
-                      />
-                      <DetailRow label="Talk-enabled" value={`${countPermissions(assignedPermissions, "talk")}`} />
-                      <DetailRow label="Active listen routes" value={`${activeListenCount}`} />
-                      <DetailRow label="Active talk routes" value={`${activeTalkCount}`} />
-                    </View>
-
-                    <View className="gap-3 rounded-xl border border-border bg-background/60 p-4">
+                  <SectionCard>
+                    <View className="flex-row items-center justify-between">
                       <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                        Mobile audio
+                        Audio
                       </Text>
-                      <ActionButton
-                        disabled={
-                          audioBusy ||
-                          audioReady ||
-                          !canArmMobileAudio({
-                            hasSession: !!state.session,
-                            realtimeState: state.realtimeState,
-                          })
-                        }
-                        label={
-                          audioReady
-                            ? "Audio live"
-                            : audioBusy
-                              ? "Arming..."
-                              : audioArmed
-                                ? "Retry audio"
-                                : "Arm audio"
-                        }
-                        onPress={() => {
-                          void handleArmAudio();
-                        }}
-                        tone={audioReady ? "secondary" : "primary"}
-                      />
-                      <Text className="text-sm leading-6 text-muted-foreground">
-                        The first arm configures the native audio session, opens the mediasoup
-                        send/recv transports, and keeps the screen awake while the operator stays in
-                        session.
-                      </Text>
-                      {showAndroidRuntimeSupport ? (
-                        <DetailRow
-                          label="Background alert"
-                          value={androidBackgroundAlertActive ? "Active" : "Standby"}
-                        />
-                      ) : null}
-                      <View className="gap-2">
-                        <View className="flex-row items-center justify-between">
-                          <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                            Mic level
-                          </Text>
-                          <Text className="text-xs font-semibold text-foreground">{inputLevel}%</Text>
-                        </View>
-                        <View className="h-3 overflow-hidden rounded-full bg-secondary/80">
-                          <View
-                            className="h-full rounded-full bg-primary"
-                            style={{ width: `${audioReady ? Math.max(4, inputLevel) : 0}%` }}
-                          />
-                        </View>
-                      </View>
-                      <View className="gap-2">
-                        <View className="flex-row items-center justify-between">
-                          <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                            Master volume
-                          </Text>
-                          <Text className="text-xs font-semibold text-foreground">{masterVolume}%</Text>
-                        </View>
-                        <Slider
-                          maximumTrackTintColor="#334155"
-                          maximumValue={100}
-                          minimumTrackTintColor="#5eead4"
-                          minimumValue={0}
-                          onValueChange={setMasterVolume}
-                          step={5}
-                          thumbTintColor="#5eead4"
-                          value={masterVolume}
-                        />
-                      </View>
-                      {audioError ? (
-                        <View className="rounded-xl border border-warning/30 bg-warning/10 p-4">
-                          <Text className="text-sm leading-6 text-warning">{audioError}</Text>
-                        </View>
-                      ) : null}
-                      {runtimeNotice ? (
-                        <View className="rounded-xl border border-warning/30 bg-warning/10 p-4">
-                          <Text className="text-sm leading-6 text-warning">{runtimeNotice}</Text>
-                        </View>
-                      ) : null}
-                      {remoteTalkers.length ? (
-                        <View className="gap-2">
-                          <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                            Remote talkers
-                          </Text>
-                          {remoteTalkers.map((talker) => (
-                            <Text className="text-sm leading-6 text-foreground" key={talker.consumerId}>
-                              {talker.producerUsername}:{" "}
-                              {talker.activeChannelIds
-                                .map(
-                                  (channelId) =>
-                                    activeChannels.find((channel) => channel.id === channelId)?.name ?? channelId,
-                                )
-                                .join(", ")}
-                            </Text>
-                          ))}
-                        </View>
-                      ) : (
-                        <Text className="text-sm leading-6 text-muted-foreground">
-                          No remote talkers are active right now.
+                      <Text className="text-xs font-semibold text-foreground">{audioStatusLabel}</Text>
+                    </View>
+
+                    <ActionButton
+                      disabled={
+                        audioBusy ||
+                        audioReady ||
+                        !canArmMobileAudio({
+                          hasSession: !!state.session,
+                          realtimeState: state.realtimeState,
+                        })
+                      }
+                      label={
+                        audioReady
+                          ? "Audio live"
+                          : audioBusy
+                            ? "Arming..."
+                            : audioArmed
+                              ? "Retry audio"
+                              : "Arm audio"
+                      }
+                      onPress={() => void handleArmAudio()}
+                      tone={audioReady ? "secondary" : "primary"}
+                    />
+
+                    <View className="gap-2">
+                      <View className="flex-row items-center justify-between">
+                        <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                          Mic level
                         </Text>
-                      )}
+                        <Text className="text-xs font-semibold text-foreground">{inputLevel}%</Text>
+                      </View>
+                      <View className="h-3 overflow-hidden rounded-full bg-secondary/80">
+                        <View
+                          className="h-full rounded-full bg-primary"
+                          style={{ width: `${audioReady ? Math.max(4, inputLevel) : 0}%` }}
+                        />
+                      </View>
+                    </View>
+
+                    <View className="gap-2">
+                      <View className="flex-row items-center justify-between">
+                        <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                          Master volume
+                        </Text>
+                        <Text className="text-xs font-semibold text-foreground">{masterVolume}%</Text>
+                      </View>
+                      <Slider
+                        maximumTrackTintColor="#334155"
+                        maximumValue={100}
+                        minimumTrackTintColor="#5eead4"
+                        minimumValue={0}
+                        onValueChange={setMasterVolume}
+                        step={5}
+                        thumbTintColor="#5eead4"
+                        value={masterVolume}
+                      />
                     </View>
 
                     {showAndroidRuntimeSupport ? (
-                      <View className="gap-3 rounded-xl border border-border bg-background/60 p-4">
-                        <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                          Android runtime
-                        </Text>
-                        <Text className="text-sm leading-6 text-muted-foreground">
-                          Allow CueCommX notifications and exempt the app from battery optimization
-                          for the most reliable background-audio holdover during a live show.
-                        </Text>
-                        <ActionButton
-                          label="Open battery settings"
-                          onPress={() => {
-                            void handleOpenBatterySettings();
-                          }}
-                          tone="secondary"
-                        />
-                      </View>
+                      <DetailRow
+                        label="Background alert"
+                        value={androidBackgroundAlertActive ? "Active" : "Standby"}
+                      />
                     ) : null}
 
-                    <View className="gap-3 rounded-xl border border-border bg-background/60 p-4">
-                      <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                        Talk mode
-                      </Text>
-                      <View className="flex-row gap-3">
-                        <ActionButton
-                          disabled={talkMode === "momentary"}
-                          label="Momentary"
-                          onPress={() => {
-                            setTalkMode("momentary");
-                            queueHapticFeedback(() => triggerTalkHaptic("mode"));
-                          }}
-                          tone={talkMode === "momentary" ? "primary" : "secondary"}
-                        />
-                        <ActionButton
-                          disabled={talkMode === "latched"}
-                          label="Latched"
-                          onPress={() => {
-                            setTalkMode("latched");
-                            queueHapticFeedback(() => triggerTalkHaptic("mode"));
-                          }}
-                          tone={talkMode === "latched" ? "primary" : "secondary"}
-                        />
-                      </View>
-                      <Text className="text-sm leading-6 text-muted-foreground">
-                        Momentary uses hold-to-talk. Latched turns the Talk button into a toggle for
-                        one-handed operation.
-                      </Text>
-                    </View>
-
-                    {state.realtimeError ? (
+                    {audioError ? (
                       <View className="rounded-xl border border-warning/30 bg-warning/10 p-4">
-                        <Text className="text-sm leading-6 text-warning">{state.realtimeError}</Text>
+                        <Text className="text-sm leading-6 text-warning">{audioError}</Text>
                       </View>
                     ) : null}
 
-                    <View className="gap-3">
-                      {activeChannels.map((channel) => {
-                        const permission = findPermission(assignedPermissions, channel.id);
+                    {runtimeNotice ? (
+                      <View className="rounded-xl border border-warning/30 bg-warning/10 p-4">
+                        <Text className="text-sm leading-6 text-warning">{runtimeNotice}</Text>
+                      </View>
+                    ) : null}
 
-                        return (
-                          <ChannelPermissionCard
-                            connected={state.realtimeState === "connected"}
-                            canListen={permission?.canListen ?? false}
-                            canTalk={permission?.canTalk ?? false}
-                            color={channel.color}
-                            isListening={
-                              state.operatorState?.listenChannelIds.includes(channel.id) ?? false
-                            }
-                            isTalking={state.operatorState?.talkChannelIds.includes(channel.id) ?? false}
-                            key={channel.id}
-                            name={channel.name}
-                            onToggleListen={() =>
-                              handleToggleListen(
-                                channel.id,
-                                !(state.operatorState?.listenChannelIds.includes(channel.id) ?? false),
+                    {remoteTalkers.length ? (
+                      <View className="gap-2">
+                        <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                          Remote talkers
+                        </Text>
+                        {remoteTalkers.map((talker) => (
+                          <Text className="text-sm leading-6 text-foreground" key={talker.consumerId}>
+                            {talker.producerUsername}:{" "}
+                            {talker.activeChannelIds
+                              .map(
+                                (channelId) =>
+                                  activeChannels.find((channel) => channel.id === channelId)?.name ?? channelId,
                               )
-                            }
-                            onTalkPress={(phase) => handleTalkGesture(channel.id, phase)}
-                            onVolumeChange={(value) =>
-                              setChannelVolumes((current) => {
-                                const rounded = Math.round(value);
-                                if ((current[channel.id] ?? 100) === rounded) {
-                                  return current;
-                                }
-                                return { ...current, [channel.id]: rounded };
-                              })
-                            }
-                            talkReady={audioReady}
-                            talkMode={talkMode}
-                            volumePercent={channelVolumes[channel.id] ?? 100}
-                          />
-                        );
-                      })}
-                    </View>
-                  </View>
-                ) : (
-                  <View className="gap-4">
-                    <Text className="text-sm leading-6 text-muted-foreground">
-                      This shell is already enforcing the mobile UX floor: one-handed layout,
-                      prominent talk affordance sizing, and reconnect behavior aligned with the web
-                      client.
+                              .join(", ")}
+                          </Text>
+                        ))}
+                      </View>
+                    ) : null}
+                  </SectionCard>
+
+                  {showAndroidRuntimeSupport ? (
+                    <SectionCard>
+                      <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                        Android runtime
+                      </Text>
+                      <Text className="text-sm leading-6 text-muted-foreground">
+                        Allow CueCommX notifications and exempt the app from battery optimization
+                        for reliable background audio.
+                      </Text>
+                      <ActionButton
+                        label="Open battery settings"
+                        onPress={() => void handleOpenBatterySettings()}
+                        tone="secondary"
+                      />
+                    </SectionCard>
+                  ) : null}
+
+                  <SectionCard>
+                    <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                      Talk mode
                     </Text>
-                    <View className="gap-3 rounded-xl border border-border bg-background/60 p-4">
-                      <DetailRow label="Minimum talk target" value={`${foundation.talkTargetHeight}pt`} />
-                      <DetailRow label="First reconnect step" value={`${foundation.firstReconnectDelayMs}ms`} />
-                      <DetailRow label="Preview channels" value={`${foundation.channels.length}`} />
+                    <View className="flex-row gap-3">
+                      <ActionButton
+                        disabled={talkMode === "momentary"}
+                        label="Momentary"
+                        onPress={() => {
+                          setTalkMode("momentary");
+                          queueHapticFeedback(() => triggerTalkHaptic("mode"));
+                        }}
+                        tone={talkMode === "momentary" ? "primary" : "secondary"}
+                      />
+                      <ActionButton
+                        disabled={talkMode === "latched"}
+                        label="Latched"
+                        onPress={() => {
+                          setTalkMode("latched");
+                          queueHapticFeedback(() => triggerTalkHaptic("mode"));
+                        }}
+                        tone={talkMode === "latched" ? "primary" : "secondary"}
+                      />
                     </View>
+                    <Text className="text-sm leading-6 text-muted-foreground">
+                      Momentary uses hold-to-talk. Latched turns the Talk button into a toggle for
+                      one-handed operation.
+                    </Text>
+                  </SectionCard>
+
+                  <View className="gap-3">
+                    {activeChannels.map((channel) => {
+                      const permission = findPermission(assignedPermissions, channel.id);
+
+                      return (
+                        <ChannelPermissionCard
+                          connected={state.realtimeState === "connected"}
+                          canListen={permission?.canListen ?? false}
+                          canTalk={permission?.canTalk ?? false}
+                          color={channel.color}
+                          isListening={
+                            state.operatorState?.listenChannelIds.includes(channel.id) ?? false
+                          }
+                          isTalking={state.operatorState?.talkChannelIds.includes(channel.id) ?? false}
+                          key={channel.id}
+                          name={channel.name}
+                          onToggleListen={() =>
+                            handleToggleListen(
+                              channel.id,
+                              !(state.operatorState?.listenChannelIds.includes(channel.id) ?? false),
+                            )
+                          }
+                          onTalkPress={(phase) => handleTalkGesture(channel.id, phase)}
+                          onVolumeChange={(value) =>
+                            setChannelVolumes((current) => {
+                              const rounded = Math.round(value);
+                              if ((current[channel.id] ?? 100) === rounded) {
+                                return current;
+                              }
+                              return { ...current, [channel.id]: rounded };
+                            })
+                          }
+                          talkReady={audioReady}
+                          talkMode={talkMode}
+                          volumePercent={channelVolumes[channel.id] ?? 100}
+                        />
+                      );
+                    })}
                   </View>
-                )}
-              </SectionCard>
+
+                  <View className="pt-4">
+                    <ActionButton label="Sign out" onPress={handleSignOut} tone="secondary" />
+                  </View>
+                </View>
+              </ScrollView>
             </View>
-          </ScrollView>
+          )}
         </KeyboardAvoidingView>
       </SafeAreaView>
     </SafeAreaProvider>
