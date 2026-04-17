@@ -1,4 +1,5 @@
 import {
+  type ConnectionQuality,
   type MediaCapabilitiesMessage,
   type MediaDtlsParameters,
   type MediaProducerClosedMessage,
@@ -8,6 +9,7 @@ import {
   type MediaTransportConnectedMessage,
   type MediaTransportCreatedMessage,
   type MediaTransportDirection,
+  type PreflightStatus,
   parseServerSignalingMessage,
   type ClientSignalingMessage,
   type MediaConsumerResumedMessage,
@@ -165,6 +167,20 @@ export class CueCommXRealtimeClient {
         channelId,
         listening,
       },
+    });
+  }
+
+  reportConnectionQuality(quality: ConnectionQuality): void {
+    this.sendClientMessage({
+      type: "quality:report",
+      payload: quality,
+    });
+  }
+
+  reportPreflightResult(status: PreflightStatus): void {
+    this.sendClientMessage({
+      type: "preflight:result",
+      payload: { status },
     });
   }
 

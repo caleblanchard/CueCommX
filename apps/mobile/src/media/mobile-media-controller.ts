@@ -10,6 +10,8 @@ import type {
   TransportOptions as MediasoupTransportOptions,
 } from "mediasoup-client/types";
 import type {
+  ConnectionQuality,
+  ConnectionQualityGrade,
   MediaConsumerAvailableMessage,
   MediaConsumerStateMessage,
   MediaDtlsParameters,
@@ -42,6 +44,7 @@ export interface MobileRemoteTalkerSnapshot {
 }
 
 export interface MobileMediaControllerOptions {
+  onConnectionQualityChange?: (quality: ConnectionQuality | undefined) => void;
   onError?: (error: Error) => void;
   onLocalLevelChange?: (level: number) => void;
   onRemoteTalkersChange?: (talkers: MobileRemoteTalkerSnapshot[]) => void;
@@ -95,6 +98,17 @@ function isSupportedHeaderExtensionUri(uri: string): uri is MediaRtpHeaderExtens
 
 function clampVolume(value: number): number {
   return Math.max(0, Math.min(1, value));
+}
+
+function computeQualityGradeMobile(
+  rttMs: number,
+  lossPercent: number,
+  jitterMs: number,
+): ConnectionQualityGrade {
+  if (rttMs <= 30 && lossPercent <= 0.5 && jitterMs <= 5) return "excellent";
+  if (rttMs <= 50 && lossPercent <= 1 && jitterMs <= 15) return "good";
+  if (rttMs <= 100 && lossPercent <= 5 && jitterMs <= 30) return "fair";
+  return "poor";
 }
 
 function getRemoteConsumerVolume(activeChannelIds: readonly string[], settings: MixSettings): number {
@@ -315,6 +329,8 @@ export class MobileMediaController {
 
   private producer: Producer | undefined;
 
+  private qualityTimer: ReturnType<typeof setInterval> | undefined;
+
   private readonly remoteConsumers = new Map<string, RemoteConsumerRecord>();
 
   private recvTransport: Transport | undefined;
@@ -326,6 +342,7 @@ export class MobileMediaController {
   async close(): Promise<void> {
     this.resetConnection();
     this.stopLocalLevelPolling();
+    this.stopQualityMonitor();
     this.stopLocalStream();
     this.device = undefined;
     this.options.onLocalLevelChange?.(0);
@@ -354,6 +371,7 @@ export class MobileMediaController {
   }
 
   resetConnection(): void {
+    this.stopQualityMonitor();
     this.producer?.close();
     this.producer = undefined;
     this.stopLocalLevelPolling();
@@ -418,6 +436,7 @@ export class MobileMediaController {
     }
 
     this.startLocalLevelPolling();
+    this.startQualityMonitor();
     await this.consumePendingRemoteAudio();
     this.updateMix(this.mixSettings);
   }
@@ -592,6 +611,91 @@ export class MobileMediaController {
 
     this.localStream?.release(true);
     this.localStream = undefined;
+  }
+
+  private startQualityMonitor(): void {
+    if (this.qualityTimer) {
+      return;
+    }
+
+    this.qualityTimer = setInterval(() => {
+      void this.collectQualityStats();
+    }, 5_000);
+  }
+
+  private stopQualityMonitor(): void {
+    if (!this.qualityTimer) {
+      return;
+    }
+
+    clearInterval(this.qualityTimer);
+    this.qualityTimer = undefined;
+    this.options.onConnectionQualityChange?.(undefined);
+  }
+
+  private async collectQualityStats(): Promise<void> {
+    const transport = this.sendTransport;
+
+    if (!transport) {
+      return;
+    }
+
+    try {
+      const stats = await transport.getStats();
+      const quality = this.extractQualityFromStats(stats);
+
+      if (quality) {
+        this.options.onConnectionQualityChange?.(quality);
+        this.options.realtimeClient.reportConnectionQuality(quality);
+      }
+    } catch {
+      // Stats collection may fail during transport teardown
+    }
+  }
+
+  private extractQualityFromStats(stats: unknown): ConnectionQuality | undefined {
+    if (!stats || typeof stats !== "object") {
+      return undefined;
+    }
+
+    // react-native-webrtc returns stats as a Map-like or iterable
+    const entries: Iterable<[string, Record<string, unknown>]> =
+      typeof (stats as Map<string, unknown>).values === "function"
+        ? (stats as Map<string, Record<string, unknown>>).entries()
+        : Object.entries(stats as Record<string, Record<string, unknown>>);
+
+    let rttMs = 0;
+    let lossPercent = 0;
+    let jitterMs = 0;
+
+    for (const [, report] of entries) {
+      if (report.type === "candidate-pair" && report.nominated) {
+        rttMs = (typeof report.currentRoundTripTime === "number" ? report.currentRoundTripTime : 0) * 1_000;
+      }
+
+      if (report.type === "outbound-rtp") {
+        const packetsSent = typeof report.packetsSent === "number" ? report.packetsSent : 0;
+        const nackCount = typeof report.nackCount === "number" ? report.nackCount : 0;
+        const totalPackets = packetsSent + nackCount;
+
+        if (totalPackets > 0 && nackCount > 0) {
+          lossPercent = (nackCount / totalPackets) * 100;
+        }
+      }
+
+      if (report.type === "remote-inbound-rtp") {
+        jitterMs = (typeof report.jitter === "number" ? report.jitter : 0) * 1_000;
+      }
+    }
+
+    const grade = computeQualityGradeMobile(rttMs, lossPercent, jitterMs);
+
+    return {
+      grade,
+      roundTripTimeMs: Math.round(rttMs * 10) / 10,
+      packetLossPercent: Math.round(lossPercent * 100) / 100,
+      jitterMs: Math.round(jitterMs * 10) / 10,
+    };
   }
 
   private startLocalLevelPolling(): void {

@@ -802,6 +802,7 @@ describe("createApp", () => {
         maxUsers: 30,
         maxChannels: 16,
         logLevel: "info",
+        httpsPort: 3443,
       },
       database,
     });
@@ -942,6 +943,7 @@ describe("createApp", () => {
         maxUsers: 1,
         maxChannels: 16,
         logLevel: "info",
+        httpsPort: 3443,
       },
       database,
     });
@@ -1073,6 +1075,7 @@ describe("createApp", () => {
         maxUsers: 30,
         maxChannels: 16,
         logLevel: "info",
+        httpsPort: 3443,
       },
       database,
     });
@@ -1294,6 +1297,7 @@ describe("createApp", () => {
         maxUsers: 30,
         maxChannels: 16,
         logLevel: "info",
+        httpsPort: 3443,
       },
       database,
     });
@@ -1688,6 +1692,7 @@ describe("createApp", () => {
         maxUsers: 30,
         maxChannels: 16,
         logLevel: "info",
+        httpsPort: 3443,
       },
       database,
     });
@@ -2018,6 +2023,7 @@ describe("createApp", () => {
         maxUsers: 30,
         maxChannels: 16,
         logLevel: "info",
+        httpsPort: 3443,
       },
       database,
     });
@@ -2142,6 +2148,177 @@ describe("createApp", () => {
     socket.close();
     await once(socket, "close");
     messages.stop();
+    await app.close();
+  });
+
+  it("stores quality:report and preflight:result and includes them in admin dashboard", async () => {
+    const adminId = database.createUser({
+      username: "QAdmin",
+      role: "admin",
+      pinHash: hashPin("1111"),
+    });
+    const operatorId = database.createUser({
+      username: "QOperator",
+      role: "operator",
+      pinHash: hashPin("2222"),
+    });
+    database.grantChannelPermissions(operatorId, [
+      { channelId: "ch-production", canTalk: true, canListen: true },
+    ]);
+
+    const app = createApp({
+      config: {
+        serverName: "Quality Test",
+        host: "127.0.0.1",
+        port: 0,
+        rtcMinPort: 40000,
+        rtcMaxPort: 41000,
+        announcedIp: undefined,
+        dataDir: workingDirectory,
+        dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"),
+        maxUsers: 30,
+        maxChannels: 16,
+        logLevel: "info",
+        httpsPort: 3443,
+      },
+      database,
+    });
+
+    // Login both users
+    const adminLogin = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { username: "QAdmin", pin: "1111" },
+    });
+    const operatorLogin = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { username: "QOperator", pin: "2222" },
+    });
+
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+    const wsUrl = toWebSocketUrl(address);
+
+    // Connect admin socket
+    const adminSocket = new WebSocket(`${wsUrl}/ws`);
+    await withTimeout(once(adminSocket, "open"), "admin ws open");
+    adminSocket.send(
+      JSON.stringify({
+        type: "session:authenticate",
+        payload: { sessionToken: adminLogin.json().sessionToken },
+      }),
+    );
+    const adminMessages = createJsonMessageCollector(adminSocket);
+    await withTimeout(
+      adminMessages.next("session:ready"),
+      "admin session:ready",
+    );
+
+    // Connect operator socket
+    const operatorSocket = new WebSocket(`${wsUrl}/ws`);
+    await withTimeout(once(operatorSocket, "open"), "operator ws open");
+    operatorSocket.send(
+      JSON.stringify({
+        type: "session:authenticate",
+        payload: { sessionToken: operatorLogin.json().sessionToken },
+      }),
+    );
+    const operatorMessages = createJsonMessageCollector(operatorSocket);
+    await withTimeout(
+      operatorMessages.next("session:ready"),
+      "operator session:ready",
+    );
+
+    // Drain initial admin dashboard broadcasts from operator connecting
+    // (presence + session may produce multiple dashboard snapshots)
+    await withTimeout(
+      adminMessages.next("admin:dashboard"),
+      "initial admin dashboard after operator connects",
+    );
+
+    // Small delay to ensure any queued dashboard broadcasts are flushed
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Send quality:report from operator
+    operatorSocket.send(
+      JSON.stringify({
+        type: "quality:report",
+        payload: {
+          grade: "good",
+          roundTripTimeMs: 35,
+          packetLossPercent: 0.5,
+          jitterMs: 8,
+        },
+      }),
+    );
+
+    // Wait for dashboard that includes quality — there may be intermediate broadcasts
+    let operatorWithQuality: { connectionQuality?: { grade: string; roundTripTimeMs: number } } | undefined;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const dashboard = await withTimeout(
+        adminMessages.next<{
+          type: string;
+          payload: {
+            users: Array<{
+              id: string;
+              connectionQuality?: {
+                grade: string;
+                roundTripTimeMs: number;
+              };
+            }>;
+          };
+        }>("admin:dashboard"),
+        "admin dashboard with quality",
+      );
+
+      const found = dashboard.payload.users.find((u) => u.id === operatorId);
+      if (found?.connectionQuality) {
+        operatorWithQuality = found;
+        break;
+      }
+    }
+
+    expect(operatorWithQuality).toBeDefined();
+    expect(operatorWithQuality!.connectionQuality).toBeDefined();
+    expect(operatorWithQuality!.connectionQuality!.grade).toBe("good");
+    expect(operatorWithQuality!.connectionQuality!.roundTripTimeMs).toBe(35);
+
+    // Now send preflight:result from operator
+    operatorSocket.send(
+      JSON.stringify({
+        type: "preflight:result",
+        payload: {
+          status: "passed",
+        },
+      }),
+    );
+
+    // The server should broadcast another dashboard update with preflight
+    const dashboardAfterPreflight = await withTimeout(
+      adminMessages.next<{
+        type: string;
+        payload: {
+          users: Array<{
+            id: string;
+            preflightStatus?: string;
+          }>;
+        };
+      }>("admin:dashboard"),
+      "admin dashboard after preflight result",
+    );
+
+    const operatorAfterPreflight = dashboardAfterPreflight.payload.users.find(
+      (u) => u.id === operatorId,
+    );
+    expect(operatorAfterPreflight).toBeDefined();
+    expect(operatorAfterPreflight!.preflightStatus).toBe("passed");
+
+    adminSocket.close();
+    operatorSocket.close();
+    await Promise.all([once(adminSocket, "close"), once(operatorSocket, "close")]);
+    adminMessages.stop();
+    operatorMessages.stop();
     await app.close();
   });
 });

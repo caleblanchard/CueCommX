@@ -9,6 +9,8 @@ import type {
   TransportOptions as MediasoupTransportOptions,
 } from "mediasoup-client/types";
 import type {
+  ConnectionQuality,
+  ConnectionQualityGrade,
   MediaConsumerAvailableMessage,
   MediaConsumerStateMessage,
   MediaDtlsParameters,
@@ -39,6 +41,7 @@ export interface RemoteTalkerSnapshot {
 }
 
 export interface WebMediaControllerOptions {
+  onConnectionQualityChange?: (quality: ConnectionQuality | undefined) => void;
   onError?: (error: Error) => void;
   onInputDevicesChange?: (devices: MediaDeviceOption[]) => void;
   onLocalLevelChange?: (level: number) => void;
@@ -328,6 +331,85 @@ export function getRemoteConsumerVolume(
   return clampVolume(settings.masterVolume * loudestChannel);
 }
 
+const QUALITY_THRESHOLDS = {
+  excellent: { maxRttMs: 30, maxLossPercent: 0.5, maxJitterMs: 5 },
+  good: { maxRttMs: 50, maxLossPercent: 1, maxJitterMs: 15 },
+  fair: { maxRttMs: 100, maxLossPercent: 5, maxJitterMs: 30 },
+} as const;
+
+export function computeQualityGrade(
+  rttMs: number,
+  lossPercent: number,
+  jitterMs: number,
+): ConnectionQualityGrade {
+  for (const [grade, thresholds] of Object.entries(QUALITY_THRESHOLDS) as [
+    ConnectionQualityGrade,
+    (typeof QUALITY_THRESHOLDS)[keyof typeof QUALITY_THRESHOLDS],
+  ][]) {
+    if (
+      rttMs <= thresholds.maxRttMs &&
+      lossPercent <= thresholds.maxLossPercent &&
+      jitterMs <= thresholds.maxJitterMs
+    ) {
+      return grade;
+    }
+  }
+
+  return "poor";
+}
+
+export function extractConnectionQuality(
+  stats: RTCStatsReport,
+): ConnectionQuality | undefined {
+  let selectedPair: RTCIceCandidatePairStats | undefined;
+
+  for (const report of stats.values()) {
+    if (report.type === "candidate-pair" && (report as RTCIceCandidatePairStats).nominated) {
+      selectedPair = report as RTCIceCandidatePairStats;
+      break;
+    }
+  }
+
+  if (!selectedPair) {
+    return undefined;
+  }
+
+  const rttMs = (selectedPair.currentRoundTripTime ?? 0) * 1_000;
+
+  let lossPercent = 0;
+
+  for (const report of stats.values()) {
+    if (report.type === "outbound-rtp") {
+      const outbound = report as RTCOutboundRtpStreamStats;
+      const totalPackets = (outbound.packetsSent ?? 0) + (outbound.nackCount ?? 0);
+
+      if (totalPackets > 0 && (outbound.nackCount ?? 0) > 0) {
+        lossPercent = ((outbound.nackCount ?? 0) / totalPackets) * 100;
+      }
+
+      break;
+    }
+  }
+
+  let jitterMs = 0;
+
+  for (const report of stats.values()) {
+    if (report.type === "remote-inbound-rtp") {
+      jitterMs = ((report as { jitter?: number }).jitter ?? 0) * 1_000;
+      break;
+    }
+  }
+
+  const grade = computeQualityGrade(rttMs, lossPercent, jitterMs);
+
+  return {
+    grade,
+    roundTripTimeMs: Math.round(rttMs * 10) / 10,
+    packetLossPercent: Math.round(lossPercent * 100) / 100,
+    jitterMs: Math.round(jitterMs * 10) / 10,
+  };
+}
+
 export class WebMediaController {
   private analyserNode: AnalyserNode | undefined;
 
@@ -351,6 +433,8 @@ export class WebMediaController {
 
   private producer: Producer | undefined;
 
+  private qualityTimer: number | undefined;
+
   private readonly remoteConsumers = new Map<string, RemoteConsumerRecord>();
 
   private recvTransport: Transport | undefined;
@@ -366,6 +450,7 @@ export class WebMediaController {
   async close(): Promise<void> {
     this.resetConnection();
     this.stopMeter();
+    this.stopQualityMonitor();
     this.localAudioSource?.disconnect();
     this.localAudioSource = undefined;
     this.analyserNode?.disconnect();
@@ -405,6 +490,7 @@ export class WebMediaController {
   }
 
   resetConnection(): void {
+    this.stopQualityMonitor();
     this.producer?.close();
     this.producer = undefined;
     this.sendTransport?.close();
@@ -453,6 +539,7 @@ export class WebMediaController {
 
     await this.consumePendingRemoteAudio();
     this.updateMix(this.mixSettings);
+    this.startQualityMonitor();
   }
 
   async switchInputDevice(inputDeviceId?: string): Promise<void> {
@@ -675,6 +762,46 @@ export class WebMediaController {
         this.options.onError?.(new Error(`CueCommX receive transport entered ${state}.`));
       }
     });
+  }
+
+  private startQualityMonitor(): void {
+    if (this.qualityTimer) {
+      return;
+    }
+
+    this.qualityTimer = window.setInterval(() => {
+      void this.collectQualityStats();
+    }, 5_000);
+  }
+
+  private stopQualityMonitor(): void {
+    if (!this.qualityTimer) {
+      return;
+    }
+
+    window.clearInterval(this.qualityTimer);
+    this.qualityTimer = undefined;
+    this.options.onConnectionQualityChange?.(undefined);
+  }
+
+  private async collectQualityStats(): Promise<void> {
+    const transport = this.sendTransport;
+
+    if (!transport) {
+      return;
+    }
+
+    try {
+      const stats = await transport.getStats();
+      const quality = extractConnectionQuality(stats);
+
+      if (quality) {
+        this.options.onConnectionQualityChange?.(quality);
+        this.options.realtimeClient.reportConnectionQuality(quality);
+      }
+    } catch {
+      // Stats collection may fail during transport teardown — ignore
+    }
   }
 
   private startMeter(): void {

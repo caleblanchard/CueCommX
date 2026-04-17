@@ -8,6 +8,7 @@ import {
   StatusResponseSchema,
   type AuthSuccessResponse,
   type ChannelPermission,
+  type ConnectionQuality,
   type DiscoveryResponse,
   type OperatorState,
   type ServerSignalingMessage,
@@ -39,6 +40,10 @@ import {
   type RemoteTalkerSnapshot,
   type WebMediaController,
 } from "./media/web-media-controller.js";
+import {
+  PreflightAudioTest,
+  type PreflightState,
+} from "./media/preflight-audio-test.js";
 import { formatLatencyIndicator, readNetworkRtt } from "./network-latency.js";
 import {
   type AudioProcessingPreferences,
@@ -115,6 +120,41 @@ function findPermission(
   channelId: string,
 ): ChannelPermission | undefined {
   return permissions.find((entry) => entry.channelId === channelId);
+}
+
+const QUALITY_GRADE_CONFIG: Record<
+  string,
+  { label: string; color: string; dotClass: string }
+> = {
+  excellent: { label: "Excellent", color: "text-green-400", dotClass: "bg-green-400" },
+  good: { label: "Good", color: "text-green-400", dotClass: "bg-green-400" },
+  fair: { label: "Fair", color: "text-yellow-400", dotClass: "bg-yellow-400" },
+  poor: { label: "Poor", color: "text-red-400", dotClass: "bg-red-400" },
+};
+
+function formatConnectionQuality(quality: ConnectionQuality | undefined): {
+  label: string;
+  detail: string;
+  dotClass: string;
+  color: string;
+} {
+  if (!quality) {
+    return {
+      label: "No data",
+      detail: "Arm audio to start monitoring",
+      dotClass: "bg-muted-foreground",
+      color: "text-muted-foreground",
+    };
+  }
+
+  const config = QUALITY_GRADE_CONFIG[quality.grade] ?? QUALITY_GRADE_CONFIG.poor;
+
+  return {
+    label: config.label,
+    detail: `${quality.roundTripTimeMs}ms RTT · ${quality.packetLossPercent}% loss · ${quality.jitterMs}ms jitter`,
+    dotClass: config.dotClass,
+    color: config.color,
+  };
 }
 
 function normalizeManualServerUrl(input: string): string {
@@ -225,6 +265,13 @@ export default function App() {
     persistedPreferences.preferredListenChannelIds,
   );
   const [remoteTalkers, setRemoteTalkers] = useState<RemoteTalkerSnapshot[]>([]);
+  const [connectionQuality, setConnectionQuality] = useState<ConnectionQuality | undefined>(undefined);
+  const [preflightState, setPreflightState] = useState<PreflightState>({
+    micLevel: 0,
+    passed: undefined,
+    step: "idle",
+  });
+  const preflightRef = useRef<PreflightAudioTest | null>(null);
   const realtimeClientRef = useRef<CueCommXRealtimeClient | null>(null);
   const mediaControllerRef = useRef<WebMediaController | null>(null);
   const mediaStartingRef = useRef(false);
@@ -267,6 +314,7 @@ export default function App() {
     return next;
   }, [remoteTalkers]);
   const latencyLabel = formatLatencyIndicator(networkRttMs);
+  const qualityInfo = formatConnectionQuality(connectionQuality);
   const liveRemoteTalkerUsernames = useMemo(
     () =>
       [...new Set(remoteTalkers.map((talker) => talker.producerUsername))].sort((left, right) =>
@@ -504,6 +552,13 @@ export default function App() {
       sessionToken: state.session.sessionToken,
     });
     const mediaController = createWebMediaController({
+      onConnectionQualityChange: (quality) => {
+        if (!active) {
+          return;
+        }
+
+        setConnectionQuality(quality);
+      },
       onError: (error) => {
         if (!active) {
           return;
@@ -554,6 +609,7 @@ export default function App() {
       setInputDevices([]);
       setInputLevel(0);
       setRemoteTalkers([]);
+      setConnectionQuality(undefined);
     };
   }, [state.session?.sessionToken]);
 
@@ -833,6 +889,27 @@ export default function App() {
     } finally {
       setAudioBusy(false);
     }
+  }
+
+  async function handleStartPreflight(): Promise<void> {
+    preflightRef.current?.cancel();
+    const test = new PreflightAudioTest();
+    preflightRef.current = test;
+
+    test.onStateChange((next) => {
+      setPreflightState(next);
+
+      if (next.step === "done" && realtimeClientRef.current) {
+        realtimeClientRef.current.reportPreflightResult(next.passed ? "passed" : "failed");
+      }
+    });
+
+    await test.run();
+  }
+
+  function handleCancelPreflight(): void {
+    preflightRef.current?.cancel();
+    preflightRef.current = null;
   }
 
   function updateListen(channelId: string, listening: boolean): void {
@@ -1477,6 +1554,51 @@ export default function App() {
                             ))}
                           </div>
                         </div>
+                        <Button
+                          className="w-full justify-center"
+                          onClick={() => void handleStartPreflight()}
+                          type="button"
+                          variant="secondary"
+                        >
+                          {preflightState.step !== "idle" && preflightState.step !== "done"
+                            ? `Testing audio (${preflightState.step})...`
+                            : "Test audio"}
+                        </Button>
+                        {preflightState.step !== "idle" ? (
+                          <div className="space-y-2 rounded-xl border border-border/60 bg-background/35 p-4">
+                            <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                              Preflight audio test
+                            </p>
+                            {preflightState.step === "tone" ? (
+                              <p className="text-sm text-foreground">🔊 Playing test tone — listen for a beep…</p>
+                            ) : null}
+                            {preflightState.step === "recording" ? (
+                              <>
+                                <p className="text-sm text-foreground">🎙 Recording — speak into your mic…</p>
+                                <SignalMeter className="mt-1" label="Mic level" value={preflightState.micLevel} />
+                              </>
+                            ) : null}
+                            {preflightState.step === "playback" ? (
+                              <p className="text-sm text-foreground">🔈 Playing back your recording…</p>
+                            ) : null}
+                            {preflightState.step === "done" && preflightState.passed ? (
+                              <p className="text-sm text-green-400">✓ Audio test passed</p>
+                            ) : null}
+                            {preflightState.step === "done" && preflightState.passed === false ? (
+                              <p className="text-sm text-red-400">✗ {preflightState.error ?? "Audio test failed"}</p>
+                            ) : null}
+                            {preflightState.step !== "done" ? (
+                              <Button
+                                className="mt-2 w-full justify-center"
+                                onClick={handleCancelPreflight}
+                                type="button"
+                                variant="ghost"
+                              >
+                                Cancel test
+                              </Button>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </>
                     ) : null}
                     {audioError ? (
@@ -1509,6 +1631,16 @@ export default function App() {
                           Approx. browser RTT
                         </p>
                         <p className="mt-2 font-medium text-foreground">{latencyLabel}</p>
+                      </div>
+                      <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
+                        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                          Media quality
+                        </p>
+                        <p className={`mt-2 flex items-center gap-2 font-medium ${qualityInfo.color}`}>
+                          <span className={`inline-block h-2.5 w-2.5 rounded-full ${qualityInfo.dotClass}`} />
+                          {qualityInfo.label}
+                        </p>
+                        <p className="mt-1 text-sm text-muted-foreground">{qualityInfo.detail}</p>
                       </div>
                       <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
                         <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">

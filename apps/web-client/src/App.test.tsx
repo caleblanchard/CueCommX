@@ -33,6 +33,7 @@ const mediaControllerState = vi.hoisted(() => {
 
 vi.mock("./media/web-media-controller.js", () => ({
   createWebMediaController: (options: {
+    onConnectionQualityChange?: (quality: unknown) => void;
     onInputDevicesChange?: (devices: Array<{ deviceId: string; label: string }>) => void;
     onLocalLevelChange?: (level: number) => void;
     onRemoteTalkersChange?: (

@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import {
   canEnumerateInputDevices,
   clampVolume,
+  computeQualityGrade,
+  extractConnectionQuality,
   getAudioCaptureCapabilityError,
   getRemoteConsumerVolume,
   toMediasoupRtpCapabilities,
@@ -267,5 +269,101 @@ describe("mediasoup option mappers", () => {
         ],
       }),
     ).toThrow("preferred header extension id");
+  });
+});
+
+describe("computeQualityGrade", () => {
+  it("classifies excellent conditions", () => {
+    expect(computeQualityGrade(10, 0.1, 2)).toBe("excellent");
+  });
+
+  it("classifies good conditions", () => {
+    expect(computeQualityGrade(40, 0.8, 10)).toBe("good");
+  });
+
+  it("classifies fair conditions", () => {
+    expect(computeQualityGrade(80, 3, 25)).toBe("fair");
+  });
+
+  it("classifies poor conditions", () => {
+    expect(computeQualityGrade(150, 8, 50)).toBe("poor");
+  });
+
+  it("downgrades when any metric exceeds threshold", () => {
+    // RTT excellent but loss is fair-range
+    expect(computeQualityGrade(10, 3, 2)).toBe("fair");
+    // All metrics good but jitter is poor-range
+    expect(computeQualityGrade(20, 0.5, 40)).toBe("poor");
+  });
+});
+
+describe("extractConnectionQuality", () => {
+  function createStatsReport(entries: Record<string, unknown>[]): RTCStatsReport {
+    const map = new Map<string, unknown>();
+
+    for (const entry of entries) {
+      map.set(entry.id as string, entry);
+    }
+
+    return map as unknown as RTCStatsReport;
+  }
+
+  it("extracts quality from a stats report with candidate-pair", () => {
+    const stats = createStatsReport([
+      {
+        id: "CP1",
+        type: "candidate-pair",
+        nominated: true,
+        currentRoundTripTime: 0.025,
+      },
+      {
+        id: "OT1",
+        type: "outbound-rtp",
+        packetsSent: 1000,
+        nackCount: 5,
+      },
+      {
+        id: "RI1",
+        type: "remote-inbound-rtp",
+        jitter: 0.008,
+      },
+    ]);
+
+    const quality = extractConnectionQuality(stats);
+    expect(quality).toBeDefined();
+    expect(quality!.roundTripTimeMs).toBe(25);
+    expect(quality!.packetLossPercent).toBeCloseTo(0.5, 1);
+    expect(quality!.jitterMs).toBe(8);
+    expect(quality!.grade).toBe("good");
+  });
+
+  it("returns undefined when no nominated candidate-pair exists", () => {
+    const stats = createStatsReport([
+      {
+        id: "CP1",
+        type: "candidate-pair",
+        nominated: false,
+        currentRoundTripTime: 0.05,
+      },
+    ]);
+
+    expect(extractConnectionQuality(stats)).toBeUndefined();
+  });
+
+  it("handles missing jitter and loss gracefully", () => {
+    const stats = createStatsReport([
+      {
+        id: "CP1",
+        type: "candidate-pair",
+        nominated: true,
+        currentRoundTripTime: 0.01,
+      },
+    ]);
+
+    const quality = extractConnectionQuality(stats);
+    expect(quality).toBeDefined();
+    expect(quality!.packetLossPercent).toBe(0);
+    expect(quality!.jitterMs).toBe(0);
+    expect(quality!.grade).toBe("excellent");
   });
 });

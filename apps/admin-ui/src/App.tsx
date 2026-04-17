@@ -1592,6 +1592,31 @@ export default function App() {
                                   <Badge variant={user.role === "admin" ? "accent" : "neutral"}>
                                     {user.role}
                                   </Badge>
+                                  {user.online && user.connectionQuality ? (
+                                    <Badge
+                                      variant={
+                                        user.connectionQuality.grade === "poor"
+                                          ? "danger"
+                                          : user.connectionQuality.grade === "fair"
+                                            ? "warning"
+                                            : "success"
+                                      }
+                                    >
+                                      {user.connectionQuality.grade === "excellent"
+                                        ? "🟢"
+                                        : user.connectionQuality.grade === "good"
+                                          ? "🟢"
+                                          : user.connectionQuality.grade === "fair"
+                                            ? "🟡"
+                                            : "🔴"}{" "}
+                                      {user.connectionQuality.roundTripTimeMs}ms
+                                    </Badge>
+                                  ) : null}
+                                  {user.preflightStatus === "passed" ? (
+                                    <Badge variant="success">✓ Audio OK</Badge>
+                                  ) : user.preflightStatus === "failed" ? (
+                                    <Badge variant="danger">✗ Audio fail</Badge>
+                                  ) : null}
                                 </div>
                                 <p className="text-sm leading-6 text-muted-foreground">
                                   {formatChannelSummary(user, state.channels)}

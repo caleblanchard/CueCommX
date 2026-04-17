@@ -25,6 +25,7 @@ function buildConfig(workingDirectory: string): CueCommXConfig {
     maxUsers: 30,
     maxChannels: 16,
     logLevel: "info",
+  httpsPort: 3443,
   };
 }
 

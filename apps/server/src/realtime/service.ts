@@ -6,6 +6,8 @@ import type { Socket } from "node:net";
 
 import {
   type AdminDashboardSnapshot,
+  type ConnectionQuality,
+  type PreflightStatus,
   PROTOCOL_VERSION,
   parseClientSignalingMessage,
   type ClientSignalingMessage,
@@ -24,6 +26,8 @@ import type { MediaRequestMessage, MediaSessionContext, RealtimeMediaService } f
 interface AuthenticatedConnection {
   channels: ChannelInfo[];
   connectHost?: string;
+  connectionQuality?: ConnectionQuality;
+  preflightStatus?: PreflightStatus;
   sessionToken: string;
   state: OperatorState;
   user: UserInfo;
@@ -557,6 +561,8 @@ export class RealtimeService {
   private buildAdminDashboardSnapshot(): AdminDashboardSnapshot {
     const talkChannelsByUser = new Map<string, Set<string>>();
     const onlineUserIds = new Set<string>();
+    const qualityByUser = new Map<string, ConnectionQuality>();
+    const preflightByUser = new Map<string, PreflightStatus>();
 
     for (const connection of this.connections.values()) {
       if (!connection.authenticated) {
@@ -573,6 +579,14 @@ export class RealtimeService {
       }
 
       talkChannelsByUser.set(userId, talkChannels);
+
+      if (connection.authenticated.connectionQuality) {
+        qualityByUser.set(userId, connection.authenticated.connectionQuality);
+      }
+
+      if (connection.authenticated.preflightStatus) {
+        preflightByUser.set(userId, connection.authenticated.preflightStatus);
+      }
     }
 
     return {
@@ -587,6 +601,8 @@ export class RealtimeService {
           online: onlineUserIds.has(user.id),
           talking: activeTalkChannelIds.length > 0,
           activeTalkChannelIds,
+          connectionQuality: qualityByUser.get(user.id),
+          preflightStatus: preflightByUser.get(user.id),
         };
       }),
     };
@@ -667,6 +683,18 @@ export class RealtimeService {
 
       if (parsed.type === "talk:stop") {
         await this.applyTalkChange(connection.authenticated, parsed.payload.channelIds, "stop");
+        return;
+      }
+
+      if (parsed.type === "quality:report") {
+        connection.authenticated.connectionQuality = parsed.payload;
+        this.broadcastAdminDashboard();
+        return;
+      }
+
+      if (parsed.type === "preflight:result") {
+        connection.authenticated.preflightStatus = parsed.payload.status;
+        this.broadcastAdminDashboard();
         return;
       }
 

@@ -535,4 +535,62 @@ describe("admin monitoring schemas", () => {
 
     expect(message.type).toBe("admin:dashboard");
   });
+
+  it("accepts a quality:report client message", () => {
+    const message = parseClientSignalingMessage({
+      type: "quality:report",
+      payload: {
+        grade: "good",
+        roundTripTimeMs: 45,
+        packetLossPercent: 0.3,
+        jitterMs: 8,
+      },
+    });
+
+    expect(message.type).toBe("quality:report");
+  });
+
+  it("accepts a preflight:result client message", () => {
+    const message = parseClientSignalingMessage({
+      type: "preflight:result",
+      payload: {
+        status: "passed",
+      },
+    });
+
+    expect(message.type).toBe("preflight:result");
+  });
+
+  it("accepts admin dashboard with quality and preflight fields", () => {
+    const message = parseServerSignalingMessage({
+      type: "admin:dashboard",
+      payload: {
+        channels: [],
+        users: [
+          {
+            id: "usr-1",
+            username: "Alice",
+            role: "operator",
+            online: true,
+            talking: false,
+            activeTalkChannelIds: [],
+            channelPermissions: [],
+            connectionQuality: {
+              grade: "excellent",
+              roundTripTimeMs: 12,
+              packetLossPercent: 0,
+              jitterMs: 2,
+            },
+            preflightStatus: "passed",
+          },
+        ],
+      },
+    });
+
+    expect(message.type).toBe("admin:dashboard");
+    if (message.type === "admin:dashboard") {
+      expect(message.payload.users[0]?.connectionQuality?.grade).toBe("excellent");
+      expect(message.payload.users[0]?.preflightStatus).toBe("passed");
+    }
+  });
 });

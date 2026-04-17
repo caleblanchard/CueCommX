@@ -17,6 +17,7 @@ const baseConfig = {
   maxUsers: 30,
   maxChannels: 16,
   logLevel: "info" as const,
+  httpsPort: 3443,
 };
 
 describe("CueCommXMdnsAdvertiser", () => {

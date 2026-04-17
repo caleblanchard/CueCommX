@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { AdminDashboardSnapshotSchema } from "./admin.js";
+import { AdminDashboardSnapshotSchema, ConnectionQualitySchema, PreflightStatusSchema } from "./admin.js";
 import { AuthCredentialsSchema } from "./auth.js";
 import {
   MediaCapabilitiesMessageSchema,
@@ -103,6 +103,20 @@ export const ForceMutedMessageSchema = z.object({
 });
 export type ForceMutedMessage = z.infer<typeof ForceMutedMessageSchema>;
 
+export const QualityReportMessageSchema = z.object({
+  type: z.literal("quality:report"),
+  payload: ConnectionQualitySchema,
+});
+export type QualityReportMessage = z.infer<typeof QualityReportMessageSchema>;
+
+export const PreflightResultMessageSchema = z.object({
+  type: z.literal("preflight:result"),
+  payload: z.object({
+    status: PreflightStatusSchema,
+  }),
+});
+export type PreflightResultMessage = z.infer<typeof PreflightResultMessageSchema>;
+
 export const TalkStartMessageSchema = z.object({
   type: z.literal("talk:start"),
   payload: z.object({
@@ -134,6 +148,8 @@ export const ClientSignalingMessageSchema = z.discriminatedUnion("type", [
   TalkStartMessageSchema,
   TalkStopMessageSchema,
   ListenToggleMessageSchema,
+  QualityReportMessageSchema,
+  PreflightResultMessageSchema,
   MediaCapabilitiesRequestMessageSchema,
   MediaTransportCreateRequestMessageSchema,
   MediaTransportConnectRequestMessageSchema,
@@ -176,6 +192,8 @@ export const SignalingMessageSchema = z.discriminatedUnion("type", [
   TalkStartMessageSchema,
   TalkStopMessageSchema,
   ListenToggleMessageSchema,
+  QualityReportMessageSchema,
+  PreflightResultMessageSchema,
   MediaCapabilitiesRequestMessageSchema,
   MediaCapabilitiesMessageSchema,
   MediaTransportCreateRequestMessageSchema,
