@@ -45,6 +45,7 @@ import {
 } from "./components/ui/card.js";
 
 interface ViewState {
+  allPageActive?: { userId: string; username: string };
   channelActionError?: string;
   channelDeletePendingId?: string;
   channelFormPending: boolean;
@@ -379,6 +380,7 @@ export default function App() {
 
             return {
               ...current,
+              allPageActive: message.payload.allPageActive,
               channels: message.payload.channels,
               forceMutePendingId:
                 current.forceMutePendingId &&
@@ -1493,6 +1495,11 @@ export default function App() {
                   <CardTitle>Active talkers</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {state.allPageActive ? (
+                    <div className="flex items-center gap-3 rounded-xl border border-warning/50 bg-warning/10 px-4 py-3 text-sm font-medium text-warning">
+                      📢 All-Page active by {state.allPageActive.username}
+                    </div>
+                  ) : null}
                   {state.session ? (
                     state.channels.map((channel, index) => {
                       const activeTalkers = state.users.filter((user) =>

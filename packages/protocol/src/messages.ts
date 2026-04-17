@@ -117,6 +117,80 @@ export const PreflightResultMessageSchema = z.object({
 });
 export type PreflightResultMessage = z.infer<typeof PreflightResultMessageSchema>;
 
+// --- All-Page messages ---
+
+export const AllPageStartMessageSchema = z.object({
+  type: z.literal("allpage:start"),
+  payload: z.object({}),
+});
+export type AllPageStartMessage = z.infer<typeof AllPageStartMessageSchema>;
+
+export const AllPageStopMessageSchema = z.object({
+  type: z.literal("allpage:stop"),
+  payload: z.object({}),
+});
+export type AllPageStopMessage = z.infer<typeof AllPageStopMessageSchema>;
+
+export const AllPageActiveMessageSchema = z.object({
+  type: z.literal("allpage:active"),
+  payload: z.object({
+    userId: z.string().min(1),
+    username: z.string().min(1),
+  }),
+});
+export type AllPageActiveMessage = z.infer<typeof AllPageActiveMessageSchema>;
+
+export const AllPageInactiveMessageSchema = z.object({
+  type: z.literal("allpage:inactive"),
+  payload: z.object({}),
+});
+export type AllPageInactiveMessage = z.infer<typeof AllPageInactiveMessageSchema>;
+
+// --- Call Signaling messages ---
+
+export const CallSignalTypeSchema = z.enum(["call", "standby", "go"]);
+export type CallSignalType = z.infer<typeof CallSignalTypeSchema>;
+
+export const SignalSendMessageSchema = z.object({
+  type: z.literal("signal:send"),
+  payload: z.object({
+    signalType: CallSignalTypeSchema,
+    targetChannelId: z.string().min(1).optional(),
+    targetUserId: z.string().min(1).optional(),
+  }),
+});
+export type SignalSendMessage = z.infer<typeof SignalSendMessageSchema>;
+
+export const SignalAcknowledgeMessageSchema = z.object({
+  type: z.literal("signal:ack"),
+  payload: z.object({
+    signalId: z.string().min(1),
+  }),
+});
+export type SignalAcknowledgeMessage = z.infer<typeof SignalAcknowledgeMessageSchema>;
+
+export const SignalReceivedMessageSchema = z.object({
+  type: z.literal("signal:incoming"),
+  payload: z.object({
+    signalId: z.string().min(1),
+    signalType: CallSignalTypeSchema,
+    fromUserId: z.string().min(1),
+    fromUsername: z.string().min(1),
+    targetChannelId: z.string().min(1).optional(),
+  }),
+});
+export type SignalReceivedMessage = z.infer<typeof SignalReceivedMessageSchema>;
+
+export const SignalClearedMessageSchema = z.object({
+  type: z.literal("signal:cleared"),
+  payload: z.object({
+    signalId: z.string().min(1),
+  }),
+});
+export type SignalClearedMessage = z.infer<typeof SignalClearedMessageSchema>;
+
+// --- Talk messages ---
+
 export const TalkStartMessageSchema = z.object({
   type: z.literal("talk:start"),
   payload: z.object({
@@ -150,6 +224,10 @@ export const ClientSignalingMessageSchema = z.discriminatedUnion("type", [
   ListenToggleMessageSchema,
   QualityReportMessageSchema,
   PreflightResultMessageSchema,
+  AllPageStartMessageSchema,
+  AllPageStopMessageSchema,
+  SignalSendMessageSchema,
+  SignalAcknowledgeMessageSchema,
   MediaCapabilitiesRequestMessageSchema,
   MediaTransportCreateRequestMessageSchema,
   MediaTransportConnectRequestMessageSchema,
@@ -167,6 +245,10 @@ export const ServerSignalingMessageSchema = z.discriminatedUnion("type", [
   SignalErrorMessageSchema,
   AdminDashboardMessageSchema,
   ForceMutedMessageSchema,
+  AllPageActiveMessageSchema,
+  AllPageInactiveMessageSchema,
+  SignalReceivedMessageSchema,
+  SignalClearedMessageSchema,
   MediaCapabilitiesMessageSchema,
   MediaTransportCreatedMessageSchema,
   MediaTransportConnectedMessageSchema,
@@ -194,6 +276,14 @@ export const SignalingMessageSchema = z.discriminatedUnion("type", [
   ListenToggleMessageSchema,
   QualityReportMessageSchema,
   PreflightResultMessageSchema,
+  AllPageStartMessageSchema,
+  AllPageStopMessageSchema,
+  AllPageActiveMessageSchema,
+  AllPageInactiveMessageSchema,
+  SignalSendMessageSchema,
+  SignalAcknowledgeMessageSchema,
+  SignalReceivedMessageSchema,
+  SignalClearedMessageSchema,
   MediaCapabilitiesRequestMessageSchema,
   MediaCapabilitiesMessageSchema,
   MediaTransportCreateRequestMessageSchema,

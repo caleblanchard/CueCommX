@@ -31,6 +31,10 @@ export const AdminDashboardUserSchema = ManagedUserSchema.extend({
 export type AdminDashboardUser = z.infer<typeof AdminDashboardUserSchema>;
 
 export const AdminDashboardSnapshotSchema = z.object({
+  allPageActive: z.object({
+    userId: z.string(),
+    username: z.string(),
+  }).optional(),
   channels: z.array(ChannelInfoSchema),
   users: z.array(AdminDashboardUserSchema),
 });

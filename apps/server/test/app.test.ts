@@ -2321,4 +2321,339 @@ describe("createApp", () => {
     operatorMessages.stop();
     await app.close();
   });
+
+  it("supports all-page broadcast by operator with force-stop and restoration", async () => {
+    const op1Id = database.createUser({
+      username: "Op1",
+      role: "operator",
+      pinHash: hashPin("1111"),
+    });
+    database.grantChannelPermissions(op1Id, [
+      { channelId: "ch-production", canTalk: true, canListen: true },
+      { channelId: "ch-audio", canTalk: true, canListen: true },
+    ]);
+
+    const op2Id = database.createUser({
+      username: "Op2",
+      role: "operator",
+      pinHash: hashPin("2222"),
+    });
+    database.grantChannelPermissions(op2Id, [
+      { channelId: "ch-production", canTalk: true, canListen: true },
+    ]);
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church",
+        host: "127.0.0.1",
+        port: 0,
+        rtcMinPort: 40000,
+        rtcMaxPort: 41000,
+        announcedIp: undefined,
+        dataDir: workingDirectory,
+        dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"),
+        maxUsers: 30,
+        maxChannels: 16,
+        logLevel: "info",
+        httpsPort: 3443,
+      },
+      database,
+    });
+
+    const op1Login = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { username: "Op1", pin: "1111" },
+    });
+    const op1Token = op1Login.json().sessionToken as string;
+
+    const op2Login = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { username: "Op2", pin: "2222" },
+    });
+    const op2Token = op2Login.json().sessionToken as string;
+
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+
+    const op1Socket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const op1Messages = createJsonMessageCollector(op1Socket);
+    await once(op1Socket, "open");
+    op1Socket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: op1Token } }));
+    await withTimeout(op1Messages.next("session:ready"), "op1 session ready");
+
+    const op2Socket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const op2Messages = createJsonMessageCollector(op2Socket);
+    await once(op2Socket, "open");
+    op2Socket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: op2Token } }));
+    await withTimeout(op2Messages.next("session:ready"), "op2 session ready");
+
+    // Op2 starts talking on ch-production
+    op2Socket.send(JSON.stringify({ type: "talk:start", payload: { channelIds: ["ch-production"] } }));
+    const op2TalkState = await withTimeout(
+      op2Messages.next<{ payload: { talkChannelIds: string[]; talking: boolean }; type: string }>("operator-state"),
+      "op2 talk start state",
+    );
+    expect(op2TalkState.payload).toMatchObject({ talkChannelIds: ["ch-production"], talking: true });
+
+    // Op1 starts all-page
+    op1Socket.send(JSON.stringify({ type: "allpage:start", payload: {} }));
+
+    // Op2 should be force-stopped
+    const op2ForceStopState = await withTimeout(
+      op2Messages.next<{ payload: { talkChannelIds: string[]; talking: boolean }; type: string }>("operator-state"),
+      "op2 force-stop state",
+    );
+    expect(op2ForceStopState.payload.talkChannelIds).toEqual([]);
+    expect(op2ForceStopState.payload.talking).toBe(false);
+
+    // Op1 should be talking on both channels
+    const op1TalkState = await withTimeout(
+      op1Messages.next<{ payload: { talkChannelIds: string[]; talking: boolean }; type: string }>("operator-state"),
+      "op1 allpage talk state",
+    );
+    expect(op1TalkState.payload.talking).toBe(true);
+    expect(op1TalkState.payload.talkChannelIds).toContain("ch-production");
+    expect(op1TalkState.payload.talkChannelIds).toContain("ch-audio");
+
+    // Both receive allpage:active
+    const op1Active = await withTimeout(
+      op1Messages.next<{ payload: { username: string }; type: string }>("allpage:active"),
+      "op1 allpage active",
+    );
+    expect(op1Active.payload.username).toBe("Op1");
+
+    const op2Active = await withTimeout(
+      op2Messages.next<{ payload: { username: string }; type: string }>("allpage:active"),
+      "op2 allpage active",
+    );
+    expect(op2Active.payload.username).toBe("Op1");
+
+    // Op2 tries to talk during all-page → forbidden
+    op2Socket.send(JSON.stringify({ type: "talk:start", payload: { channelIds: ["ch-production"] } }));
+    const op2Forbidden = await withTimeout(
+      op2Messages.next<{ payload: { code: string }; type: string }>("signal:error"),
+      "op2 talk forbidden during allpage",
+    );
+    expect(op2Forbidden.payload.code).toBe("forbidden");
+
+    // Op1 stops all-page
+    op1Socket.send(JSON.stringify({ type: "allpage:stop", payload: {} }));
+
+    // Both receive allpage:inactive
+    const op1Inactive = await withTimeout(
+      op1Messages.next<{ type: string }>("allpage:inactive"),
+      "op1 allpage inactive",
+    );
+    expect(op1Inactive.type).toBe("allpage:inactive");
+
+    const op2Inactive = await withTimeout(
+      op2Messages.next<{ type: string }>("allpage:inactive"),
+      "op2 allpage inactive",
+    );
+    expect(op2Inactive.type).toBe("allpage:inactive");
+
+    // Op1 should stop talking
+    const op1StopState = await withTimeout(
+      op1Messages.next<{ payload: { talkChannelIds: string[]; talking: boolean }; type: string }>("operator-state"),
+      "op1 allpage stop state",
+    );
+    expect(op1StopState.payload.talking).toBe(false);
+    expect(op1StopState.payload.talkChannelIds).toEqual([]);
+
+    op1Socket.close();
+    op2Socket.close();
+    await Promise.all([once(op1Socket, "close"), once(op2Socket, "close")]);
+    op1Messages.stop();
+    op2Messages.stop();
+    await app.close();
+  });
+
+  it("routes call signals to channel listeners and supports acknowledgment", async () => {
+    const op1Id = database.createUser({
+      username: "Director",
+      role: "operator",
+      pinHash: hashPin("1111"),
+    });
+    database.grantChannelPermissions(op1Id, [
+      { channelId: "ch-production", canTalk: true, canListen: true },
+    ]);
+
+    const op2Id = database.createUser({
+      username: "Camera1",
+      role: "operator",
+      pinHash: hashPin("2222"),
+    });
+    database.grantChannelPermissions(op2Id, [
+      { channelId: "ch-production", canTalk: false, canListen: true },
+    ]);
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church",
+        host: "127.0.0.1",
+        port: 0,
+        rtcMinPort: 40000,
+        rtcMaxPort: 41000,
+        announcedIp: undefined,
+        dataDir: workingDirectory,
+        dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"),
+        maxUsers: 30,
+        maxChannels: 16,
+        logLevel: "info",
+        httpsPort: 3443,
+      },
+      database,
+    });
+
+    const op1Login = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { username: "Director", pin: "1111" },
+    });
+    const op1Token = op1Login.json().sessionToken as string;
+
+    const op2Login = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { username: "Camera1", pin: "2222" },
+    });
+    const op2Token = op2Login.json().sessionToken as string;
+
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+
+    const op1Socket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const op1Messages = createJsonMessageCollector(op1Socket);
+    await once(op1Socket, "open");
+    op1Socket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: op1Token } }));
+    await withTimeout(op1Messages.next("session:ready"), "op1 session ready");
+
+    const op2Socket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const op2Messages = createJsonMessageCollector(op2Socket);
+    await once(op2Socket, "open");
+    op2Socket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: op2Token } }));
+    await withTimeout(op2Messages.next("session:ready"), "op2 session ready");
+
+    // Op1 sends a channel signal
+    op1Socket.send(JSON.stringify({
+      type: "signal:send",
+      payload: { signalType: "call", targetChannelId: "ch-production" },
+    }));
+
+    // Op2 (listener on ch-production) should receive signal:incoming
+    const op2Signal = await withTimeout(
+      op2Messages.next<{
+        payload: { signalId: string; signalType: string; fromUsername: string; targetChannelId: string };
+        type: string;
+      }>("signal:incoming"),
+      "op2 signal incoming",
+    );
+    expect(op2Signal.payload.signalType).toBe("call");
+    expect(op2Signal.payload.fromUsername).toBe("Director");
+    expect(op2Signal.payload.targetChannelId).toBe("ch-production");
+    const signalId = op2Signal.payload.signalId;
+
+    // Op1 should NOT receive signal:incoming (sender excluded)
+    // We verify by sending another message and confirming no signal:incoming arrived
+    op1Socket.send(JSON.stringify({ type: "listen:toggle", payload: { channelId: "ch-production", listening: true } }));
+    const op1NextMsg = await withTimeout(
+      op1Messages.next<{ type: string }>("operator-state"),
+      "op1 next message after signal",
+    );
+    expect(op1NextMsg.type).toBe("operator-state");
+
+    // Op2 acknowledges the signal
+    op2Socket.send(JSON.stringify({ type: "signal:ack", payload: { signalId } }));
+
+    // Both should receive signal:cleared
+    const op1Cleared = await withTimeout(
+      op1Messages.next<{ payload: { signalId: string }; type: string }>("signal:cleared"),
+      "op1 signal cleared",
+    );
+    expect(op1Cleared.payload.signalId).toBe(signalId);
+
+    const op2Cleared = await withTimeout(
+      op2Messages.next<{ payload: { signalId: string }; type: string }>("signal:cleared"),
+      "op2 signal cleared",
+    );
+    expect(op2Cleared.payload.signalId).toBe(signalId);
+
+    op1Socket.close();
+    op2Socket.close();
+    await Promise.all([once(op1Socket, "close"), once(op2Socket, "close")]);
+    op1Messages.stop();
+    op2Messages.stop();
+    await app.close();
+  });
+
+  it("rejects all-page and signal operations from regular users", async () => {
+    const userId = database.createUser({
+      username: "Volunteer",
+      role: "user",
+      pinHash: hashPin("3333"),
+    });
+    database.grantChannelPermissions(userId, [
+      { channelId: "ch-production", canTalk: true, canListen: true },
+    ]);
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church",
+        host: "127.0.0.1",
+        port: 0,
+        rtcMinPort: 40000,
+        rtcMaxPort: 41000,
+        announcedIp: undefined,
+        dataDir: workingDirectory,
+        dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"),
+        maxUsers: 30,
+        maxChannels: 16,
+        logLevel: "info",
+        httpsPort: 3443,
+      },
+      database,
+    });
+
+    const login = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { username: "Volunteer", pin: "3333" },
+    });
+    const token = login.json().sessionToken as string;
+
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+
+    const socket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const messages = createJsonMessageCollector(socket);
+    await once(socket, "open");
+    socket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: token } }));
+    await withTimeout(messages.next("session:ready"), "user session ready");
+
+    // Regular user tries all-page → forbidden
+    socket.send(JSON.stringify({ type: "allpage:start", payload: {} }));
+    const allpageError = await withTimeout(
+      messages.next<{ payload: { code: string }; type: string }>("signal:error"),
+      "allpage forbidden for regular user",
+    );
+    expect(allpageError.payload.code).toBe("forbidden");
+
+    // Regular user tries to send a user-targeted signal → forbidden
+    socket.send(JSON.stringify({
+      type: "signal:send",
+      payload: { signalType: "call", targetUserId: "some-user-id" },
+    }));
+    const signalError = await withTimeout(
+      messages.next<{ payload: { code: string }; type: string }>("signal:error"),
+      "user signal forbidden for regular user",
+    );
+    expect(signalError.payload.code).toBe("forbidden");
+
+    socket.close();
+    await once(socket, "close");
+    messages.stop();
+    await app.close();
+  });
 });

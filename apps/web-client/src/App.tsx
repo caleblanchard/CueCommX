@@ -15,9 +15,13 @@ import {
   type StatusResponse,
 } from "@cuecommx/protocol";
 import {
+  type CallSignalType,
+} from "@cuecommx/protocol";
+import {
   Activity,
   Headphones,
   Keyboard,
+  Megaphone,
   Mic,
   RadioTower,
   Volume2,
@@ -44,6 +48,8 @@ import {
   PreflightAudioTest,
   type PreflightState,
 } from "./media/preflight-audio-test.js";
+import { playSignalTone } from "./media/signal-tone.js";
+import { VoxDetector } from "./media/vox-detector.js";
 import { formatLatencyIndicator, readNetworkRtt } from "./network-latency.js";
 import {
   type AudioProcessingPreferences,
@@ -55,6 +61,7 @@ import {
   saveStoredSession,
   saveWebClientPreferences,
   type StorageLike,
+  type VoxSettings,
   WEB_CLIENT_PREFERENCES_KEY,
 } from "./preferences.js";
 
@@ -276,6 +283,12 @@ export default function App() {
   const mediaControllerRef = useRef<WebMediaController | null>(null);
   const mediaStartingRef = useRef(false);
   const restoredListenPreferencesRef = useRef<string | undefined>(undefined);
+  const [allPageActive, setAllPageActive] = useState<{ userId: string; username: string } | undefined>();
+  const [incomingSignals, setIncomingSignals] = useState<Array<{ signalId: string; signalType: CallSignalType; fromUsername: string; targetChannelId?: string }>>([]);
+  const [voxModeChannelIds, setVoxModeChannelIds] = useState<string[]>(persistedPreferences.voxModeChannelIds);
+  const [voxSettings, setVoxSettings] = useState<VoxSettings>(persistedPreferences.voxSettings);
+  const voxDetectorRef = useRef<VoxDetector | null>(null);
+  const [signalMenuChannelId, setSignalMenuChannelId] = useState<string | undefined>();
 
   const connectionBadge = getConnectionBadge(state.realtimeState);
   const assignedPermissions = useMemo(
@@ -546,6 +559,31 @@ export default function App() {
             setTimeout(() => setForceMuteNotice(undefined), 5000);
           }
 
+          if (message.type === "allpage:active") {
+            setAllPageActive(message.payload);
+          }
+
+          if (message.type === "allpage:inactive") {
+            setAllPageActive(undefined);
+          }
+
+          if (message.type === "signal:incoming") {
+            setIncomingSignals((prev) => [
+              ...prev,
+              {
+                signalId: message.payload.signalId,
+                signalType: message.payload.signalType,
+                fromUsername: message.payload.fromUsername,
+                targetChannelId: message.payload.targetChannelId,
+              },
+            ]);
+            playSignalTone(message.payload.signalType);
+          }
+
+          if (message.type === "signal:cleared") {
+            setIncomingSignals((prev) => prev.filter((s) => s.signalId !== message.payload.signalId));
+          }
+
           return current;
         });
       },
@@ -653,6 +691,17 @@ export default function App() {
   }, [assignedPermissions]);
 
   useEffect(() => {
+    const allowedTalkChannelIds = new Set(
+      assignedPermissions.filter((permission) => permission.canTalk).map((permission) => permission.channelId),
+    );
+
+    setVoxModeChannelIds((current) => {
+      const next = current.filter((channelId) => allowedTalkChannelIds.has(channelId));
+      return next.length === current.length ? current : next;
+    });
+  }, [assignedPermissions]);
+
+  useEffect(() => {
     const allowedListenChannelIds = new Set(
       assignedPermissions
         .filter((permission) => permission.canListen)
@@ -677,6 +726,8 @@ export default function App() {
       masterVolume,
       preferredListenChannelIds,
       selectedInputDeviceId,
+      voxModeChannelIds,
+      voxSettings,
     });
   }, [
     audioProcessing,
@@ -687,6 +738,8 @@ export default function App() {
     preferredListenChannelIds,
     selectedInputDeviceId,
     state.operatorState,
+    voxModeChannelIds,
+    voxSettings,
   ]);
 
   useEffect(() => {
@@ -704,6 +757,50 @@ export default function App() {
   useEffect(() => {
     mediaControllerRef.current?.setAudioProcessing(audioProcessing);
   }, [audioProcessing]);
+
+  useEffect(() => {
+    if (!audioReady || voxModeChannelIds.length === 0) {
+      voxDetectorRef.current?.stop();
+      voxDetectorRef.current = null;
+      return;
+    }
+
+    const nodes = mediaControllerRef.current?.getVoxAudioNodes();
+
+    if (!nodes) {
+      return;
+    }
+
+    const detector = new VoxDetector({
+      holdTimeMs: voxSettings.holdTimeMs,
+      thresholdDb: voxSettings.thresholdDb,
+      onVoxStart: () => {
+        for (const channelId of voxModeChannelIds) {
+          startTalk(channelId);
+        }
+      },
+      onVoxStop: () => {
+        for (const channelId of voxModeChannelIds) {
+          stopTalk(channelId, true);
+        }
+      },
+    });
+
+    detector.start(nodes.audioContext, nodes.sourceNode);
+    voxDetectorRef.current = detector;
+
+    return () => {
+      detector.stop();
+      voxDetectorRef.current = null;
+    };
+  }, [audioReady, voxModeChannelIds]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    voxDetectorRef.current?.updateSettings({
+      holdTimeMs: voxSettings.holdTimeMs,
+      thresholdDb: voxSettings.thresholdDb,
+    });
+  }, [voxSettings]);
 
   useEffect(() => {
     if (
@@ -990,6 +1087,21 @@ export default function App() {
         ? current.filter((entry) => entry !== channelId)
         : [...current, channelId],
     );
+    setVoxModeChannelIds((current) => current.filter((entry) => entry !== channelId));
+  }
+
+  function toggleVoxMode(channelId: string): void {
+    setVoxModeChannelIds((current) =>
+      current.includes(channelId)
+        ? current.filter((entry) => entry !== channelId)
+        : [...current, channelId],
+    );
+    setLatchModeChannelIds((current) => current.filter((entry) => entry !== channelId));
+  }
+
+  function sendSignalToChannel(channelId: string, signalType: CallSignalType): void {
+    realtimeClientRef.current?.sendCallSignal(signalType, { channelId });
+    setSignalMenuChannelId(undefined);
   }
 
   return (
@@ -1264,6 +1376,76 @@ export default function App() {
                   <Badge variant={audioStatusBadge.variant}>{audioStatusBadge.label}</Badge>
                 </div>
 
+                {(state.session?.user.role === "admin" || state.session?.user.role === "operator") ? (
+                  <div className="flex items-center gap-3">
+                    <Button
+                      disabled={state.realtimeState !== "connected" || !audioReady || (!!allPageActive && allPageActive.userId !== state.session?.user.id)}
+                      onClick={() => {
+                        if (allPageActive && allPageActive.userId === state.session?.user.id) {
+                          realtimeClientRef.current?.stopAllPage();
+                        } else {
+                          realtimeClientRef.current?.startAllPage();
+                        }
+                      }}
+                      type="button"
+                      variant={allPageActive?.userId === state.session?.user.id ? "secondary" : "outline"}
+                    >
+                      <Megaphone className="h-4 w-4" />
+                      {allPageActive?.userId === state.session?.user.id ? "Stop All-Page" : "All-Page"}
+                    </Button>
+                  </div>
+                ) : null}
+
+                {allPageActive ? (
+                  <div className="flex items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-400">
+                    <span className="flex-1">📢 All-Page by {allPageActive.username}</span>
+                    {allPageActive.userId === state.session?.user.id ? (
+                      <Button
+                        onClick={() => realtimeClientRef.current?.stopAllPage()}
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        Stop
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {incomingSignals.length > 0 ? (
+                  <div className="space-y-2">
+                    {incomingSignals.map((signal) => {
+                      const colorClass =
+                        signal.signalType === "call"
+                          ? "border-red-500/50 bg-red-500/10 text-red-400"
+                          : signal.signalType === "go"
+                            ? "border-green-500/50 bg-green-500/10 text-green-400"
+                            : "border-amber-500/50 bg-amber-500/10 text-amber-400";
+                      const flash = signal.signalType === "call" || signal.signalType === "go" ? " animate-pulse" : "";
+
+                      return (
+                        <div
+                          className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm font-medium${flash} ${colorClass}`}
+                          key={signal.signalId}
+                        >
+                          <span className="flex-1">
+                            {signal.signalType === "call" ? "📞" : signal.signalType === "go" ? "🟢" : "⏳"}{" "}
+                            {signal.signalType.toUpperCase()} from {signal.fromUsername}
+                          </span>
+                          <Button
+                            onClick={() => realtimeClientRef.current?.acknowledgeSignal(signal.signalId)}
+                            size="sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            Acknowledge
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
                 <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(24rem,1fr))]">
                   {(state.session?.channels ?? []).map((channel) => {
                     const permission = findPermission(assignedPermissions, channel.id);
@@ -1274,6 +1456,8 @@ export default function App() {
                     const controlsReady =
                       state.realtimeState === "connected" && !!state.operatorState && audioReady;
                     const latchModeEnabled = latchModeChannelIds.includes(channel.id);
+                    const voxModeEnabled = voxModeChannelIds.includes(channel.id);
+                    const allPageBlocked = !!allPageActive && allPageActive.userId !== state.session?.user.id;
                     const talkersOnChannel = remoteTalkersByChannel.get(channel.id) ?? [];
                     const monitorVolume = channelVolumes[channel.id] ?? 100;
 
@@ -1306,6 +1490,9 @@ export default function App() {
                               {latchModeEnabled && permission?.canTalk ? (
                                 <Badge variant="accent">Latch on</Badge>
                               ) : null}
+                              {voxModeEnabled && permission?.canTalk ? (
+                                <Badge variant="accent">VOX</Badge>
+                              ) : null}
                             </div>
                           </div>
                         </CardHeader>
@@ -1326,8 +1513,12 @@ export default function App() {
                             </Button>
                             <Button
                               aria-pressed={talking}
-                              disabled={!controlsReady || !permission?.canTalk}
+                              disabled={!controlsReady || !permission?.canTalk || voxModeEnabled || allPageBlocked}
                               onClick={() => {
+                                if (voxModeEnabled || allPageBlocked) {
+                                  return;
+                                }
+
                                 if (!latchModeEnabled) {
                                   return;
                                 }
@@ -1340,7 +1531,7 @@ export default function App() {
                                 startTalk(channel.id);
                               }}
                               onKeyDown={(event) => {
-                                if (latchModeEnabled) {
+                                if (latchModeEnabled || voxModeEnabled || allPageBlocked) {
                                   return;
                                 }
 
@@ -1350,7 +1541,7 @@ export default function App() {
                                 }
                               }}
                               onKeyUp={(event) => {
-                                if (latchModeEnabled) {
+                                if (latchModeEnabled || voxModeEnabled || allPageBlocked) {
                                   return;
                                 }
 
@@ -1360,20 +1551,20 @@ export default function App() {
                                 }
                               }}
                               onPointerCancel={(event) => {
-                                if (!latchModeEnabled) {
+                                if (!latchModeEnabled && !voxModeEnabled && !allPageBlocked) {
                                   (event.target as HTMLElement).releasePointerCapture?.(event.pointerId);
                                   stopTalk(channel.id);
                                 }
                               }}
                               onPointerDown={(event) => {
-                                if (!latchModeEnabled) {
+                                if (!latchModeEnabled && !voxModeEnabled && !allPageBlocked) {
                                   event.preventDefault();
                                   (event.target as HTMLElement).setPointerCapture?.(event.pointerId);
                                   startTalk(channel.id);
                                 }
                               }}
                               onPointerUp={(event) => {
-                                if (!latchModeEnabled) {
+                                if (!latchModeEnabled && !voxModeEnabled && !allPageBlocked) {
                                   (event.target as HTMLElement).releasePointerCapture?.(event.pointerId);
                                   stopTalk(channel.id);
                                 }
@@ -1383,9 +1574,15 @@ export default function App() {
                             >
                               {!permission?.canTalk
                                 ? "Talk locked"
-                                : talking
-                                  ? "Talking"
-                                  : "Talk"}
+                                : allPageBlocked
+                                  ? "All-Page active"
+                                  : voxModeEnabled
+                                    ? talking
+                                      ? "VOX talking"
+                                      : "VOX auto"
+                                    : talking
+                                      ? "Talking"
+                                      : "Talk"}
                             </Button>
                           </div>
 
@@ -1411,15 +1608,87 @@ export default function App() {
                                 value={monitorVolume}
                               />
                             </div>
-                            <Button
-                              aria-pressed={latchModeEnabled}
-                              disabled={!permission?.canTalk}
-                              onClick={() => toggleLatchMode(channel.id)}
-                              type="button"
-                              variant={latchModeEnabled ? "secondary" : "outline"}
-                            >
-                              {latchModeEnabled ? "Latch on" : "Latch off"}
-                            </Button>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                aria-pressed={!latchModeEnabled && !voxModeEnabled}
+                                disabled={!permission?.canTalk}
+                                onClick={() => {
+                                  setLatchModeChannelIds((c) => c.filter((e) => e !== channel.id));
+                                  setVoxModeChannelIds((c) => c.filter((e) => e !== channel.id));
+                                }}
+                                size="sm"
+                                type="button"
+                                variant={!latchModeEnabled && !voxModeEnabled ? "secondary" : "outline"}
+                              >
+                                PTT
+                              </Button>
+                              <Button
+                                aria-pressed={latchModeEnabled}
+                                disabled={!permission?.canTalk}
+                                onClick={() => toggleLatchMode(channel.id)}
+                                size="sm"
+                                type="button"
+                                variant={latchModeEnabled ? "secondary" : "outline"}
+                              >
+                                Latch
+                              </Button>
+                              <Button
+                                aria-pressed={voxModeEnabled}
+                                disabled={!permission?.canTalk || !audioReady}
+                                onClick={() => toggleVoxMode(channel.id)}
+                                size="sm"
+                                type="button"
+                                variant={voxModeEnabled ? "secondary" : "outline"}
+                              >
+                                VOX
+                              </Button>
+                              <div className="relative ml-auto">
+                                <Button
+                                  disabled={!controlsReady || !permission?.canTalk}
+                                  onClick={() =>
+                                    setSignalMenuChannelId(
+                                      signalMenuChannelId === channel.id ? undefined : channel.id,
+                                    )
+                                  }
+                                  size="sm"
+                                  type="button"
+                                  variant="ghost"
+                                >
+                                  Signal
+                                </Button>
+                                {signalMenuChannelId === channel.id ? (
+                                  <div className="absolute right-0 z-10 mt-1 flex flex-col gap-1 rounded-xl border border-border bg-card p-2 shadow-lg">
+                                    <Button
+                                      className="justify-start text-red-400"
+                                      onClick={() => sendSignalToChannel(channel.id, "call")}
+                                      size="sm"
+                                      type="button"
+                                      variant="ghost"
+                                    >
+                                      📞 Call
+                                    </Button>
+                                    <Button
+                                      className="justify-start text-amber-400"
+                                      onClick={() => sendSignalToChannel(channel.id, "standby")}
+                                      size="sm"
+                                      type="button"
+                                      variant="ghost"
+                                    >
+                                      ⏳ Standby
+                                    </Button>
+                                    <Button
+                                      className="justify-start text-green-400"
+                                      onClick={() => sendSignalToChannel(channel.id, "go")}
+                                      size="sm"
+                                      type="button"
+                                      variant="ghost"
+                                    >
+                                      🟢 Go
+                                    </Button>
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
                           </div>
 
                           <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
@@ -1552,6 +1821,55 @@ export default function App() {
                                 />
                               </label>
                             ))}
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                            VOX settings
+                          </p>
+                          <div className="space-y-3 rounded-lg border border-border/60 bg-background/35 p-3">
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                                <label htmlFor="vox-threshold">Threshold</label>
+                                <span>{voxSettings.thresholdDb} dB</span>
+                              </div>
+                              <input
+                                className={sliderClassName}
+                                id="vox-threshold"
+                                max={-10}
+                                min={-60}
+                                onChange={(event) =>
+                                  setVoxSettings((prev) => ({
+                                    ...prev,
+                                    thresholdDb: Number(event.target.value),
+                                  }))
+                                }
+                                step={1}
+                                type="range"
+                                value={voxSettings.thresholdDb}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                                <label htmlFor="vox-hold">Hold time</label>
+                                <span>{voxSettings.holdTimeMs} ms</span>
+                              </div>
+                              <input
+                                className={sliderClassName}
+                                id="vox-hold"
+                                max={2000}
+                                min={200}
+                                onChange={(event) =>
+                                  setVoxSettings((prev) => ({
+                                    ...prev,
+                                    holdTimeMs: Number(event.target.value),
+                                  }))
+                                }
+                                step={50}
+                                type="range"
+                                value={voxSettings.holdTimeMs}
+                              />
+                            </div>
                           </div>
                         </div>
                         <Button

@@ -443,6 +443,14 @@ export class WebMediaController {
 
   constructor(private readonly options: WebMediaControllerOptions) {}
 
+  getVoxAudioNodes(): { audioContext: AudioContext; sourceNode: MediaStreamAudioSourceNode } | undefined {
+    if (!this.audioContext || !this.localAudioSource) {
+      return undefined;
+    }
+
+    return { audioContext: this.audioContext, sourceNode: this.localAudioSource };
+  }
+
   setAudioProcessing(processing: AudioProcessingPreferences): void {
     this.audioProcessing = { ...processing };
   }

@@ -6,6 +6,7 @@ import type { Socket } from "node:net";
 
 import {
   type AdminDashboardSnapshot,
+  type CallSignalType,
   type ConnectionQuality,
   type PreflightStatus,
   PROTOCOL_VERSION,
@@ -38,6 +39,23 @@ interface ConnectionRecord {
   isAlive: boolean;
   requestHost?: string;
   socket: WebSocket;
+}
+
+interface AllPageState {
+  sessionToken: string;
+  userId: string;
+  username: string;
+  previousTalkStates: Map<string, string[]>;
+}
+
+interface ActiveSignal {
+  fromUserId: string;
+  fromUsername: string;
+  signalId: string;
+  signalType: CallSignalType;
+  targetChannelId?: string;
+  targetUserId?: string;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 function parseRequestHost(headersHost?: string): string | undefined {
@@ -102,6 +120,12 @@ export class RealtimeService {
 
   private readonly operatorStates = new Map<string, OperatorState>();
 
+  private allPageState: AllPageState | undefined;
+
+  private readonly activeSignals = new Map<string, ActiveSignal>();
+
+  private signalSequence = 0;
+
   private readonly path: string;
 
   private readonly server = new WebSocketServer({ noServer: true });
@@ -130,6 +154,13 @@ export class RealtimeService {
 
     this.connections.clear();
     this.operatorStates.clear();
+    this.allPageState = undefined;
+
+    for (const signal of this.activeSignals.values()) {
+      clearTimeout(signal.timer);
+    }
+
+    this.activeSignals.clear();
 
     for (const connection of closingConnections) {
       connection.socket.close(1001, "server shutdown");
@@ -263,6 +294,306 @@ export class RealtimeService {
 
       this.broadcastAdminDashboard();
     }
+  }
+
+  // --- All-Page ---
+
+  private async handleAllPageStart(connection: AuthenticatedConnection): Promise<void> {
+    const role = connection.user.role;
+
+    if (role !== "admin" && role !== "operator") {
+      this.sendSignalError(connection, "forbidden", "Only admins and operators can start All-Page.");
+      return;
+    }
+
+    if (this.allPageState) {
+      this.sendSignalError(connection, "conflict", "An All-Page broadcast is already active.");
+      return;
+    }
+
+    // Save current talk states and force-stop all other talkers
+    const previousTalkStates = new Map<string, string[]>();
+
+    for (const record of this.connections.values()) {
+      if (!record.authenticated) {
+        continue;
+      }
+
+      if (record.authenticated.sessionToken === connection.sessionToken) {
+        continue;
+      }
+
+      if (record.authenticated.state.talkChannelIds.length > 0) {
+        previousTalkStates.set(
+          record.authenticated.sessionToken,
+          [...record.authenticated.state.talkChannelIds],
+        );
+        record.authenticated.state = {
+          ...record.authenticated.state,
+          talkChannelIds: [],
+          talking: false,
+        };
+        this.operatorStates.set(record.authenticated.sessionToken, record.authenticated.state);
+        this.sendOperatorState(record.authenticated);
+        await this.syncMediaState(record.authenticated);
+      }
+    }
+
+    this.allPageState = {
+      sessionToken: connection.sessionToken,
+      userId: connection.user.id,
+      username: connection.user.username,
+      previousTalkStates,
+    };
+
+    // Start pager talking on all channels they have talk permission for
+    const allTalkChannelIds = connection.user.channelPermissions
+      .filter((p) => p.canTalk)
+      .map((p) => p.channelId)
+      .sort((a, b) => a.localeCompare(b));
+
+    if (allTalkChannelIds.length > 0) {
+      connection.state = {
+        ...connection.state,
+        talkChannelIds: allTalkChannelIds,
+        talking: true,
+      };
+      this.operatorStates.set(connection.sessionToken, connection.state);
+      this.sendOperatorState(connection);
+      await this.syncMediaState(connection);
+    }
+
+    // Temporarily add all channels as listen channels for all users during allpage
+    for (const record of this.connections.values()) {
+      if (!record.authenticated) {
+        continue;
+      }
+
+      if (record.authenticated.sessionToken === connection.sessionToken) {
+        continue;
+      }
+
+      const allListenChannelIds = record.authenticated.user.channelPermissions
+        .filter((p) => p.canListen)
+        .map((p) => p.channelId);
+      const merged = [...new Set([...record.authenticated.state.listenChannelIds, ...allListenChannelIds])]
+        .sort((a, b) => a.localeCompare(b));
+
+      if (merged.length !== record.authenticated.state.listenChannelIds.length) {
+        record.authenticated.state = {
+          ...record.authenticated.state,
+          listenChannelIds: merged,
+        };
+        this.operatorStates.set(record.authenticated.sessionToken, record.authenticated.state);
+        await this.syncMediaState(record.authenticated);
+      }
+    }
+
+    // Broadcast allpage:active to all clients
+    const activeMessage: ServerSignalingMessage = {
+      type: "allpage:active",
+      payload: {
+        userId: connection.user.id,
+        username: connection.user.username,
+      },
+    };
+
+    for (const record of this.connections.values()) {
+      if (record.authenticated) {
+        this.sendMessage(record.socket, activeMessage);
+      }
+    }
+
+    this.broadcastAdminDashboard();
+  }
+
+  private async handleAllPageStop(connection: AuthenticatedConnection): Promise<void> {
+    if (!this.allPageState) {
+      this.sendSignalError(connection, "invalid-state", "No All-Page broadcast is active.");
+      return;
+    }
+
+    if (this.allPageState.sessionToken !== connection.sessionToken && connection.user.role !== "admin") {
+      this.sendSignalError(connection, "forbidden", "Only the pager or an admin can stop All-Page.");
+      return;
+    }
+
+    // Stop pager's talk
+    const pagerConnection = this.findAuthenticatedBySessionToken(this.allPageState.sessionToken);
+
+    if (pagerConnection) {
+      pagerConnection.state = {
+        ...pagerConnection.state,
+        talkChannelIds: [],
+        talking: false,
+      };
+      this.operatorStates.set(pagerConnection.sessionToken, pagerConnection.state);
+      this.sendOperatorState(pagerConnection);
+      await this.syncMediaState(pagerConnection);
+    }
+
+    // Restore listen states (rebuild from preferences)
+    for (const record of this.connections.values()) {
+      if (!record.authenticated) {
+        continue;
+      }
+
+      if (record.authenticated.sessionToken === this.allPageState.sessionToken) {
+        continue;
+      }
+
+      // Rebuild operator state to restore defaults
+      const restoredState = this.buildOperatorState(
+        record.authenticated.user,
+        record.authenticated.sessionToken,
+      );
+
+      // Keep current listen channels only if user had them before (state is rebuilt)
+      record.authenticated.state = restoredState;
+      this.operatorStates.set(record.authenticated.sessionToken, restoredState);
+      this.sendOperatorState(record.authenticated);
+      await this.syncMediaState(record.authenticated);
+    }
+
+    this.allPageState = undefined;
+
+    // Broadcast allpage:inactive to all clients
+    const inactiveMessage: ServerSignalingMessage = {
+      type: "allpage:inactive",
+      payload: {},
+    };
+
+    for (const record of this.connections.values()) {
+      if (record.authenticated) {
+        this.sendMessage(record.socket, inactiveMessage);
+      }
+    }
+
+    this.broadcastAdminDashboard();
+  }
+
+  // --- Call Signaling ---
+
+  private handleSignalSend(connection: AuthenticatedConnection, payload: {
+    signalType: CallSignalType;
+    targetChannelId?: string;
+    targetUserId?: string;
+  }): void {
+    if (!payload.targetChannelId && !payload.targetUserId) {
+      this.sendSignalError(connection, "invalid-message", "Signal must target a channel or user.");
+      return;
+    }
+
+    // Permission check: must have talk permission on target channel, or be admin/operator for user targets
+    if (payload.targetChannelId) {
+      const permission = connection.user.channelPermissions.find(
+        (p) => p.channelId === payload.targetChannelId,
+      );
+
+      if (!permission?.canTalk && connection.user.role !== "admin" && connection.user.role !== "operator") {
+        this.sendSignalError(connection, "forbidden", "Cannot send signal to that channel.");
+        return;
+      }
+    }
+
+    if (payload.targetUserId && connection.user.role !== "admin" && connection.user.role !== "operator") {
+      this.sendSignalError(connection, "forbidden", "Only admins and operators can signal specific users.");
+      return;
+    }
+
+    this.signalSequence += 1;
+    const signalId = `sig-${this.signalSequence}-${Date.now()}`;
+
+    const timer = setTimeout(() => {
+      this.clearSignal(signalId);
+    }, 30_000);
+
+    const activeSignal: ActiveSignal = {
+      fromUserId: connection.user.id,
+      fromUsername: connection.user.username,
+      signalId,
+      signalType: payload.signalType,
+      targetChannelId: payload.targetChannelId,
+      targetUserId: payload.targetUserId,
+      timer,
+    };
+
+    this.activeSignals.set(signalId, activeSignal);
+
+    // Route signal to recipients
+    const incomingMessage: ServerSignalingMessage = {
+      type: "signal:incoming",
+      payload: {
+        signalId,
+        signalType: payload.signalType,
+        fromUserId: connection.user.id,
+        fromUsername: connection.user.username,
+        targetChannelId: payload.targetChannelId,
+      },
+    };
+
+    for (const record of this.connections.values()) {
+      if (!record.authenticated) {
+        continue;
+      }
+
+      // Don't send to the sender
+      if (record.authenticated.user.id === connection.user.id) {
+        continue;
+      }
+
+      if (payload.targetUserId) {
+        // Direct user signal
+        if (record.authenticated.user.id === payload.targetUserId) {
+          this.sendMessage(record.socket, incomingMessage);
+        }
+      } else if (payload.targetChannelId) {
+        // Channel signal — send to all listeners on that channel
+        const hasPermission = record.authenticated.user.channelPermissions.some(
+          (p) => p.channelId === payload.targetChannelId && p.canListen,
+        );
+
+        if (hasPermission) {
+          this.sendMessage(record.socket, incomingMessage);
+        }
+      }
+    }
+  }
+
+  private handleSignalAcknowledge(connection: AuthenticatedConnection, signalId: string): void {
+    this.clearSignal(signalId);
+  }
+
+  private clearSignal(signalId: string): void {
+    const signal = this.activeSignals.get(signalId);
+
+    if (!signal) {
+      return;
+    }
+
+    clearTimeout(signal.timer);
+    this.activeSignals.delete(signalId);
+
+    const clearedMessage: ServerSignalingMessage = {
+      type: "signal:cleared",
+      payload: { signalId },
+    };
+
+    for (const record of this.connections.values()) {
+      if (record.authenticated) {
+        this.sendMessage(record.socket, clearedMessage);
+      }
+    }
+  }
+
+  private findAuthenticatedBySessionToken(sessionToken: string): AuthenticatedConnection | undefined {
+    for (const record of this.connections.values()) {
+      if (record.authenticated?.sessionToken === sessionToken) {
+        return record.authenticated;
+      }
+    }
+
+    return undefined;
   }
 
   getConnectedUserIds(): string[] {
@@ -503,6 +834,22 @@ export class RealtimeService {
     }
 
     if (connection.authenticated) {
+      // If this user was the allpage pager, end the allpage
+      if (this.allPageState?.sessionToken === connection.authenticated.sessionToken) {
+        this.allPageState = undefined;
+
+        const inactiveMessage: ServerSignalingMessage = {
+          type: "allpage:inactive",
+          payload: {},
+        };
+
+        for (const record of this.connections.values()) {
+          if (record.authenticated && record !== connection) {
+            this.sendMessage(record.socket, inactiveMessage);
+          }
+        }
+      }
+
       connection.authenticated.state = {
         ...connection.authenticated.state,
         talkChannelIds: [],
@@ -590,6 +937,9 @@ export class RealtimeService {
     }
 
     return {
+      allPageActive: this.allPageState
+        ? { userId: this.allPageState.userId, username: this.allPageState.username }
+        : undefined,
       channels: this.options.database.listChannels(),
       users: this.options.database.listUsers().map((user) => {
         const activeTalkChannelIds = [...(talkChannelsByUser.get(user.id) ?? new Set<string>())].sort(
@@ -677,6 +1027,11 @@ export class RealtimeService {
       }
 
       if (parsed.type === "talk:start") {
+        if (this.allPageState && this.allPageState.sessionToken !== connection.authenticated.sessionToken) {
+          this.sendSignalError(connection.authenticated, "forbidden", "Talk is disabled during All-Page broadcast.");
+          return;
+        }
+
         await this.applyTalkChange(connection.authenticated, parsed.payload.channelIds, "start");
         return;
       }
@@ -695,6 +1050,26 @@ export class RealtimeService {
       if (parsed.type === "preflight:result") {
         connection.authenticated.preflightStatus = parsed.payload.status;
         this.broadcastAdminDashboard();
+        return;
+      }
+
+      if (parsed.type === "allpage:start") {
+        await this.handleAllPageStart(connection.authenticated);
+        return;
+      }
+
+      if (parsed.type === "allpage:stop") {
+        await this.handleAllPageStop(connection.authenticated);
+        return;
+      }
+
+      if (parsed.type === "signal:send") {
+        this.handleSignalSend(connection.authenticated, parsed.payload);
+        return;
+      }
+
+      if (parsed.type === "signal:ack") {
+        this.handleSignalAcknowledge(connection.authenticated, parsed.payload.signalId);
         return;
       }
 

@@ -10,6 +10,16 @@ export const DEFAULT_AUDIO_PROCESSING: AudioProcessingPreferences = {
   noiseSuppression: true,
 };
 
+export interface VoxSettings {
+  holdTimeMs: number;
+  thresholdDb: number;
+}
+
+export const DEFAULT_VOX_SETTINGS: VoxSettings = {
+  holdTimeMs: 500,
+  thresholdDb: -40,
+};
+
 export interface WebClientPreferences {
   audioProcessing: AudioProcessingPreferences;
   channelVolumes: Record<string, number>;
@@ -17,6 +27,8 @@ export interface WebClientPreferences {
   masterVolume: number;
   preferredListenChannelIds: string[];
   selectedInputDeviceId: string;
+  voxModeChannelIds: string[];
+  voxSettings: VoxSettings;
 }
 
 export interface StorageLike {
@@ -39,6 +51,8 @@ export const DEFAULT_WEB_CLIENT_PREFERENCES: WebClientPreferences = {
   masterVolume: 100,
   preferredListenChannelIds: [],
   selectedInputDeviceId: "",
+  voxModeChannelIds: [],
+  voxSettings: { ...DEFAULT_VOX_SETTINGS },
 };
 
 function clampPercent(value: number): number {
@@ -82,6 +96,25 @@ function toAudioProcessing(value: unknown): AudioProcessingPreferences {
   };
 }
 
+function toVoxSettings(value: unknown): VoxSettings {
+  if (typeof value !== "object" || value === null) {
+    return { ...DEFAULT_VOX_SETTINGS };
+  }
+
+  const obj = value as Record<string, unknown>;
+
+  return {
+    holdTimeMs:
+      typeof obj.holdTimeMs === "number" && Number.isFinite(obj.holdTimeMs)
+        ? Math.max(200, Math.min(2000, Math.round(obj.holdTimeMs)))
+        : DEFAULT_VOX_SETTINGS.holdTimeMs,
+    thresholdDb:
+      typeof obj.thresholdDb === "number" && Number.isFinite(obj.thresholdDb)
+        ? Math.max(-60, Math.min(-10, obj.thresholdDb))
+        : DEFAULT_VOX_SETTINGS.thresholdDb,
+  };
+}
+
 export function parseWebClientPreferences(input: string | null | undefined): WebClientPreferences {
   if (!input) {
     return DEFAULT_WEB_CLIENT_PREFERENCES;
@@ -95,6 +128,8 @@ export function parseWebClientPreferences(input: string | null | undefined): Web
       masterVolume?: unknown;
       preferredListenChannelIds?: unknown;
       selectedInputDeviceId?: unknown;
+      voxModeChannelIds?: unknown;
+      voxSettings?: unknown;
     };
 
     return {
@@ -108,6 +143,8 @@ export function parseWebClientPreferences(input: string | null | undefined): Web
       preferredListenChannelIds: toStringArray(parsed.preferredListenChannelIds),
       selectedInputDeviceId:
         typeof parsed.selectedInputDeviceId === "string" ? parsed.selectedInputDeviceId : "",
+      voxModeChannelIds: toStringArray(parsed.voxModeChannelIds),
+      voxSettings: toVoxSettings(parsed.voxSettings),
     };
   } catch {
     return DEFAULT_WEB_CLIENT_PREFERENCES;

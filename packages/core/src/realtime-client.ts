@@ -184,6 +184,41 @@ export class CueCommXRealtimeClient {
     });
   }
 
+  startAllPage(): void {
+    this.sendClientMessage({
+      type: "allpage:start",
+      payload: {},
+    });
+  }
+
+  stopAllPage(): void {
+    this.sendClientMessage({
+      type: "allpage:stop",
+      payload: {},
+    });
+  }
+
+  sendCallSignal(
+    signalType: "call" | "standby" | "go",
+    target: { channelId?: string; userId?: string },
+  ): void {
+    this.sendClientMessage({
+      type: "signal:send",
+      payload: {
+        signalType,
+        targetChannelId: target.channelId,
+        targetUserId: target.userId,
+      },
+    });
+  }
+
+  acknowledgeSignal(signalId: string): void {
+    this.sendClientMessage({
+      type: "signal:ack",
+      payload: { signalId },
+    });
+  }
+
   async requestMediaCapabilities(): Promise<MediaRtpCapabilities> {
     const response = await this.sendRequest("media:capabilities", (requestId) => ({
       type: "media:capabilities:get",

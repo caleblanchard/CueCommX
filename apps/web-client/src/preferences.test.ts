@@ -38,6 +38,8 @@ describe("parseWebClientPreferences", () => {
       masterVolume: 100,
       preferredListenChannelIds: ["ch-1", "ch-2"],
       selectedInputDeviceId: "mic-2",
+      voxModeChannelIds: [],
+      voxSettings: { holdTimeMs: 500, thresholdDb: -40 },
     });
   });
 
@@ -89,6 +91,8 @@ describe("load/saveWebClientPreferences", () => {
         masterVolume: 75,
         preferredListenChannelIds: ["ch-1"],
         selectedInputDeviceId: "usb-mic",
+        voxModeChannelIds: [],
+        voxSettings: { holdTimeMs: 500, thresholdDb: -40 },
       },
     );
 
@@ -105,6 +109,8 @@ describe("load/saveWebClientPreferences", () => {
       masterVolume: 75,
       preferredListenChannelIds: ["ch-1"],
       selectedInputDeviceId: "usb-mic",
+      voxModeChannelIds: [],
+      voxSettings: { holdTimeMs: 500, thresholdDb: -40 },
     });
   });
 });

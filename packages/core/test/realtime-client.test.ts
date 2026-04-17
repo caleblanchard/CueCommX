@@ -121,6 +121,43 @@ describe("CueCommXRealtimeClient", () => {
     expect(messages).toEqual(["presence:update"]);
   });
 
+  it("sends all-page and call-signal messages", () => {
+    const socket = new FakeWebSocket();
+
+    const client = new CueCommXRealtimeClient({
+      baseUrl: "http://127.0.0.1:3000",
+      createWebSocket: () => socket as never,
+      sessionToken: "sess-456",
+    });
+
+    client.connect();
+    socket.open();
+
+    client.startAllPage();
+    client.stopAllPage();
+    client.sendCallSignal("call", { channelId: "ch-production" });
+    client.sendCallSignal("go", { userId: "usr-42" });
+    client.acknowledgeSignal("sig-1-12345");
+
+    const sent = socket.sent.map((entry) => JSON.parse(entry));
+
+    // First message is session:authenticate
+    expect(sent[1]).toEqual({ type: "allpage:start", payload: {} });
+    expect(sent[2]).toEqual({ type: "allpage:stop", payload: {} });
+    expect(sent[3]).toEqual({
+      type: "signal:send",
+      payload: { signalType: "call", targetChannelId: "ch-production", targetUserId: undefined },
+    });
+    expect(sent[4]).toEqual({
+      type: "signal:send",
+      payload: { signalType: "go", targetChannelId: undefined, targetUserId: "usr-42" },
+    });
+    expect(sent[5]).toEqual({
+      type: "signal:ack",
+      payload: { signalId: "sig-1-12345" },
+    });
+  });
+
   it("reconnects with backoff after an unexpected close", () => {
     const sockets = [new FakeWebSocket(), new FakeWebSocket()];
     const states: string[] = [];
