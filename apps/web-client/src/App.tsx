@@ -7,9 +7,11 @@ import {
   LoginResponseSchema,
   StatusResponseSchema,
   type AuthSuccessResponse,
+  type ChannelInfo,
   type ChannelPermission,
   type ConnectionQuality,
   type DiscoveryResponse,
+  type GroupInfo,
   type OperatorState,
   type ServerSignalingMessage,
   type StatusResponse,
@@ -289,12 +291,53 @@ export default function App() {
   const [voxSettings, setVoxSettings] = useState<VoxSettings>(persistedPreferences.voxSettings);
   const voxDetectorRef = useRef<VoxDetector | null>(null);
   const [signalMenuChannelId, setSignalMenuChannelId] = useState<string | undefined>();
+  const [groups, setGroups] = useState<GroupInfo[]>([]);
+  const [activeGroupId, setActiveGroupId] = useState<string | undefined>(
+    persistedPreferences.activeGroupId,
+  );
 
   const connectionBadge = getConnectionBadge(state.realtimeState);
   const assignedPermissions = useMemo(
     () => state.session?.user.channelPermissions ?? [],
     [state.session?.user.channelPermissions],
   );
+
+  // Determine the user's assigned group IDs from the groups data
+  const userGroupIds = useMemo(() => {
+    if (!state.session) {
+      return [];
+    }
+
+    return (state.session as AuthSuccessResponse & { groups?: GroupInfo[] }).groups
+      ?.filter(() => true)
+      .map((g) => g.id) ?? [];
+  }, [state.session]);
+
+  // Filter visible channels based on active group
+  const visibleChannels: ChannelInfo[] = useMemo(() => {
+    const allChannels = state.session?.channels ?? [];
+
+    if (groups.length === 0 || !activeGroupId) {
+      // No groups or no active group: show all channels (backward compatible)
+      return allChannels;
+    }
+
+    const activeGroup = groups.find((g) => g.id === activeGroupId);
+
+    if (!activeGroup) {
+      return allChannels;
+    }
+
+    const groupChannelSet = new Set(activeGroup.channelIds);
+
+    // Global channels first, then group channels
+    const globals = allChannels.filter((ch) => ch.isGlobal);
+    const groupChannels = allChannels.filter(
+      (ch) => !ch.isGlobal && groupChannelSet.has(ch.id),
+    );
+
+    return [...globals, ...groupChannels];
+  }, [state.session?.channels, groups, activeGroupId]);
   const manualConnect = useMemo(() => getManualConnectState(serverUrlInput), [serverUrlInput]);
   const currentConnectUrl = state.discovery?.primaryUrl ?? window.location.origin;
   const listenChannelIds = state.operatorState?.listenChannelIds ?? [];
@@ -388,6 +431,10 @@ export default function App() {
         }
 
         if (restoredSession) {
+          if (restoredSession.groups) {
+            setGroups(restoredSession.groups);
+          }
+
           setState({
             discovery,
             loading: false,
@@ -498,6 +545,10 @@ export default function App() {
 
         setState((current) => {
           if (message.type === "session:ready") {
+            if (message.payload.groups) {
+              setGroups(message.payload.groups);
+            }
+
             return {
               ...current,
               operatorState: message.payload.operatorState,
@@ -720,6 +771,7 @@ export default function App() {
     }
 
     saveWebClientPreferences(getBrowserStorage(), {
+      activeGroupId,
       audioProcessing,
       channelVolumes,
       latchModeChannelIds,
@@ -730,6 +782,7 @@ export default function App() {
       voxSettings,
     });
   }, [
+    activeGroupId,
     audioProcessing,
     channelVolumes,
     hasPersistedListenPreferences,
@@ -927,6 +980,10 @@ export default function App() {
         sessionToken: payload.sessionToken,
         username: payload.user.username,
       });
+
+      if (payload.groups) {
+        setGroups(payload.groups);
+      }
 
       setState((current) => ({
         ...current,
@@ -1446,8 +1503,39 @@ export default function App() {
                   </div>
                 ) : null}
 
+                {groups.length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium text-muted-foreground">Group:</span>
+                    <button
+                      className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                        !activeGroupId
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-secondary/50 text-foreground hover:bg-secondary"
+                      }`}
+                      onClick={() => setActiveGroupId(undefined)}
+                      type="button"
+                    >
+                      All
+                    </button>
+                    {groups.map((group) => (
+                      <button
+                        className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                          activeGroupId === group.id
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-secondary/50 text-foreground hover:bg-secondary"
+                        }`}
+                        key={group.id}
+                        onClick={() => setActiveGroupId(group.id)}
+                        type="button"
+                      >
+                        {group.name}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
                 <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(24rem,1fr))]">
-                  {(state.session?.channels ?? []).map((channel) => {
+                  {visibleChannels.map((channel) => {
                     const permission = findPermission(assignedPermissions, channel.id);
                     const listening = listenChannelIds.includes(channel.id);
                     const talking =

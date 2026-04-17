@@ -21,6 +21,7 @@ export const DEFAULT_VOX_SETTINGS: VoxSettings = {
 };
 
 export interface WebClientPreferences {
+  activeGroupId?: string;
   audioProcessing: AudioProcessingPreferences;
   channelVolumes: Record<string, number>;
   latchModeChannelIds: string[];
@@ -45,6 +46,7 @@ export interface StoredSession {
 }
 
 export const DEFAULT_WEB_CLIENT_PREFERENCES: WebClientPreferences = {
+  activeGroupId: undefined,
   audioProcessing: { ...DEFAULT_AUDIO_PROCESSING },
   channelVolumes: {},
   latchModeChannelIds: [],
@@ -122,6 +124,7 @@ export function parseWebClientPreferences(input: string | null | undefined): Web
 
   try {
     const parsed = JSON.parse(input) as {
+      activeGroupId?: unknown;
       audioProcessing?: unknown;
       channelVolumes?: unknown;
       latchModeChannelIds?: unknown;
@@ -133,6 +136,10 @@ export function parseWebClientPreferences(input: string | null | undefined): Web
     };
 
     return {
+      activeGroupId:
+        typeof parsed.activeGroupId === "string" && parsed.activeGroupId.trim()
+          ? parsed.activeGroupId
+          : undefined,
       audioProcessing: toAudioProcessing(parsed.audioProcessing),
       channelVolumes: toVolumeMap(parsed.channelVolumes),
       latchModeChannelIds: toStringArray(parsed.latchModeChannelIds),

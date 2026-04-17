@@ -2,6 +2,7 @@ export * from "./admin.js";
 export * from "./auth.js";
 export * from "./channels.js";
 export * from "./discovery.js";
+export * from "./groups.js";
 export * from "./media.js";
 export * from "./messages.js";
 export * from "./models.js";

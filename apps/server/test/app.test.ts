@@ -417,8 +417,8 @@ describe("createApp", () => {
     expect(setupBody.channels).toHaveLength(5);
     expect(setupBody.channels).toEqual(
       expect.arrayContaining([
-        { id: "ch-production", name: "Production", color: "#EF4444" },
-        { id: "ch-audio", name: "Audio", color: "#3B82F6" },
+        { id: "ch-production", name: "Production", color: "#EF4444", isGlobal: false },
+        { id: "ch-audio", name: "Audio", color: "#3B82F6", isGlobal: false },
       ]),
     );
 
@@ -503,8 +503,8 @@ describe("createApp", () => {
         ],
       },
       channels: [
-        { id: "ch-production", name: "Production", color: "#EF4444" },
-        { id: "ch-video", name: "Video/Camera", color: "#10B981" },
+        { id: "ch-production", name: "Production", color: "#EF4444", isGlobal: false },
+        { id: "ch-video", name: "Video/Camera", color: "#10B981", isGlobal: false },
       ],
     });
 

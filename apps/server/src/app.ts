@@ -9,6 +9,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import {
   AuthSuccessResponseSchema,
   CreateChannelRequestSchema,
+  CreateGroupRequestSchema,
   CreateUserRequestSchema,
   DiscoveryResponseSchema,
   LoginRequestSchema,
@@ -20,6 +21,7 @@ import {
   type ManagedUser,
   type StatusResponse,
   UpdateChannelRequestSchema,
+  UpdateGroupRequestSchema,
   UpdateUserRequestSchema,
   UsersListResponseSchema,
 } from "@cuecommx/protocol";
@@ -69,12 +71,15 @@ function createSuccessResponse(
     throw new Error(`Authenticated user ${userId} was not found.`);
   }
 
+  const groups = database.listGroups();
+
   return AuthSuccessResponseSchema.parse({
     success: true,
     protocolVersion: PROTOCOL_VERSION,
     sessionToken: sessionStore.createSession(userId).token,
     user,
     channels: database.listAssignedChannels(userId),
+    groups,
   });
 }
 
@@ -92,6 +97,7 @@ function createManagedUserResponse(
   return ManagedUserSchema.parse({
     ...user,
     online: realtimeService.getConnectedUserIds().includes(user.id),
+    groupIds: database.getUserGroupIds(user.id),
   });
 }
 
@@ -269,6 +275,7 @@ export function createApp(options: CreateAppOptions) {
           sessionToken: token,
           user,
           channels: database.listAssignedChannels(user.id),
+          groups: database.listGroups(),
         }),
       );
     });
@@ -306,6 +313,7 @@ export function createApp(options: CreateAppOptions) {
         database.listUsers().map((user) => ({
           ...user,
           online: realtimeService.getConnectedUserIds().includes(user.id),
+          groupIds: database.getUserGroupIds(user.id),
         })),
       );
     });
@@ -335,6 +343,7 @@ export function createApp(options: CreateAppOptions) {
         pinHash: parsed.data.pin ? hashPin(parsed.data.pin) : undefined,
       });
       database.replaceChannelPermissions(userId, normalizeChannelPermissions(parsed.data.channelPermissions));
+      database.replaceUserGroups(userId, parsed.data.groupIds);
 
       return reply.code(201).send(createManagedUserResponse(database, realtimeService, userId));
     });
@@ -391,6 +400,7 @@ export function createApp(options: CreateAppOptions) {
             : undefined,
       });
       database.replaceChannelPermissions(userId, normalizeChannelPermissions(parsed.data.channelPermissions));
+      database.replaceUserGroups(userId, parsed.data.groupIds);
       await realtimeService.refreshUserSessions(userId);
 
       return reply.code(200).send(createManagedUserResponse(database, realtimeService, userId));
@@ -594,6 +604,124 @@ export function createApp(options: CreateAppOptions) {
 
       database.deleteChannel(channelId);
       await realtimeService.refreshAllSessions();
+
+      return reply.code(204).send();
+    });
+
+    // --- Group endpoints ---
+
+    configuredApp.get("/api/groups", async (request, reply) => {
+      const sessionContext = requireOperatorSession(request, reply, database, sessionStore);
+
+      if (!sessionContext) {
+        return reply;
+      }
+
+      return database.listGroups();
+    });
+
+    configuredApp.post("/api/groups", async (request, reply) => {
+      const sessionContext = requireAdminSession(request, reply, database, sessionStore);
+
+      if (!sessionContext) {
+        return reply;
+      }
+
+      const parsed = CreateGroupRequestSchema.safeParse(request.body);
+
+      if (!parsed.success) {
+        return reply
+          .code(400)
+          .send(
+            createFailureResponse(
+              parsed.error.issues[0]?.message ?? "Invalid create-group request.",
+            ),
+          );
+      }
+
+      if (database.findGroupByName(parsed.data.name)) {
+        return reply
+          .code(409)
+          .send(createFailureResponse("A group with that name already exists."));
+      }
+
+      return reply.code(201).send(database.createGroup(parsed.data));
+    });
+
+    configuredApp.put("/api/groups/:id", async (request, reply) => {
+      const sessionContext = requireAdminSession(request, reply, database, sessionStore);
+
+      if (!sessionContext) {
+        return reply;
+      }
+
+      const groupId =
+        typeof (request.params as { id?: unknown }).id === "string"
+          ? (request.params as { id: string }).id
+          : undefined;
+
+      if (!groupId) {
+        return reply.code(400).send(createFailureResponse("Group id is required."));
+      }
+
+      const existingGroup = database.getGroup(groupId);
+
+      if (!existingGroup) {
+        return reply.code(404).send(createFailureResponse("Group not found."));
+      }
+
+      const parsed = UpdateGroupRequestSchema.safeParse(request.body);
+
+      if (!parsed.success) {
+        return reply
+          .code(400)
+          .send(
+            createFailureResponse(
+              parsed.error.issues[0]?.message ?? "Invalid update-group request.",
+            ),
+          );
+      }
+
+      const duplicateGroup = database.findGroupByName(parsed.data.name);
+
+      if (duplicateGroup && duplicateGroup.id !== groupId) {
+        return reply
+          .code(409)
+          .send(createFailureResponse("A group with that name already exists."));
+      }
+
+      database.updateGroup(groupId, parsed.data);
+
+      const group = database.getGroup(groupId);
+
+      if (!group) {
+        throw new Error(`Updated group ${groupId} was not found.`);
+      }
+
+      return reply.code(200).send(group);
+    });
+
+    configuredApp.delete("/api/groups/:id", async (request, reply) => {
+      const sessionContext = requireAdminSession(request, reply, database, sessionStore);
+
+      if (!sessionContext) {
+        return reply;
+      }
+
+      const groupId =
+        typeof (request.params as { id?: unknown }).id === "string"
+          ? (request.params as { id: string }).id
+          : undefined;
+
+      if (!groupId) {
+        return reply.code(400).send(createFailureResponse("Group id is required."));
+      }
+
+      if (!database.getGroup(groupId)) {
+        return reply.code(404).send(createFailureResponse("Group not found."));
+      }
+
+      database.deleteGroup(groupId);
 
       return reply.code(204).send();
     });

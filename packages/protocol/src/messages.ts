@@ -25,6 +25,7 @@ import {
   PROTOCOL_VERSION,
   UserInfoSchema,
 } from "./models.js";
+import { GroupInfoSchema } from "./groups.js";
 
 export const AuthRequestSchema = z.object({
   type: z.literal("auth"),
@@ -39,6 +40,7 @@ export const AuthResponseSchema = z.object({
     protocolVersion: z.literal(PROTOCOL_VERSION),
     user: UserInfoSchema.optional(),
     channels: z.array(ChannelInfoSchema).optional(),
+    groups: z.array(GroupInfoSchema).optional(),
     error: z.string().min(1).optional(),
   }),
 });
@@ -59,6 +61,7 @@ export const SessionReadyMessageSchema = z.object({
     connectedUsers: z.number().int().nonnegative(),
     user: UserInfoSchema,
     channels: z.array(ChannelInfoSchema),
+    groups: z.array(GroupInfoSchema).optional().default([]),
     operatorState: OperatorStateSchema,
   }),
 });

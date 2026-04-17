@@ -35,3 +35,23 @@ INSERT OR IGNORE INTO channels (id, name, color, sort_order) VALUES
   ('ch-video', 'Video/Camera', '#10B981', 3),
   ('ch-lighting', 'Lighting', '#F59E0B', 4),
   ('ch-stage', 'Stage', '#8B5CF6', 5);
+
+-- Groups feature
+CREATE TABLE IF NOT EXISTS groups (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  sort_order INTEGER DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS group_channels (
+  group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  PRIMARY KEY (group_id, channel_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_groups (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  PRIMARY KEY (user_id, group_id)
+);

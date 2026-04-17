@@ -781,6 +781,8 @@ export class RealtimeService {
     connection.authenticated = authenticated;
     this.operatorStates.set(sessionToken, nextState);
 
+    const groups = this.options.database.listGroups();
+
     this.sendMessage(connection.socket, {
       type: "session:ready",
       payload: {
@@ -788,6 +790,7 @@ export class RealtimeService {
         connectedUsers: this.getConnectedUsersCount(),
         user,
         channels,
+        groups,
         operatorState: nextState,
       },
     });
@@ -887,6 +890,8 @@ export class RealtimeService {
     connection.authenticated.state = nextState;
     this.operatorStates.set(connection.authenticated.sessionToken, nextState);
 
+    const groups = this.options.database.listGroups();
+
     this.sendMessage(connection.socket, {
       type: "session:ready",
       payload: {
@@ -894,6 +899,7 @@ export class RealtimeService {
         connectedUsers: this.getConnectedUsersCount(),
         user,
         channels,
+        groups,
         operatorState: nextState,
       },
     });
@@ -941,6 +947,7 @@ export class RealtimeService {
         ? { userId: this.allPageState.userId, username: this.allPageState.username }
         : undefined,
       channels: this.options.database.listChannels(),
+      groups: this.options.database.listGroups(),
       users: this.options.database.listUsers().map((user) => {
         const activeTalkChannelIds = [...(talkChannelsByUser.get(user.id) ?? new Set<string>())].sort(
           (left, right) => left.localeCompare(right),
@@ -953,6 +960,7 @@ export class RealtimeService {
           activeTalkChannelIds,
           connectionQuality: qualityByUser.get(user.id),
           preflightStatus: preflightByUser.get(user.id),
+          groupIds: this.options.database.getUserGroupIds(user.id),
         };
       }),
     };

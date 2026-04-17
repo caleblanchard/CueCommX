@@ -20,6 +20,8 @@ import {
   ChannelMutationResponseSchema,
   ChannelsListResponseSchema,
   DiscoveryResponseSchema,
+  GroupMutationResponseSchema,
+  GroupsListResponseSchema,
   LoginResponseSchema,
   SetupAdminResponseSchema,
   StatusResponseSchema,
@@ -29,6 +31,7 @@ import {
   type ChannelInfo,
   type ChannelPermission,
   type DiscoveryResponse,
+  type GroupInfo,
   type ManagedUser,
   type StatusResponse,
   type UserRole,
@@ -54,6 +57,10 @@ interface ViewState {
   discovery?: DiscoveryResponse;
   error?: string;
   forceMutePendingId?: string;
+  groupActionError?: string;
+  groupDeletePendingId?: string;
+  groupFormPending: boolean;
+  groups: GroupInfo[];
   loading: boolean;
   loginError?: string;
   loginPending: boolean;
@@ -71,6 +78,8 @@ interface ViewState {
 const initialState: ViewState = {
   channelFormPending: false,
   channels: [],
+  groupFormPending: false,
+  groups: [],
   loading: true,
   loginPending: false,
   setupPending: false,
@@ -228,8 +237,13 @@ export default function App() {
   const [userRole, setUserRole] = useState<UserRole>("operator");
   const [clearUserPin, setClearUserPin] = useState(false);
   const [userPermissions, setUserPermissions] = useState<ChannelPermission[]>([]);
+  const [userGroupIds, setUserGroupIds] = useState<string[]>([]);
   const [channelName, setChannelName] = useState("");
   const [channelColor, setChannelColor] = useState("#22C55E");
+  const [channelIsGlobal, setChannelIsGlobal] = useState(false);
+  const [editingGroupId, setEditingGroupId] = useState<string | undefined>();
+  const [groupName, setGroupName] = useState("");
+  const [groupChannelIds, setGroupChannelIds] = useState<string[]>([]);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -255,6 +269,8 @@ export default function App() {
           channelFormPending: false,
           channels: parsedChannels,
           discovery,
+          groupFormPending: false,
+          groups: [],
           loading: false,
           loginPending: false,
           setupPending: false,
@@ -272,6 +288,8 @@ export default function App() {
           channelFormPending: false,
           channels: [],
           error: error instanceof Error ? error.message : "Unknown admin dashboard error.",
+          groupFormPending: false,
+          groups: [],
           loading: false,
           loginPending: false,
           setupPending: false,
@@ -302,18 +320,30 @@ export default function App() {
       }));
 
       try {
-        const response = await fetch("/api/users", {
-          headers: {
-            Authorization: `Bearer ${state.session?.sessionToken}`,
-          },
-        });
-        const payload = await response.json();
+        const [usersResponse, groupsResponse] = await Promise.all([
+          fetch("/api/users", {
+            headers: {
+              Authorization: `Bearer ${state.session?.sessionToken}`,
+            },
+          }),
+          fetch("/api/groups", {
+            headers: {
+              Authorization: `Bearer ${state.session?.sessionToken}`,
+            },
+          }),
+        ]);
+        const usersPayload = await usersResponse.json();
 
-        if (!response.ok) {
-          throw new Error(AuthFailureResponseSchema.parse(payload).error);
+        if (!usersResponse.ok) {
+          throw new Error(AuthFailureResponseSchema.parse(usersPayload).error);
         }
 
-        const users = sortUsers(UsersListResponseSchema.parse(payload).map(toAdminDashboardUser));
+        const users = sortUsers(UsersListResponseSchema.parse(usersPayload).map(toAdminDashboardUser));
+        let groups: GroupInfo[] = [];
+
+        if (groupsResponse.ok) {
+          groups = GroupsListResponseSchema.parse(await groupsResponse.json());
+        }
 
         if (!active) {
           return;
@@ -321,6 +351,7 @@ export default function App() {
 
         setState((current) => ({
           ...current,
+          groups,
           userActionError: undefined,
           users,
           usersLoading: false,
@@ -382,6 +413,7 @@ export default function App() {
               ...current,
               allPageActive: message.payload.allPageActive,
               channels: message.payload.channels,
+              groups: message.payload.groups ?? current.groups,
               forceMutePendingId:
                 current.forceMutePendingId &&
                 message.payload.users.some(
@@ -438,12 +470,20 @@ export default function App() {
     setUserRole("operator");
     setClearUserPin(false);
     setUserPermissions(buildPermissionDraft(state.channels));
+    setUserGroupIds([]);
   }
 
   function resetChannelForm(): void {
     setEditingChannelId(undefined);
     setChannelName("");
     setChannelColor("#22C55E");
+    setChannelIsGlobal(false);
+  }
+
+  function resetGroupForm(): void {
+    setEditingGroupId(undefined);
+    setGroupName("");
+    setGroupChannelIds([]);
   }
 
   function setPermissionValue(
@@ -483,6 +523,7 @@ export default function App() {
           body: JSON.stringify({
             name: channelName,
             color: channelColor,
+            isGlobal: channelIsGlobal,
           }),
         },
       );
@@ -646,6 +687,7 @@ export default function App() {
           channelPermissions: userPermissions.filter(
             (permission) => permission.canListen || permission.canTalk,
           ),
+          groupIds: userGroupIds,
         }),
       });
       const payload = await response.json();
@@ -879,12 +921,126 @@ export default function App() {
     setUserRole(user.role);
     setClearUserPin(false);
     setUserPermissions(buildPermissionDraft(state.channels, user.channelPermissions));
+    setUserGroupIds(user.groupIds ?? []);
   }
 
   function handleEditChannel(channel: ChannelInfo): void {
     setEditingChannelId(channel.id);
     setChannelName(channel.name);
     setChannelColor(channel.color);
+    setChannelIsGlobal(channel.isGlobal ?? false);
+  }
+
+  function handleEditGroup(group: GroupInfo): void {
+    setEditingGroupId(group.id);
+    setGroupName(group.name);
+    setGroupChannelIds([...group.channelIds]);
+  }
+
+  async function handleGroupSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+
+    if (!state.session) {
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      groupActionError: undefined,
+      groupFormPending: true,
+    }));
+
+    try {
+      const response = await fetch(
+        editingGroupId ? `/api/groups/${editingGroupId}` : "/api/groups",
+        {
+          method: editingGroupId ? "PUT" : "POST",
+          headers: {
+            Authorization: `Bearer ${state.session.sessionToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: groupName,
+            channelIds: groupChannelIds,
+          }),
+        },
+      );
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(AuthFailureResponseSchema.parse(payload).error);
+      }
+
+      const group = GroupMutationResponseSchema.parse(payload);
+
+      setState((current) => {
+        const existingIndex = current.groups.findIndex((g) => g.id === group.id);
+        const nextGroups =
+          existingIndex === -1
+            ? [...current.groups, group]
+            : current.groups.map((g) => (g.id === group.id ? group : g));
+
+        return {
+          ...current,
+          groupActionError: undefined,
+          groupFormPending: false,
+          groups: nextGroups,
+        };
+      });
+      resetGroupForm();
+    } catch (error) {
+      setState((current) => ({
+        ...current,
+        groupActionError: error instanceof Error ? error.message : "Unable to save group.",
+        groupFormPending: false,
+      }));
+    }
+  }
+
+  async function handleDeleteGroup(group: GroupInfo): Promise<void> {
+    if (!state.session) {
+      return;
+    }
+
+    if (!window.confirm(`Delete group "${group.name}"? Users will lose this group assignment.`)) {
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      groupActionError: undefined,
+      groupDeletePendingId: group.id,
+    }));
+
+    try {
+      const response = await fetch(`/api/groups/${group.id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${state.session.sessionToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(AuthFailureResponseSchema.parse(await response.json()).error);
+      }
+
+      setState((current) => ({
+        ...current,
+        groupDeletePendingId: undefined,
+        groups: current.groups.filter((g) => g.id !== group.id),
+      }));
+
+      if (editingGroupId === group.id) {
+        resetGroupForm();
+      }
+    } catch (error) {
+      setState((current) => ({
+        ...current,
+        groupActionError:
+          error instanceof Error ? error.message : "Unable to delete group.",
+        groupDeletePendingId: undefined,
+      }));
+    }
   }
 
   const primaryDiscoveryTarget =
@@ -1460,6 +1616,44 @@ export default function App() {
                         </div>
                       </div>
 
+                      {state.groups.length > 0 ? (
+                        <div className="space-y-3">
+                          <div className="space-y-1">
+                            <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                              Group assignments
+                            </h3>
+                            <p className="text-sm leading-6 text-muted-foreground">
+                              Users with no groups see all their permitted channels. Assigning groups limits visible channels to the active group plus global channels.
+                            </p>
+                          </div>
+
+                          <div className="grid gap-3">
+                            {state.groups.map((group) => (
+                              <label
+                                className="inline-flex items-center gap-3 rounded-xl border border-border/70 bg-background/60 px-4 py-3 text-sm text-foreground"
+                                key={group.id}
+                              >
+                                <input
+                                  checked={userGroupIds.includes(group.id)}
+                                  onChange={(event) =>
+                                    setUserGroupIds((current) =>
+                                      event.target.checked
+                                        ? [...current, group.id]
+                                        : current.filter((id) => id !== group.id),
+                                    )
+                                  }
+                                  type="checkbox"
+                                />
+                                {group.name}
+                                <span className="text-muted-foreground">
+                                  ({group.channelIds.length} channel{group.channelIds.length !== 1 ? "s" : ""})
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
                       <div className="flex flex-wrap gap-3">
                         <Button disabled={state.userFormPending} type="submit">
                           {state.userFormPending
@@ -1749,6 +1943,15 @@ export default function App() {
                         </p>
                       </div>
 
+                      <label className="inline-flex items-center gap-3 rounded-xl border border-border/70 bg-background/60 px-4 py-3 text-sm text-foreground">
+                        <input
+                          checked={channelIsGlobal}
+                          onChange={(event) => setChannelIsGlobal(event.target.checked)}
+                          type="checkbox"
+                        />
+                        Global channel (always visible regardless of active group)
+                      </label>
+
                       <div className="flex flex-wrap gap-3">
                         <Button disabled={state.channelFormPending} type="submit">
                           {state.channelFormPending
@@ -1805,6 +2008,9 @@ export default function App() {
 
                             <div className="flex flex-wrap items-center gap-2">
                               <Badge variant="neutral">{channel.color}</Badge>
+                              {channel.isGlobal ? (
+                                <Badge variant="accent">Global</Badge>
+                              ) : null}
                               {state.session ? (
                                 <>
                                   <Button
@@ -1844,6 +2050,157 @@ export default function App() {
                   </div>
                 </CardContent>
               </Card>
+
+              {state.session ? (
+                <Card className="h-fit">
+                  <CardHeader>
+                    <CardDescription>Group management</CardDescription>
+                    <CardTitle>
+                      {editingGroupId ? "Edit group" : "Create a group"}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-5">
+                    <form className="space-y-4" onSubmit={(event) => void handleGroupSubmit(event)}>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-foreground" htmlFor="group-name">
+                          Group name
+                        </label>
+                        <input
+                          className={inputClassName}
+                          id="group-name"
+                          onChange={(event) => setGroupName(event.target.value)}
+                          placeholder="Sunday Morning"
+                          value={groupName}
+                        />
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="space-y-1">
+                          <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                            Channels in group
+                          </h3>
+                          <p className="text-sm leading-6 text-muted-foreground">
+                            Select which channels appear when this group is active. Global channels always appear regardless.
+                          </p>
+                        </div>
+
+                        <div className="grid gap-3">
+                          {state.channels.map((channel) => (
+                            <label
+                              className="inline-flex items-center gap-3 rounded-xl border border-border/70 bg-background/60 px-4 py-3 text-sm text-foreground"
+                              key={channel.id}
+                            >
+                              <input
+                                checked={groupChannelIds.includes(channel.id)}
+                                onChange={(event) =>
+                                  setGroupChannelIds((current) =>
+                                    event.target.checked
+                                      ? [...current, channel.id]
+                                      : current.filter((id) => id !== channel.id),
+                                  )
+                                }
+                                type="checkbox"
+                              />
+                              <span
+                                aria-hidden="true"
+                                className="h-3 w-3 rounded-full"
+                                style={{ backgroundColor: channel.color }}
+                              />
+                              {channel.name}
+                              {channel.isGlobal ? (
+                                <span className="text-xs text-muted-foreground">(Global)</span>
+                              ) : null}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-3">
+                        <Button disabled={state.groupFormPending} type="submit">
+                          {state.groupFormPending
+                            ? editingGroupId
+                              ? "Saving..."
+                              : "Creating..."
+                            : editingGroupId
+                              ? "Save group"
+                              : "Create group"}
+                        </Button>
+                        {editingGroupId ? (
+                          <Button onClick={resetGroupForm} type="button" variant="outline">
+                            Cancel editing
+                          </Button>
+                        ) : null}
+                      </div>
+                    </form>
+
+                    {state.groupActionError ? (
+                      <div className="rounded-xl border border-danger/50 bg-danger/10 px-4 py-3 text-sm text-danger">
+                        {state.groupActionError}
+                      </div>
+                    ) : null}
+
+                    {state.groups.length > 0 ? (
+                      <>
+                        <Separator.Root
+                          className="h-px w-full bg-border/60"
+                          decorative
+                          orientation="horizontal"
+                        />
+
+                        <div className="space-y-4">
+                          {state.groups.map((group, index) => (
+                            <div className="space-y-4" key={group.id}>
+                              <div className="rounded-2xl border border-border/60 bg-background/40 p-4">
+                                <div className="flex flex-wrap items-start justify-between gap-4">
+                                  <div className="space-y-1">
+                                    <p className="font-medium text-foreground">{group.name}</p>
+                                    <p className="text-sm text-muted-foreground">
+                                      {group.channelIds.length} channel{group.channelIds.length !== 1 ? "s" : ""}{" "}
+                                      • {group.channelIds
+                                        .map((id) => state.channels.find((ch) => ch.id === id)?.name ?? id)
+                                        .join(", ")}
+                                    </p>
+                                  </div>
+
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <Button
+                                      aria-label={`Edit ${group.name}`}
+                                      onClick={() => handleEditGroup(group)}
+                                      type="button"
+                                      variant="outline"
+                                    >
+                                      Edit
+                                    </Button>
+                                    <Button
+                                      aria-label={`Delete ${group.name}`}
+                                      disabled={state.groupDeletePendingId === group.id}
+                                      onClick={() => void handleDeleteGroup(group)}
+                                      type="button"
+                                      variant="danger"
+                                    >
+                                      {state.groupDeletePendingId === group.id
+                                        ? "Deleting..."
+                                        : "Delete"}
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {index < state.groups.length - 1 ? (
+                                <Separator.Root
+                                  className="h-px w-full bg-border/60"
+                                  decorative
+                                  orientation="horizontal"
+                                />
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : null}
+                  </CardContent>
+                </Card>
+              ) : null}
             </div>
           </section>
         ) : null}

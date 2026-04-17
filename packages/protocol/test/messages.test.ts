@@ -375,6 +375,7 @@ describe("user management schemas", () => {
           canListen: true,
         },
       ],
+      groupIds: [],
     });
   });
 
@@ -435,6 +436,7 @@ describe("channel management schemas", () => {
     expect(request).toEqual({
       name: "Front of House",
       color: "#22C55E",
+      isGlobal: false,
     });
   });
 

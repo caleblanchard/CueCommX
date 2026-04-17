@@ -10,11 +10,13 @@ const userMutationBaseSchema = z.object({
 
 export const ManagedUserSchema = UserInfoSchema.extend({
   online: z.boolean(),
+  groupIds: z.array(z.string().min(1)).optional().default([]),
 });
 export type ManagedUser = z.infer<typeof ManagedUserSchema>;
 
 export const CreateUserRequestSchema = userMutationBaseSchema.extend({
   pin: z.string().trim().min(1).optional(),
+  groupIds: z.array(z.string().min(1)).optional().default([]),
 });
 export type CreateUserRequest = z.infer<typeof CreateUserRequestSchema>;
 
@@ -22,6 +24,7 @@ export const UpdateUserRequestSchema = userMutationBaseSchema
   .extend({
     clearPin: z.boolean().optional(),
     pin: z.string().trim().min(1).optional(),
+    groupIds: z.array(z.string().min(1)).optional().default([]),
   })
   .refine((value) => !(value.pin && value.clearPin), {
     message: "Cannot provide both pin and clearPin.",

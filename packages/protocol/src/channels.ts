@@ -5,6 +5,7 @@ import { ChannelInfoSchema } from "./models.js";
 const channelMutationBaseSchema = z.object({
   name: z.string().trim().min(1),
   color: z.string().trim().regex(/^#[0-9A-Fa-f]{6}$/),
+  isGlobal: z.boolean().optional().default(false),
 });
 
 export const CreateChannelRequestSchema = channelMutationBaseSchema;

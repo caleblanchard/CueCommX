@@ -16,6 +16,7 @@ export const ChannelInfoSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   color: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+  isGlobal: z.boolean().optional().default(false),
 });
 export type ChannelInfo = z.infer<typeof ChannelInfoSchema>;
 

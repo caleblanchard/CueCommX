@@ -116,6 +116,7 @@ describe("Admin App", () => {
         username: "Chuck",
         role: "admin",
         online: false,
+        groupIds: [],
         channelPermissions: [
           { channelId: "ch-production", canTalk: true, canListen: true },
           { channelId: "ch-audio", canTalk: true, canListen: true },
@@ -215,6 +216,7 @@ describe("Admin App", () => {
         username: "Chuck",
         role: "admin",
         online: false,
+        groupIds: [],
         channelPermissions: [],
       },
     ];
@@ -283,6 +285,7 @@ describe("Admin App", () => {
             username: payload.username,
             role: payload.role,
             online: false,
+        groupIds: [],
             channelPermissions: payload.channelPermissions,
           };
           users = [users[0], user];
@@ -341,6 +344,7 @@ describe("Admin App", () => {
         username: "Chuck",
         role: "admin",
         online: false,
+        groupIds: [],
         channelPermissions: [],
       },
       {
@@ -348,6 +352,7 @@ describe("Admin App", () => {
         username: "Camera 1",
         role: "operator",
         online: false,
+        groupIds: [],
         channelPermissions: [
           { channelId: "ch-production", canTalk: true, canListen: true },
         ],
@@ -549,6 +554,7 @@ describe("Admin App", () => {
         username: "Chuck",
         role: "admin",
         online: false,
+        groupIds: [],
         channelPermissions: [],
       },
     ];

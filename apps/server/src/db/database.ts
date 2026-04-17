@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import type {
   ChannelInfo,
   ChannelPermission,
+  GroupInfo,
   UserInfo,
   UserRole,
 } from "@cuecommx/protocol";
@@ -61,33 +62,62 @@ export class DatabaseService {
   }
 
   listChannels(): ChannelInfo[] {
-    return this.connection
-      .prepare("SELECT id, name, color FROM channels ORDER BY sort_order ASC, name ASC")
-      .all() as ChannelInfo[];
+    const rows = this.connection
+      .prepare("SELECT id, name, color, COALESCE(is_global, 0) as isGlobal FROM channels ORDER BY sort_order ASC, name ASC")
+      .all() as Array<{ id: string; name: string; color: string; isGlobal: number }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      color: row.color,
+      isGlobal: row.isGlobal === 1,
+    }));
   }
 
   getChannel(channelId: string): ChannelInfo | undefined {
-    return this.connection
+    const row = this.connection
       .prepare(
         `
-          SELECT id, name, color
+          SELECT id, name, color, COALESCE(is_global, 0) as isGlobal
           FROM channels
           WHERE id = ?
         `,
       )
-      .get(channelId) as ChannelInfo | undefined;
+      .get(channelId) as { id: string; name: string; color: string; isGlobal: number } | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    return {
+      id: row.id,
+      name: row.name,
+      color: row.color,
+      isGlobal: row.isGlobal === 1,
+    };
   }
 
   findChannelByName(name: string): ChannelInfo | undefined {
-    return this.connection
+    const row = this.connection
       .prepare(
         `
-          SELECT id, name, color
+          SELECT id, name, color, COALESCE(is_global, 0) as isGlobal
           FROM channels
           WHERE lower(name) = lower(?)
         `,
       )
-      .get(name) as ChannelInfo | undefined;
+      .get(name) as { id: string; name: string; color: string; isGlobal: number } | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    return {
+      id: row.id,
+      name: row.name,
+      color: row.color,
+      isGlobal: row.isGlobal === 1,
+    };
   }
 
   hasAdminUser(): boolean {
@@ -179,7 +209,7 @@ export class DatabaseService {
       .filter((user): user is UserInfo => Boolean(user));
   }
 
-  createChannel(input: { color: string; name: string }): ChannelInfo {
+  createChannel(input: { color: string; name: string; isGlobal?: boolean }): ChannelInfo {
     const baseChannelId = `ch-${toChannelSlug(input.name)}`;
     let channelId = baseChannelId;
     let suffix = 2;
@@ -196,8 +226,8 @@ export class DatabaseService {
     this.connection
       .prepare(
         `
-          INSERT INTO channels (id, name, color, sort_order)
-          VALUES (@id, @name, @color, @sortOrder)
+          INSERT INTO channels (id, name, color, sort_order, is_global)
+          VALUES (@id, @name, @color, @sortOrder, @isGlobal)
         `,
       )
       .run({
@@ -205,6 +235,7 @@ export class DatabaseService {
         name: input.name,
         color: input.color,
         sortOrder: row.maxSortOrder + 1,
+        isGlobal: input.isGlobal ? 1 : 0,
       });
 
     const channel = this.getChannel(channelId);
@@ -242,10 +273,11 @@ export class DatabaseService {
   }
 
   listAssignedChannels(userId: string): ChannelInfo[] {
-    return this.connection
+    const rows = this.connection
       .prepare(
         `
-          SELECT DISTINCT channels.id, channels.name, channels.color
+          SELECT DISTINCT channels.id, channels.name, channels.color,
+                 COALESCE(channels.is_global, 0) as isGlobal
           FROM channels
           INNER JOIN channel_permissions
             ON channel_permissions.channel_id = channels.id
@@ -254,7 +286,14 @@ export class DatabaseService {
           ORDER BY channels.sort_order ASC, channels.name ASC
         `,
       )
-      .all(userId) as ChannelInfo[];
+      .all(userId) as Array<{ id: string; name: string; color: string; isGlobal: number }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      color: row.color,
+      isGlobal: row.isGlobal === 1,
+    }));
   }
 
   replaceChannelPermissions(userId: string, permissions: ChannelPermission[]): void {
@@ -339,6 +378,7 @@ export class DatabaseService {
     input: {
       color: string;
       name: string;
+      isGlobal?: boolean;
     },
   ): void {
     this.connection
@@ -346,7 +386,8 @@ export class DatabaseService {
         `
           UPDATE channels
           SET name = @name,
-              color = @color
+              color = @color,
+              is_global = @isGlobal
           WHERE id = @id
         `,
       )
@@ -354,6 +395,7 @@ export class DatabaseService {
         id: channelId,
         name: input.name,
         color: input.color,
+        isGlobal: input.isGlobal ? 1 : 0,
       });
   }
 
@@ -377,6 +419,132 @@ export class DatabaseService {
         `,
       )
       .run(channelId);
+  }
+
+  // --- Group CRUD ---
+
+  listGroups(): GroupInfo[] {
+    const rows = this.connection
+      .prepare("SELECT id, name FROM groups ORDER BY sort_order ASC, name ASC")
+      .all() as Array<{ id: string; name: string }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      channelIds: this.getGroupChannelIds(row.id),
+    }));
+  }
+
+  getGroup(groupId: string): GroupInfo | undefined {
+    const row = this.connection
+      .prepare("SELECT id, name FROM groups WHERE id = ?")
+      .get(groupId) as { id: string; name: string } | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    return {
+      id: row.id,
+      name: row.name,
+      channelIds: this.getGroupChannelIds(row.id),
+    };
+  }
+
+  findGroupByName(name: string): GroupInfo | undefined {
+    const row = this.connection
+      .prepare("SELECT id, name FROM groups WHERE lower(name) = lower(?)")
+      .get(name) as { id: string; name: string } | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    return {
+      id: row.id,
+      name: row.name,
+      channelIds: this.getGroupChannelIds(row.id),
+    };
+  }
+
+  createGroup(input: { name: string; channelIds: string[] }): GroupInfo {
+    const groupId = `grp-${randomUUID()}`;
+
+    const row = this.connection
+      .prepare("SELECT COALESCE(MAX(sort_order), 0) as maxSortOrder FROM groups")
+      .get() as { maxSortOrder: number };
+
+    this.connection
+      .prepare("INSERT INTO groups (id, name, sort_order) VALUES (@id, @name, @sortOrder)")
+      .run({ id: groupId, name: input.name, sortOrder: row.maxSortOrder + 1 });
+
+    this.replaceGroupChannels(groupId, input.channelIds);
+
+    return this.getGroup(groupId)!;
+  }
+
+  updateGroup(groupId: string, input: { name: string; channelIds: string[] }): void {
+    this.connection
+      .prepare("UPDATE groups SET name = @name WHERE id = @id")
+      .run({ id: groupId, name: input.name });
+
+    this.replaceGroupChannels(groupId, input.channelIds);
+  }
+
+  deleteGroup(groupId: string): void {
+    this.connection.prepare("DELETE FROM groups WHERE id = ?").run(groupId);
+  }
+
+  // --- User-Group assignment ---
+
+  getUserGroupIds(userId: string): string[] {
+    const rows = this.connection
+      .prepare("SELECT group_id FROM user_groups WHERE user_id = ? ORDER BY group_id ASC")
+      .all(userId) as Array<{ group_id: string }>;
+
+    return rows.map((row) => row.group_id);
+  }
+
+  replaceUserGroups(userId: string, groupIds: string[]): void {
+    const deleteStatement = this.connection.prepare("DELETE FROM user_groups WHERE user_id = ?");
+    const insertStatement = this.connection.prepare(
+      "INSERT INTO user_groups (user_id, group_id) VALUES (@userId, @groupId)",
+    );
+
+    const transaction = this.connection.transaction((items: string[]) => {
+      deleteStatement.run(userId);
+
+      for (const groupId of items) {
+        insertStatement.run({ userId, groupId });
+      }
+    });
+
+    transaction(groupIds);
+  }
+
+  private getGroupChannelIds(groupId: string): string[] {
+    const rows = this.connection
+      .prepare("SELECT channel_id FROM group_channels WHERE group_id = ? ORDER BY channel_id ASC")
+      .all(groupId) as Array<{ channel_id: string }>;
+
+    return rows.map((row) => row.channel_id);
+  }
+
+  private replaceGroupChannels(groupId: string, channelIds: string[]): void {
+    const deleteStatement = this.connection.prepare("DELETE FROM group_channels WHERE group_id = ?");
+    const insertStatement = this.connection.prepare(
+      "INSERT INTO group_channels (group_id, channel_id) VALUES (@groupId, @channelId)",
+    );
+
+    const transaction = this.connection.transaction((items: string[]) => {
+      deleteStatement.run(groupId);
+
+      for (const channelId of items) {
+        insertStatement.run({ groupId, channelId });
+      }
+    });
+
+    transaction(channelIds);
   }
 
   private listUserChannelPermissions(userId: string): ChannelPermission[] {
@@ -405,6 +573,13 @@ export class DatabaseService {
   private migrate(): void {
     const schema = readFileSync(new URL("./schema.sql", import.meta.url), "utf8");
     this.connection.exec(schema);
+
+    // Safe migration: add is_global column if it doesn't exist yet
+    const columns = this.connection.pragma("table_info(channels)") as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "is_global")) {
+      this.connection.exec("ALTER TABLE channels ADD COLUMN is_global BOOLEAN NOT NULL DEFAULT 0");
+    }
+
     this.ensureCaseInsensitiveUsernameUniqueness();
     this.connection.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS users_username_nocase_idx ON users(username COLLATE NOCASE)",

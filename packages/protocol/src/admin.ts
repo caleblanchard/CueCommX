@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { ChannelInfoSchema } from "./models.js";
+import { GroupInfoSchema } from "./groups.js";
 import { ManagedUserSchema } from "./users.js";
 
 export const ConnectionQualityGradeSchema = z.enum([
@@ -36,6 +37,7 @@ export const AdminDashboardSnapshotSchema = z.object({
     username: z.string(),
   }).optional(),
   channels: z.array(ChannelInfoSchema),
+  groups: z.array(GroupInfoSchema).optional().default([]),
   users: z.array(AdminDashboardUserSchema),
 });
 export type AdminDashboardSnapshot = z.infer<typeof AdminDashboardSnapshotSchema>;
