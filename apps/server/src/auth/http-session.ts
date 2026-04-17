@@ -69,3 +69,41 @@ export function requireAdminSession(
     user,
   };
 }
+
+export function requireOperatorSession(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  database: DatabaseService,
+  sessionStore: SessionStore,
+): SessionContext | undefined {
+  const sessionToken = getBearerToken(request.headers.authorization);
+
+  if (!sessionToken) {
+    void reply.code(401).send(createFailureResponse("Bearer session token is required."));
+    return undefined;
+  }
+
+  const session = sessionStore.get(sessionToken);
+
+  if (!session) {
+    void reply.code(401).send(createFailureResponse("Session token is invalid or expired."));
+    return undefined;
+  }
+
+  const user = database.getUser(session.userId);
+
+  if (!user) {
+    void reply.code(401).send(createFailureResponse("Session user was not found."));
+    return undefined;
+  }
+
+  if (user.role !== "admin" && user.role !== "operator") {
+    void reply.code(403).send(createFailureResponse("Operator or admin access is required."));
+    return undefined;
+  }
+
+  return {
+    sessionToken,
+    user,
+  };
+}

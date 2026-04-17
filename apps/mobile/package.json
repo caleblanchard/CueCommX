@@ -23,6 +23,7 @@
     "@cuecommx/core": "0.1.0",
     "@cuecommx/design-tokens": "0.1.0",
     "@cuecommx/protocol": "0.1.0",
+    "@react-native-async-storage/async-storage": "^3.0.2",
     "@react-native-community/slider": "5.1.2",
     "expo": "~54.0.33",
     "expo-audio": "~1.1.1",

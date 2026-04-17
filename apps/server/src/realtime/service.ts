@@ -205,6 +205,10 @@ export class RealtimeService {
       };
       this.operatorStates.set(connection.authenticated.sessionToken, connection.authenticated.state);
       this.sendOperatorState(connection.authenticated);
+      this.sendMessage(connection.socket, {
+        type: "force-muted",
+        payload: { reason: "user" },
+      });
       mutedConnections.push(connection.authenticated);
       didMute = true;
     }
@@ -212,6 +216,45 @@ export class RealtimeService {
     if (didMute) {
       for (const mutedConnection of mutedConnections) {
         await this.syncMediaState(mutedConnection);
+      }
+
+      this.broadcastAdminDashboard();
+    }
+  }
+
+  async unlatchChannel(channelId: string): Promise<void> {
+    const unlatchedConnections: AuthenticatedConnection[] = [];
+
+    for (const connection of this.connections.values()) {
+      if (!connection.authenticated) {
+        continue;
+      }
+
+      const { state } = connection.authenticated;
+
+      if (!state.talkChannelIds.includes(channelId)) {
+        continue;
+      }
+
+      const updatedTalkChannelIds = state.talkChannelIds.filter((id) => id !== channelId);
+
+      connection.authenticated.state = {
+        ...state,
+        talkChannelIds: updatedTalkChannelIds,
+        talking: updatedTalkChannelIds.length > 0 && state.talking,
+      };
+      this.operatorStates.set(connection.authenticated.sessionToken, connection.authenticated.state);
+      this.sendOperatorState(connection.authenticated);
+      this.sendMessage(connection.socket, {
+        type: "force-muted",
+        payload: { reason: "channel", channelId },
+      });
+      unlatchedConnections.push(connection.authenticated);
+    }
+
+    if (unlatchedConnections.length > 0) {
+      for (const unlatchedConnection of unlatchedConnections) {
+        await this.syncMediaState(unlatchedConnection);
       }
 
       this.broadcastAdminDashboard();
@@ -556,7 +599,9 @@ export class RealtimeService {
     };
 
     for (const connection of this.connections.values()) {
-      if (connection.authenticated?.user.role !== "admin") {
+      const role = connection.authenticated?.user.role;
+
+      if (role !== "admin" && role !== "operator") {
         continue;
       }
 

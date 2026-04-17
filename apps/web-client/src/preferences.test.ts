@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   clearStoredSession,
+  DEFAULT_AUDIO_PROCESSING,
   DEFAULT_WEB_CLIENT_PREFERENCES,
   hasStoredPreferredListenChannelIds,
   loadStoredSession,
@@ -31,11 +32,31 @@ describe("parseWebClientPreferences", () => {
         }),
       ),
     ).toEqual({
+      audioProcessing: { ...DEFAULT_AUDIO_PROCESSING },
       channelVolumes: { "ch-1": 35, "ch-2": 100 },
       latchModeChannelIds: ["ch-1"],
       masterVolume: 100,
       preferredListenChannelIds: ["ch-1", "ch-2"],
       selectedInputDeviceId: "mic-2",
+    });
+  });
+
+  it("parses audioProcessing with defaults for missing boolean fields", () => {
+    expect(
+      parseWebClientPreferences(JSON.stringify({ audioProcessing: { noiseSuppression: false } })),
+    ).toMatchObject({
+      audioProcessing: { autoGainControl: true, echoCancellation: true, noiseSuppression: false },
+    });
+  });
+
+  it("defaults audioProcessing when field is absent or invalid", () => {
+    expect(parseWebClientPreferences(JSON.stringify({}))).toMatchObject({
+      audioProcessing: { ...DEFAULT_AUDIO_PROCESSING },
+    });
+    expect(
+      parseWebClientPreferences(JSON.stringify({ audioProcessing: "bad" })),
+    ).toMatchObject({
+      audioProcessing: { ...DEFAULT_AUDIO_PROCESSING },
     });
   });
 });
@@ -62,6 +83,7 @@ describe("load/saveWebClientPreferences", () => {
         },
       },
       {
+        audioProcessing: { autoGainControl: false, echoCancellation: true, noiseSuppression: true },
         channelVolumes: { "ch-1": 55 },
         latchModeChannelIds: ["ch-1"],
         masterVolume: 75,
@@ -77,6 +99,7 @@ describe("load/saveWebClientPreferences", () => {
         setItem: () => undefined,
       }),
     ).toEqual({
+      audioProcessing: { autoGainControl: false, echoCancellation: true, noiseSuppression: true },
       channelVolumes: { "ch-1": 55 },
       latchModeChannelIds: ["ch-1"],
       masterVolume: 75,

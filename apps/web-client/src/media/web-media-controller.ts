@@ -21,6 +21,11 @@ import type {
 } from "@cuecommx/protocol";
 import { CueCommXRealtimeClient } from "@cuecommx/core";
 
+import type {
+  AudioProcessingPreferences,
+} from "../preferences.js";
+import { DEFAULT_AUDIO_PROCESSING } from "../preferences.js";
+
 export interface MediaDeviceOption {
   deviceId: string;
   label: string;
@@ -328,6 +333,8 @@ export class WebMediaController {
 
   private audioContext: AudioContext | undefined;
 
+  private audioProcessing: AudioProcessingPreferences = { ...DEFAULT_AUDIO_PROCESSING };
+
   private currentInputDeviceId: string | undefined;
 
   private device: Device | undefined;
@@ -351,6 +358,10 @@ export class WebMediaController {
   private sendTransport: Transport | undefined;
 
   constructor(private readonly options: WebMediaControllerOptions) {}
+
+  setAudioProcessing(processing: AudioProcessingPreferences): void {
+    this.audioProcessing = { ...processing };
+  }
 
   async close(): Promise<void> {
     this.resetConnection();
@@ -544,11 +555,11 @@ export class WebMediaController {
 
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
-        autoGainControl: true,
+        autoGainControl: this.audioProcessing.autoGainControl,
         channelCount: 1,
         deviceId: inputDeviceId ? { exact: inputDeviceId } : undefined,
-        echoCancellation: true,
-        noiseSuppression: true,
+        echoCancellation: this.audioProcessing.echoCancellation,
+        noiseSuppression: this.audioProcessing.noiseSuppression,
       },
     });
     const [track] = stream.getAudioTracks();

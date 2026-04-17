@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PROTOCOL_VERSION } from "@cuecommx/protocol";
@@ -22,6 +22,7 @@ const mediaControllerState = vi.hoisted(() => {
       ) => void;
     };
     resetConnection: ReturnType<typeof vi.fn>;
+    setAudioProcessing: ReturnType<typeof vi.fn>;
     start: ReturnType<typeof vi.fn>;
     switchInputDevice: ReturnType<typeof vi.fn>;
     updateMix: ReturnType<typeof vi.fn>;
@@ -48,6 +49,7 @@ vi.mock("./media/web-media-controller.js", () => ({
       handleServerMessage: vi.fn(async () => undefined),
       options,
       resetConnection: vi.fn(),
+      setAudioProcessing: vi.fn(),
       start: vi.fn(async () => {
         options.onInputDevicesChange?.([
           { deviceId: "mic-1", label: "Built-in Mic" },
@@ -141,10 +143,50 @@ const discovery = {
 
 describe("Web Client App", () => {
   afterEach(() => {
+    cleanup();
     MockWebSocket.instances = [];
     mediaControllerState.created.length = 0;
     window.localStorage.clear();
     vi.unstubAllGlobals();
+  });
+
+  it("shows only join-relevant information before the operator signs in", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | RequestInfo) => {
+        const url = String(input);
+
+        if (url.endsWith("/api/status")) {
+          return new Response(
+            JSON.stringify({
+              name: "Main Church",
+              version: "0.1.0",
+              uptime: 2,
+              connectedUsers: 1,
+              maxUsers: 30,
+              channels: 5,
+              needsAdminSetup: false,
+              protocolVersion: PROTOCOL_VERSION,
+            }),
+            { status: 200 },
+          );
+        }
+
+        if (url.endsWith("/api/discovery")) {
+          return new Response(JSON.stringify(discovery), { status: 200 });
+        }
+
+        return new Response(JSON.stringify({ error: "Unexpected request" }), { status: 500 });
+      }),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Join local intercom" })).toBeInTheDocument();
+    expect(screen.getByText("Only the essentials")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Arm audio context" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Mic input")).not.toBeInTheDocument();
+    expect(screen.queryByText("Live link and monitor state")).not.toBeInTheDocument();
   });
 
   it("restores saved operator preferences and drives live listen/talk controls", async () => {
@@ -251,6 +293,9 @@ describe("Web Client App", () => {
         },
       },
     ]);
+    expect(screen.getByText("Assigned channels")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Arm audio context" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Mic input")).not.toBeInTheDocument();
 
     socket?.emitMessage({
       type: "session:ready",
@@ -290,14 +335,18 @@ describe("Web Client App", () => {
       }),
     );
     expect(screen.getAllByRole("button", { name: "Listening" })[0]).toBeDisabled();
-    expect(screen.getByLabelText("Master monitor volume")).toHaveValue("65");
-    expect(screen.getAllByLabelText("Monitor volume")[0]).toHaveValue("35");
+    expect(screen.queryByLabelText("Master monitor volume")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Arm audio context" }));
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Audio armed" })).toBeEnabled());
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Arm audio context" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("Audio armed for comms")).toBeInTheDocument();
     expect(await screen.findByText("38%")).toBeInTheDocument();
     expect(screen.getByLabelText("Mic input")).toHaveValue("mic-2");
+    expect(screen.getByLabelText("Master monitor volume")).toHaveValue("65");
+    expect(screen.getAllByLabelText("Monitor volume")[0]).toHaveValue("35");
 
     const controller = mediaControllerState.created[0];
     expect(controller?.start).toHaveBeenCalledWith("mic-2");

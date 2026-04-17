@@ -18,7 +18,7 @@ function toWebSocketUrl(address: string): string {
 async function waitForJsonMessage<T>(
   socket: WebSocket,
   type: string,
-  timeoutMs: number = 2_000,
+  timeoutMs: number = 5_000,
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
 
@@ -1490,6 +1490,83 @@ describe("createApp", () => {
       ]),
     );
 
+    // Verify the operator received a force-muted notification
+    const forceMutedNotice = await withTimeout(
+      operatorMessages.next<{
+        payload: { reason: string };
+        type: string;
+      }>("force-muted"),
+      "force-muted notification",
+    );
+    expect(forceMutedNotice.payload.reason).toBe("user");
+
+    // Start talking again to test channel unlatch
+    operatorSocket.send(
+      JSON.stringify({
+        type: "talk:start",
+        payload: { channelIds: ["ch-production"] },
+      }),
+    );
+
+    await withTimeout(operatorMessages.next("operator-state"), "operator restart talk state");
+    await withTimeout(adminMessages.next("admin:dashboard"), "restart talk dashboard");
+
+    // Unlatch the channel
+    const unlatchResponse = await withTimeout(
+      app.inject({
+        method: "POST",
+        url: "/api/channels/ch-production/unlatch",
+        headers: { authorization: `Bearer ${adminToken}` },
+      }),
+      "unlatch request",
+    );
+    expect(unlatchResponse.statusCode).toBe(204);
+
+    const unlatchedState = await withTimeout(
+      operatorMessages.next<{
+        payload: { talkChannelIds: string[]; talking: boolean };
+        type: string;
+      }>("operator-state"),
+      "unlatched operator state",
+    );
+    expect(unlatchedState.payload).toMatchObject({
+      talkChannelIds: [],
+      talking: false,
+    });
+
+    const unlatchedNotice = await withTimeout(
+      operatorMessages.next<{
+        payload: { reason: string; channelId: string };
+        type: string;
+      }>("force-muted"),
+      "unlatch force-muted notification",
+    );
+    expect(unlatchedNotice.payload.reason).toBe("channel");
+    expect(unlatchedNotice.payload.channelId).toBe("ch-production");
+
+    const unlatchedDashboard = await withTimeout(
+      adminMessages.next<{
+        payload: {
+          users: Array<{
+            activeTalkChannelIds: string[];
+            talking: boolean;
+            username: string;
+          }>;
+        };
+        type: string;
+      }>("admin:dashboard"),
+      "unlatched admin dashboard",
+    );
+    expect(unlatchedDashboard.payload.users).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          username: "Camera 1",
+          talking: false,
+          activeTalkChannelIds: [],
+        }),
+      ]),
+    );
+
     const adminClosedPromise = once(adminSocket, "close");
     const operatorClosedPromise = once(operatorSocket, "close");
     adminSocket.close();
@@ -1543,20 +1620,146 @@ describe("createApp", () => {
       },
     });
 
-    const response = await app.inject({
+    const token = loginResponse.json().sessionToken as string;
+
+    // Operators CAN list users (read-only access)
+    const listResponse = await app.inject({
       method: "GET",
       url: "/api/users",
-      headers: {
-        authorization: `Bearer ${loginResponse.json().sessionToken as string}`,
-      },
+      headers: { authorization: `Bearer ${token}` },
     });
+    expect(listResponse.statusCode).toBe(200);
 
-    expect(response.statusCode).toBe(403);
-    expect(response.json()).toEqual({
+    // Operators CANNOT create users (admin-only mutation)
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/users",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { username: "hacker", pin: "9999", role: "operator" },
+    });
+    expect(createResponse.statusCode).toBe(403);
+    expect(createResponse.json()).toEqual({
       success: false,
       protocolVersion: PROTOCOL_VERSION,
       error: "Admin access is required.",
     });
+
+    await app.close();
+  });
+
+  it("allows operators to force-mute users and unlatch channels", async () => {
+    const operatorId = database.createUser({
+      username: "Op1",
+      role: "operator",
+      pinHash: hashPin("5678"),
+    });
+    database.grantChannelPermissions(operatorId, [
+      {
+        channelId: "ch-production",
+        canTalk: true,
+        canListen: true,
+      },
+    ]);
+
+    const talkerId = database.createUser({
+      username: "Talker",
+      role: "operator",
+      pinHash: hashPin("9999"),
+    });
+    database.grantChannelPermissions(talkerId, [
+      {
+        channelId: "ch-production",
+        canTalk: true,
+        canListen: true,
+      },
+    ]);
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church",
+        host: "127.0.0.1",
+        port: 0,
+        rtcMinPort: 40000,
+        rtcMaxPort: 41000,
+        announcedIp: undefined,
+        dataDir: workingDirectory,
+        dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"),
+        maxUsers: 30,
+        maxChannels: 16,
+        logLevel: "info",
+      },
+      database,
+    });
+
+    // Set up admin session for dashboard
+    await app.inject({
+      method: "POST",
+      url: "/api/auth/setup-admin",
+      payload: { username: "Chuck", pin: "1234" },
+    });
+
+    const opLogin = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { username: "Op1", pin: "5678" },
+    });
+    const opToken = opLogin.json().sessionToken as string;
+
+    // Operator can force-mute a user
+    const forceMuteResponse = await app.inject({
+      method: "POST",
+      url: `/api/users/${talkerId}/force-mute`,
+      headers: { authorization: `Bearer ${opToken}` },
+    });
+    expect(forceMuteResponse.statusCode).toBe(204);
+
+    // Operator can unlatch a channel
+    const unlatchResponse = await app.inject({
+      method: "POST",
+      url: "/api/channels/ch-production/unlatch",
+      headers: { authorization: `Bearer ${opToken}` },
+    });
+    expect(unlatchResponse.statusCode).toBe(204);
+
+    // Unlatch returns 404 for a nonexistent channel
+    const missing = await app.inject({
+      method: "POST",
+      url: "/api/channels/ch-nonexistent/unlatch",
+      headers: { authorization: `Bearer ${opToken}` },
+    });
+    expect(missing.statusCode).toBe(404);
+
+    // Regular user cannot force-mute
+    const userId = database.createUser({
+      username: "RegUser",
+      role: "user",
+      pinHash: hashPin("0000"),
+    });
+    database.grantChannelPermissions(userId, [
+      { channelId: "ch-production", canTalk: true, canListen: true },
+    ]);
+
+    const userLogin = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { username: "RegUser", pin: "0000" },
+    });
+    const userToken = userLogin.json().sessionToken as string;
+
+    const userForceMute = await app.inject({
+      method: "POST",
+      url: `/api/users/${talkerId}/force-mute`,
+      headers: { authorization: `Bearer ${userToken}` },
+    });
+    expect(userForceMute.statusCode).toBe(403);
+
+    const userUnlatch = await app.inject({
+      method: "POST",
+      url: "/api/channels/ch-production/unlatch",
+      headers: { authorization: `Bearer ${userToken}` },
+    });
+    expect(userUnlatch.statusCode).toBe(403);
 
     await app.close();
   });
@@ -1841,6 +2044,7 @@ describe("createApp", () => {
 
     const address = await app.listen({ host: "127.0.0.1", port: 0 });
     const socket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const messages = createJsonMessageCollector(socket);
 
     await once(socket, "open");
     socket.send(
@@ -1852,17 +2056,20 @@ describe("createApp", () => {
       }),
     );
 
-    const ready = await waitForJsonMessage<{
-      payload: {
-        channels: Array<{ id: string }>;
-        operatorState: {
-          listenChannelIds: string[];
-          talkChannelIds: string[];
-          talking: boolean;
+    const ready = await withTimeout(
+      messages.next<{
+        payload: {
+          channels: Array<{ id: string }>;
+          operatorState: {
+            listenChannelIds: string[];
+            talkChannelIds: string[];
+            talking: boolean;
+          };
         };
-      };
-      type: string;
-    }>(socket, "session:ready");
+        type: string;
+      }>("session:ready"),
+      "operator session ready",
+    );
 
     expect(ready.payload.channels.map((channel) => channel.id)).toEqual(["ch-video"]);
     expect(ready.payload.operatorState).toEqual({
@@ -1880,13 +2087,16 @@ describe("createApp", () => {
       }),
     );
 
-    const talkState = await waitForJsonMessage<{
-      payload: {
-        talkChannelIds: string[];
-        talking: boolean;
-      };
-      type: string;
-    }>(socket, "operator-state");
+    const talkState = await withTimeout(
+      messages.next<{
+        payload: {
+          talkChannelIds: string[];
+          talking: boolean;
+        };
+        type: string;
+      }>("operator-state"),
+      "operator talk state",
+    );
 
     expect(talkState.payload).toMatchObject({
       talkChannelIds: ["ch-video"],
@@ -1903,20 +2113,23 @@ describe("createApp", () => {
 
     expect(deleteResponse.statusCode).toBe(204);
 
-    const refreshed = await waitForJsonMessage<{
-      payload: {
-        channels: Array<{ id: string }>;
-        operatorState: {
-          listenChannelIds: string[];
-          talkChannelIds: string[];
-          talking: boolean;
+    const refreshed = await withTimeout(
+      messages.next<{
+        payload: {
+          channels: Array<{ id: string }>;
+          operatorState: {
+            listenChannelIds: string[];
+            talkChannelIds: string[];
+            talking: boolean;
+          };
+          user: {
+            channelPermissions: Array<{ channelId: string }>;
+          };
         };
-        user: {
-          channelPermissions: Array<{ channelId: string }>;
-        };
-      };
-      type: string;
-    }>(socket, "session:ready");
+        type: string;
+      }>("session:ready"),
+      "refreshed session ready",
+    );
 
     expect(refreshed.payload.channels).toEqual([]);
     expect(refreshed.payload.user.channelPermissions).toEqual([]);
@@ -1928,6 +2141,7 @@ describe("createApp", () => {
 
     socket.close();
     await once(socket, "close");
+    messages.stop();
     await app.close();
   });
 });

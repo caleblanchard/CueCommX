@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   AppState,
   type AppStateStatus,
+  InteractionManager,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -32,6 +33,7 @@ import {
   previewStatus,
 } from "./src/mobile-foundation";
 import { resolveTalkGesture, type MobileTalkMode } from "./src/mobile-controls";
+import { deferMobileOperation } from "./src/mobile-feedback";
 import {
   createMobileMediaController,
   type MobileRemoteTalkerSnapshot,
@@ -39,8 +41,9 @@ import {
 import {
   loadMobileServerShell,
   loginMobileOperator,
-  normalizeMobileServerUrl,
+  resolveMobileServerBaseUrls,
 } from "./src/mobile-session";
+import { loadPersistedServerUrl, persistServerUrl } from "./src/server-url-storage";
 import {
   canArmMobileAudio,
   describeMobileAudioError,
@@ -383,13 +386,13 @@ export default function App() {
     state.discovery?.connectTargets.find((target) => target.id === state.discovery?.primaryTargetId)?.url ??
     state.discovery?.primaryUrl ??
     state.serverBaseUrl;
-  const normalizedManualUrl = useMemo(() => {
+  const manualTargetCandidates = useMemo(() => {
     if (!serverUrlInput.trim()) {
       return undefined;
     }
 
     try {
-      return normalizeMobileServerUrl(serverUrlInput);
+      return resolveMobileServerBaseUrls(serverUrlInput);
     } catch {
       return undefined;
     }
@@ -399,17 +402,30 @@ export default function App() {
     return error instanceof Error ? error.message : fallback;
   }
 
-  function queueHapticFeedback(operation: Promise<void>): void {
+  function updateServerUrlInput(value: string): void {
+    setServerUrlInput(value);
+    void persistServerUrl(value).catch((error: unknown) => {
+      setRuntimeNotice(getRuntimeMessage(error, "CueCommX could not save the last server URL."));
+    });
+  }
+
+  function queueHapticFeedback(operation: () => Promise<void>): void {
     if (!hapticsAvailable) {
       return;
     }
 
-    void operation.catch((error: unknown) => {
-      setHapticsAvailable(false);
-      setRuntimeNotice(
-        `${getRuntimeMessage(error, "CueCommX haptics are unavailable in this build.")} Haptics will stay off for this session.`,
-      );
-    });
+    deferMobileOperation(
+      operation,
+      (error: unknown) => {
+        setHapticsAvailable(false);
+        setRuntimeNotice(
+          `${getRuntimeMessage(error, "CueCommX haptics are unavailable in this build.")} Haptics will stay off for this session.`,
+        );
+      },
+      (task) => {
+        InteractionManager.runAfterInteractions(task);
+      },
+    );
   }
 
   useEffect(() => {
@@ -420,6 +436,30 @@ export default function App() {
 
   useEffect(() => {
     ensureMobileNotificationHandlerRegistered();
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    void loadPersistedServerUrl()
+      .then((persistedServerUrl) => {
+        if (!active || !persistedServerUrl) {
+          return;
+        }
+
+        setServerUrlInput((current) => current || persistedServerUrl);
+      })
+      .catch((error: unknown) => {
+        if (!active) {
+          return;
+        }
+
+        setRuntimeNotice(getRuntimeMessage(error, "CueCommX could not restore the last server URL."));
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -756,7 +796,7 @@ export default function App() {
     try {
       const shell = await loadMobileServerShell(fetch, serverUrlInput);
 
-      setServerUrlInput(shell.baseUrl);
+      updateServerUrlInput(shell.baseUrl);
       setState((current) => ({
         ...current,
         discovery: shell.discovery,
@@ -794,7 +834,7 @@ export default function App() {
         username,
       });
 
-      setServerUrlInput(shell.baseUrl);
+      updateServerUrlInput(shell.baseUrl);
       setState((current) => ({
         ...current,
         discovery: shell.discovery,
@@ -903,7 +943,7 @@ export default function App() {
         ...current,
         realtimeError: undefined,
       }));
-      queueHapticFeedback(triggerListenToggleHaptic());
+      queueHapticFeedback(() => triggerListenToggleHaptic());
     } catch (error) {
       setState((current) => ({
         ...current,
@@ -947,7 +987,7 @@ export default function App() {
         ...current,
         realtimeError: undefined,
       }));
-      queueHapticFeedback(triggerTalkHaptic(action));
+      queueHapticFeedback(() => triggerTalkHaptic(action));
     } catch (error) {
       setState((current) => ({
         ...current,
@@ -1026,7 +1066,7 @@ export default function App() {
                     autoCorrect={false}
                     className={inputClassName}
                     keyboardType="url"
-                    onChangeText={setServerUrlInput}
+                    onChangeText={updateServerUrlInput}
                     placeholder="10.0.0.25:3000"
                     placeholderTextColor="#738094"
                     value={serverUrlInput}
@@ -1041,7 +1081,12 @@ export default function App() {
                   />
                 </View>
 
-                {normalizedManualUrl ? <DetailRow label="Normalized target" value={normalizedManualUrl} /> : null}
+                {manualTargetCandidates ? (
+                  <DetailRow
+                    label={manualTargetCandidates.length === 1 ? "Normalized target" : "Manual target order"}
+                    value={manualTargetCandidates.join(" -> ")}
+                  />
+                ) : null}
                 {serverHint ? <DetailRow label="Primary connect URL" value={serverHint} /> : null}
                 {state.discovery?.announcedHost ? (
                   <DetailRow label="Announced host" value={state.discovery.announcedHost} />
@@ -1304,7 +1349,7 @@ export default function App() {
                           label="Momentary"
                           onPress={() => {
                             setTalkMode("momentary");
-                            queueHapticFeedback(triggerTalkHaptic("mode"));
+                            queueHapticFeedback(() => triggerTalkHaptic("mode"));
                           }}
                           tone={talkMode === "momentary" ? "primary" : "secondary"}
                         />
@@ -1313,7 +1358,7 @@ export default function App() {
                           label="Latched"
                           onPress={() => {
                             setTalkMode("latched");
-                            queueHapticFeedback(triggerTalkHaptic("mode"));
+                            queueHapticFeedback(() => triggerTalkHaptic("mode"));
                           }}
                           tone={talkMode === "latched" ? "primary" : "secondary"}
                         />

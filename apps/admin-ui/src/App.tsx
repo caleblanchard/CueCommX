@@ -60,6 +60,7 @@ interface ViewState {
   setupError?: string;
   setupPending: boolean;
   status?: StatusResponse;
+  unlatchPendingChannelId?: string;
   userActionError?: string;
   userFormPending: boolean;
   users: AdminDashboardUser[];
@@ -369,26 +370,37 @@ export default function App() {
         }
 
         if (message.type === "admin:dashboard") {
-          setState((current) => ({
-            ...current,
-            channels: message.payload.channels,
-            forceMutePendingId:
-              current.forceMutePendingId &&
-              message.payload.users.some(
-                (user) => user.id === current.forceMutePendingId && !user.talking,
-              )
+          setState((current) => {
+            const unlatchCleared =
+              current.unlatchPendingChannelId &&
+              !message.payload.users.some((user) =>
+                user.activeTalkChannelIds.includes(current.unlatchPendingChannelId!),
+              );
+
+            return {
+              ...current,
+              channels: message.payload.channels,
+              forceMutePendingId:
+                current.forceMutePendingId &&
+                message.payload.users.some(
+                  (user) => user.id === current.forceMutePendingId && !user.talking,
+                )
+                  ? undefined
+                  : current.forceMutePendingId,
+              status: current.status
+                ? {
+                    ...current.status,
+                    channels: message.payload.channels.length,
+                    connectedUsers: message.payload.users.filter((user) => user.online).length,
+                  }
+                : current.status,
+              unlatchPendingChannelId: unlatchCleared
                 ? undefined
-                : current.forceMutePendingId,
-            status: current.status
-              ? {
-                  ...current.status,
-                  channels: message.payload.channels.length,
-                  connectedUsers: message.payload.users.filter((user) => user.online).length,
-                }
-              : current.status,
-            users: sortUsers(message.payload.users),
-            usersLoading: false,
-          }));
+                : current.unlatchPendingChannelId,
+              users: sortUsers(message.payload.users),
+              usersLoading: false,
+            };
+          });
           setUserPermissions((current) =>
             buildPermissionDraft(message.payload.channels, current),
           );
@@ -704,6 +716,43 @@ export default function App() {
         ...current,
         forceMutePendingId: undefined,
         userActionError: error instanceof Error ? error.message : "Unable to force-mute user.",
+      }));
+    }
+  }
+
+  async function handleUnlatchChannel(channelId: string): Promise<void> {
+    if (!state.session) {
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      unlatchPendingChannelId: channelId,
+      channelActionError: undefined,
+    }));
+
+    try {
+      const response = await fetch(`/api/channels/${channelId}/unlatch`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${state.session.sessionToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(AuthFailureResponseSchema.parse(await response.json()).error);
+      }
+
+      setState((current) => ({
+        ...current,
+        unlatchPendingChannelId: undefined,
+      }));
+    } catch (error) {
+      setState((current) => ({
+        ...current,
+        unlatchPendingChannelId: undefined,
+        channelActionError:
+          error instanceof Error ? error.message : "Unable to unlatch channel.",
       }));
     }
   }
@@ -1470,11 +1519,26 @@ export default function App() {
                                 </p>
                               </div>
 
-                              <Badge variant={activeTalkers.length > 0 ? "warning" : "neutral"}>
-                                {activeTalkers.length > 0
-                                  ? `${activeTalkers.length} live`
-                                  : "Idle"}
-                              </Badge>
+                              <div className="flex items-center gap-2">
+                                {activeTalkers.length > 0 ? (
+                                  <Button
+                                    disabled={state.unlatchPendingChannelId === channel.id}
+                                    onClick={() => handleUnlatchChannel(channel.id)}
+                                    size="sm"
+                                    type="button"
+                                    variant="outline"
+                                  >
+                                    {state.unlatchPendingChannelId === channel.id
+                                      ? "Unlatching…"
+                                      : "Unlatch all"}
+                                  </Button>
+                                ) : null}
+                                <Badge variant={activeTalkers.length > 0 ? "warning" : "neutral"}>
+                                  {activeTalkers.length > 0
+                                    ? `${activeTalkers.length} live`
+                                    : "Idle"}
+                                </Badge>
+                              </div>
                             </div>
                           </div>
 

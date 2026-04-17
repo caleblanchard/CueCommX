@@ -94,6 +94,15 @@ export const AdminDashboardMessageSchema = z.object({
 });
 export type AdminDashboardMessage = z.infer<typeof AdminDashboardMessageSchema>;
 
+export const ForceMutedMessageSchema = z.object({
+  type: z.literal("force-muted"),
+  payload: z.object({
+    reason: z.enum(["user", "channel"]),
+    channelId: z.string().min(1).optional(),
+  }),
+});
+export type ForceMutedMessage = z.infer<typeof ForceMutedMessageSchema>;
+
 export const TalkStartMessageSchema = z.object({
   type: z.literal("talk:start"),
   payload: z.object({
@@ -141,6 +150,7 @@ export const ServerSignalingMessageSchema = z.discriminatedUnion("type", [
   OperatorStateMessageSchema,
   SignalErrorMessageSchema,
   AdminDashboardMessageSchema,
+  ForceMutedMessageSchema,
   MediaCapabilitiesMessageSchema,
   MediaTransportCreatedMessageSchema,
   MediaTransportConnectedMessageSchema,
@@ -162,6 +172,7 @@ export const SignalingMessageSchema = z.discriminatedUnion("type", [
   OperatorStateMessageSchema,
   SignalErrorMessageSchema,
   AdminDashboardMessageSchema,
+  ForceMutedMessageSchema,
   TalkStartMessageSchema,
   TalkStopMessageSchema,
   ListenToggleMessageSchema,

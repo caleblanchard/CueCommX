@@ -41,7 +41,9 @@ import {
 } from "./media/web-media-controller.js";
 import { formatLatencyIndicator, readNetworkRtt } from "./network-latency.js";
 import {
+  type AudioProcessingPreferences,
   clearStoredSession,
+  DEFAULT_AUDIO_PROCESSING,
   hasStoredPreferredListenChannelIds,
   loadStoredSession,
   loadWebClientPreferences,
@@ -191,6 +193,7 @@ export default function App() {
   const [audioArmed, setAudioArmed] = useState(false);
   const [audioBusy, setAudioBusy] = useState(false);
   const [audioError, setAudioError] = useState<string>();
+  const [forceMuteNotice, setForceMuteNotice] = useState<string>();
   const [audioReady, setAudioReady] = useState(false);
   const [inputLevel, setInputLevel] = useState(0);
   const [inputDevices, setInputDevices] = useState<MediaDeviceOption[]>([]);
@@ -198,6 +201,9 @@ export default function App() {
     persistedPreferences.selectedInputDeviceId,
   );
   const [masterVolume, setMasterVolume] = useState(persistedPreferences.masterVolume);
+  const [audioProcessing, setAudioProcessing] = useState<AudioProcessingPreferences>(
+    persistedPreferences.audioProcessing ?? { ...DEFAULT_AUDIO_PROCESSING },
+  );
   const [networkRttMs, setNetworkRttMs] = useState<number | undefined>(() =>
     typeof window === "undefined"
       ? undefined
@@ -261,6 +267,21 @@ export default function App() {
     return next;
   }, [remoteTalkers]);
   const latencyLabel = formatLatencyIndicator(networkRttMs);
+  const liveRemoteTalkerUsernames = useMemo(
+    () =>
+      [...new Set(remoteTalkers.map((talker) => talker.producerUsername))].sort((left, right) =>
+        left.localeCompare(right),
+      ),
+    [remoteTalkers],
+  );
+  const isSignedIn = Boolean(state.session);
+  const audioStatusBadge = audioReady
+    ? ({ label: "Audio ready", variant: "success" } as const)
+    : audioBusy
+      ? ({ label: "Arming audio", variant: "warning" } as const)
+      : audioArmed
+        ? ({ label: "Restoring audio", variant: "warning" } as const)
+        : ({ label: "Audio setup needed", variant: "accent" } as const);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -467,6 +488,16 @@ export default function App() {
             };
           }
 
+          if (message.type === "force-muted") {
+            const notice =
+              message.payload.reason === "channel"
+                ? "An admin unlatched a channel you were talking on."
+                : "An admin has force-muted your microphone.";
+
+            setForceMuteNotice(notice);
+            setTimeout(() => setForceMuteNotice(undefined), 5000);
+          }
+
           return current;
         });
       },
@@ -507,6 +538,7 @@ export default function App() {
 
     realtimeClientRef.current = realtimeClient;
     mediaControllerRef.current = mediaController;
+    mediaController.setAudioProcessing(audioProcessing);
     realtimeClient.connect();
 
     return () => {
@@ -583,6 +615,7 @@ export default function App() {
     }
 
     saveWebClientPreferences(getBrowserStorage(), {
+      audioProcessing,
       channelVolumes,
       latchModeChannelIds,
       masterVolume,
@@ -590,6 +623,7 @@ export default function App() {
       selectedInputDeviceId,
     });
   }, [
+    audioProcessing,
     channelVolumes,
     hasPersistedListenPreferences,
     latchModeChannelIds,
@@ -610,6 +644,10 @@ export default function App() {
   useEffect(() => {
     restoredListenPreferencesRef.current = undefined;
   }, [state.session?.sessionToken]);
+
+  useEffect(() => {
+    mediaControllerRef.current?.setAudioProcessing(audioProcessing);
+  }, [audioProcessing]);
 
   useEffect(() => {
     if (
@@ -734,7 +772,7 @@ export default function App() {
 
       saveStoredSession(getBrowserStorage(), {
         sessionToken: payload.sessionToken,
-        username: payload.user.displayName,
+        username: payload.user.username,
       });
 
       setState((current) => ({
@@ -880,54 +918,76 @@ export default function App() {
   return (
     <main className="min-h-screen">
       <div className="mx-auto flex max-w-7xl flex-col gap-6 px-6 py-8 sm:px-8 lg:px-10">
-        <header className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
-          <div className="max-w-3xl space-y-4">
-            <Badge variant="accent">Control surface preview</Badge>
+        <header
+          className={
+            isSignedIn
+              ? "space-y-4"
+              : "flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between"
+          }
+        >
+          <div className={isSignedIn ? "max-w-4xl space-y-3" : "max-w-3xl space-y-4"}>
+            <Badge variant="accent">{isSignedIn ? "Live operator surface" : "Control surface preview"}</Badge>
             <div className="space-y-3">
-              <h1 className="text-balance text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
-                CueCommX Web Client
+              <h1
+                className={`text-balance font-semibold tracking-tight text-foreground ${
+                  isSignedIn ? "text-3xl sm:text-4xl" : "text-4xl sm:text-5xl"
+                }`}
+              >
+                {isSignedIn ? (state.status?.name ?? "CueCommX") : "CueCommX Web Client"}
               </h1>
-              <p className="max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">
-                A dark-first, keyboard-friendly party-line surface with real browser audio, live
-                listen routing, and stable Talk targets for local productions.
+              <p className={`max-w-3xl leading-7 text-muted-foreground ${isSignedIn ? "text-base" : "text-lg"}`}>
+                {isSignedIn
+                  ? `Signed in as ${state.session?.user.username}. Your assigned channels stay front and center, while audio setup and session health only appear when they are actionable.`
+                  : "A dark-first, keyboard-friendly party-line surface with real browser audio, live listen routing, and stable Talk targets for local productions."}
               </p>
             </div>
-          </div>
-
-          <Card className="w-full max-w-xl">
-            <CardHeader>
-              <CardDescription>Live session shell</CardDescription>
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div className="space-y-2">
-                  <CardTitle>{state.status?.name ?? "CueCommX"}</CardTitle>
-                  <p className="text-sm leading-6 text-muted-foreground">
-                    Authentication stays HTTP-first, then the web surface locks onto the local
-                    signaling and media layer without changing the operator workflow.
-                  </p>
-                </div>
-                <Badge variant={state.session ? "success" : connectionBadge.variant}>
-                  {state.session ? `Signed in as ${state.session.user.username}` : connectionBadge.label}
+            {isSignedIn ? (
+              <div className="flex flex-wrap gap-3">
+                <Badge variant="success">{state.session?.user.role ?? "operator"}</Badge>
+                <Badge variant={connectionBadge.variant}>{connectionBadge.label}</Badge>
+                <Badge variant={audioStatusBadge.variant}>{audioStatusBadge.label}</Badge>
+                <Badge variant="accent">
+                  {state.session?.channels.length ?? 0} assigned channel
+                  {(state.session?.channels.length ?? 0) === 1 ? "" : "s"}
                 </Badge>
               </div>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-3 text-sm text-muted-foreground">
-              <div className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/60 px-3 py-2">
-                <Keyboard className="h-4 w-4 text-primary" />
-                Momentary and latch Talk
-              </div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/60 px-3 py-2">
-                <Wifi className="h-4 w-4 text-primary" />
-                Exponential reconnect
-              </div>
-              <a
-                className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/60 px-3 py-2 text-foreground underline-offset-4 hover:text-primary hover:underline"
-                href={currentConnectUrl}
-              >
-                <RadioTower className="h-4 w-4 text-primary" />
-                {currentConnectUrl}
-              </a>
-            </CardContent>
-          </Card>
+            ) : null}
+          </div>
+
+          {!isSignedIn ? (
+            <Card className="w-full max-w-xl">
+              <CardHeader>
+                <CardDescription>Live session shell</CardDescription>
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="space-y-2">
+                    <CardTitle>{state.status?.name ?? "CueCommX"}</CardTitle>
+                    <p className="text-sm leading-6 text-muted-foreground">
+                      Join the local intercom first. Browser audio and live telemetry stay hidden
+                      until they can actually help the operator.
+                    </p>
+                  </div>
+                  <Badge variant={connectionBadge.variant}>{connectionBadge.label}</Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-3 text-sm text-muted-foreground">
+                <div className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/60 px-3 py-2">
+                  <Keyboard className="h-4 w-4 text-primary" />
+                  Momentary and latch Talk
+                </div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/60 px-3 py-2">
+                  <Wifi className="h-4 w-4 text-primary" />
+                  Exponential reconnect
+                </div>
+                <a
+                  className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/60 px-3 py-2 text-foreground underline-offset-4 hover:text-primary hover:underline"
+                  href={currentConnectUrl}
+                >
+                  <RadioTower className="h-4 w-4 text-primary" />
+                  {currentConnectUrl}
+                </a>
+              </CardContent>
+            </Card>
+          ) : null}
         </header>
 
         {state.loading ? (
@@ -946,19 +1006,15 @@ export default function App() {
         ) : null}
 
         {state.status ? (
-          <section className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.95fr)]">
-            <div className="space-y-4">
+          !isSignedIn ? (
+            <section className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
               <Card>
                 <CardHeader>
                   <CardDescription>
                     {state.status.needsAdminSetup ? "System onboarding" : "Operator sign-in"}
                   </CardDescription>
                   <CardTitle>
-                    {state.status.needsAdminSetup
-                      ? "Waiting for the first admin"
-                      : state.session
-                        ? `Signed in as ${state.session.user.username}`
-                        : "Join local intercom"}
+                    {state.status.needsAdminSetup ? "Waiting for the first admin" : "Join local intercom"}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -967,30 +1023,11 @@ export default function App() {
                       The admin dashboard needs to create the first account before operators can
                       join this server.
                     </p>
-                  ) : state.session ? (
-                    <div className="space-y-4">
-                      <div className="flex flex-wrap gap-3">
-                        <Badge variant="success">{state.session.user.role}</Badge>
-                        <Badge variant={connectionBadge.variant}>{connectionBadge.label}</Badge>
-                        <Badge variant={audioReady ? "success" : audioArmed ? "warning" : "accent"}>
-                          {audioReady ? "Browser audio live" : audioArmed ? "Restoring audio" : "Audio idle"}
-                        </Badge>
-                        <Badge variant="accent">
-                          {state.session.channels.length} assigned channel
-                          {state.session.channels.length === 1 ? "" : "s"}
-                        </Badge>
-                      </div>
-                      <p className="text-sm leading-6 text-muted-foreground">
-                        The operator surface now negotiates WebRTC audio transports, keeps the mic
-                        armed after reconnects, and maps live consumer audio into the assigned
-                        listen matrix.
-                      </p>
-                    </div>
                   ) : (
                     <form className="space-y-4" onSubmit={(event) => void handleLogin(event)}>
                       <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
                         <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                          Manual connect fallback
+                          Current server
                         </p>
                         <a
                           className="mt-2 block break-all text-sm font-medium text-primary underline-offset-4 hover:underline"
@@ -999,8 +1036,8 @@ export default function App() {
                           {currentConnectUrl}
                         </a>
                         <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                          Need a different server? Enter the LAN URL shared by the admin dashboard
-                          and open it in this browser.
+                          Only the join details matter here. Browser audio setup appears after you
+                          sign in, when the operator surface can actually use it.
                         </p>
                       </div>
 
@@ -1091,372 +1128,461 @@ export default function App() {
                 </CardContent>
               </Card>
 
-              {state.session ? (
-                <div className="space-y-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                    <div className="space-y-2">
-                      <h2 className="text-2xl font-semibold tracking-tight text-foreground">
-                        Talk surface
-                      </h2>
-                      <p className="text-sm leading-6 text-muted-foreground">
-                        Listen toggles, volume trim, momentary PTT, and latch-mode talk all stay in
-                        the same physical spots while the underlying media routes change.
+              <Card>
+                <CardHeader>
+                  <CardDescription>Before you join</CardDescription>
+                  <CardTitle>Only the essentials</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4 text-sm text-muted-foreground">
+                  <p className="leading-6">
+                    Enter the operator name, confirm the local server, and join. Audio activation,
+                    mic metering, and live transport details stay out of the way until they are
+                    relevant.
+                  </p>
+                  <div className="grid gap-3">
+                    <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
+                      <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                        Live link
+                      </p>
+                      <p className="mt-2 font-medium text-foreground">{connectionBadge.label}</p>
+                      <p className="mt-1">
+                        {state.status.connectedUsers} live operator
+                        {state.status.connectedUsers === 1 ? "" : "s"} on this server.
                       </p>
                     </div>
-                    <Badge variant={audioReady ? "success" : "warning"}>
-                      {audioReady ? "Audio ready for comms" : "Arm audio to enable comms"}
-                    </Badge>
+                    <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
+                      <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                        Local URL
+                      </p>
+                      <a
+                        className="mt-2 block break-all font-medium text-primary underline-offset-4 hover:underline"
+                        href={currentConnectUrl}
+                      >
+                        {currentConnectUrl}
+                      </a>
+                    </div>
                   </div>
+                </CardContent>
+              </Card>
+            </section>
+          ) : (
+            <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]">
+              <div className="space-y-4">
+                {forceMuteNotice ? (
+                  <div className="animate-pulse rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm font-medium text-warning">
+                    {forceMuteNotice}
+                  </div>
+                ) : null}
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div className="space-y-2">
+                    <h2 className="text-2xl font-semibold tracking-tight text-foreground">
+                      Assigned channels
+                    </h2>
+                    <p className="text-sm leading-6 text-muted-foreground">
+                      {audioReady
+                        ? "Talk, listen, and monitor controls stay centered here for live operation."
+                        : "Your channel layout is ready. Arm browser audio when you are ready to go live."}
+                    </p>
+                  </div>
+                  <Badge variant={audioStatusBadge.variant}>{audioStatusBadge.label}</Badge>
+                </div>
 
-                  <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-                    {state.session.channels.map((channel) => {
-                      const permission = findPermission(assignedPermissions, channel.id);
-                      const listening = listenChannelIds.includes(channel.id);
-                      const talking =
-                        state.operatorState?.talking &&
-                        (state.operatorState.talkChannelIds.includes(channel.id) ?? false);
-                      const controlsReady =
-                        state.realtimeState === "connected" && !!state.operatorState && audioReady;
-                      const latchModeEnabled = latchModeChannelIds.includes(channel.id);
-                      const talkersOnChannel = remoteTalkersByChannel.get(channel.id) ?? [];
-                      const monitorVolume = channelVolumes[channel.id] ?? 100;
+                <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(24rem,1fr))]">
+                  {(state.session?.channels ?? []).map((channel) => {
+                    const permission = findPermission(assignedPermissions, channel.id);
+                    const listening = listenChannelIds.includes(channel.id);
+                    const talking =
+                      state.operatorState?.talking &&
+                      (state.operatorState.talkChannelIds.includes(channel.id) ?? false);
+                    const controlsReady =
+                      state.realtimeState === "connected" && !!state.operatorState && audioReady;
+                    const latchModeEnabled = latchModeChannelIds.includes(channel.id);
+                    const talkersOnChannel = remoteTalkersByChannel.get(channel.id) ?? [];
+                    const monitorVolume = channelVolumes[channel.id] ?? 100;
 
-                      return (
-                        <Card className="overflow-hidden" key={channel.id}>
-                          <div className="h-1.5 w-full" style={{ backgroundColor: channel.color }} />
-                          <CardHeader className="space-y-3">
-                            <div className="flex items-start justify-between gap-3">
+                    return (
+                      <Card className="overflow-hidden" key={channel.id}>
+                        <div className="h-1.5 w-full" style={{ backgroundColor: channel.color }} />
+                          <CardHeader className="space-y-4">
+                            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                               <div className="min-w-0 space-y-1">
                                 <CardTitle>{channel.name}</CardTitle>
                                 <p className="text-sm leading-6 text-muted-foreground">
-                                  {controlsReady
-                                    ? "Live signaling and browser audio are active on this channel."
-                                    : "Arm browser audio to enable live talk and listen on this channel."}
-                                </p>
-                              </div>
-                              <Badge
-                                className="min-w-[6.5rem] shrink-0 justify-center"
-                                variant={talking ? "success" : listening ? "accent" : "neutral"}
+                                {!permission?.canTalk && permission?.canListen
+                                  ? "Listen-only route."
+                                  : !permission?.canListen && permission?.canTalk
+                                    ? "Talk-only route."
+                                    : permission?.canListen || permission?.canTalk
+                                      ? controlsReady
+                                        ? "Ready for live comms."
+                                        : "Waiting on browser audio."
+                                      : "No operator controls assigned."}
+                              </p>
+                            </div>
+                              <div className="flex shrink-0 flex-wrap items-center gap-2 md:justify-end">
+                                <Badge
+                                  className="min-w-[6.5rem] shrink-0 justify-center"
+                                  variant={talking ? "success" : listening ? "accent" : "neutral"}
                               >
                                 {talking ? "Talking" : listening ? "Listening" : "Idle"}
                               </Badge>
+                              {latchModeEnabled && permission?.canTalk ? (
+                                <Badge variant="accent">Latch on</Badge>
+                              ) : null}
                             </div>
-                          </CardHeader>
-                          <CardContent className="space-y-4">
-                            <div className="grid gap-3 sm:grid-cols-2">
-                              <Button
-                                aria-pressed={listening}
-                                disabled={!controlsReady || !permission?.canListen}
-                                onClick={() => updateListen(channel.id, !listening)}
-                                type="button"
-                                variant={listening ? "secondary" : "outline"}
-                              >
-                                {!permission?.canListen
-                                  ? "Listen locked"
-                                  : listening
-                                    ? "Listening"
-                                    : "Listen off"}
-                              </Button>
-                              <Button
-                                aria-pressed={talking}
-                                disabled={!controlsReady || !permission?.canTalk}
-                                onClick={() => {
-                                  if (!latchModeEnabled) {
-                                    return;
-                                  }
+                          </div>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <Button
+                              aria-pressed={listening}
+                              disabled={!controlsReady || !permission?.canListen}
+                              onClick={() => updateListen(channel.id, !listening)}
+                              type="button"
+                              variant={listening ? "secondary" : "outline"}
+                            >
+                              {!permission?.canListen
+                                ? "Listen locked"
+                                : listening
+                                  ? "Listening"
+                                  : "Listen off"}
+                            </Button>
+                            <Button
+                              aria-pressed={talking}
+                              disabled={!controlsReady || !permission?.canTalk}
+                              onClick={() => {
+                                if (!latchModeEnabled) {
+                                  return;
+                                }
 
-                                  if (talking) {
-                                    stopTalk(channel.id, true);
-                                    return;
-                                  }
+                                if (talking) {
+                                  stopTalk(channel.id, true);
+                                  return;
+                                }
 
+                                startTalk(channel.id);
+                              }}
+                              onKeyDown={(event) => {
+                                if (latchModeEnabled) {
+                                  return;
+                                }
+
+                                if ((event.key === " " || event.key === "Enter") && !event.repeat) {
+                                  event.preventDefault();
                                   startTalk(channel.id);
-                                }}
-                                onKeyDown={(event) => {
-                                  if (latchModeEnabled) {
-                                    return;
-                                  }
+                                }
+                              }}
+                              onKeyUp={(event) => {
+                                if (latchModeEnabled) {
+                                  return;
+                                }
 
-                                  if ((event.key === " " || event.key === "Enter") && !event.repeat) {
-                                    event.preventDefault();
-                                    startTalk(channel.id);
-                                  }
-                                }}
-                                onKeyUp={(event) => {
-                                  if (latchModeEnabled) {
-                                    return;
-                                  }
+                                if (event.key === " " || event.key === "Enter") {
+                                  event.preventDefault();
+                                  stopTalk(channel.id);
+                                }
+                              }}
+                              onPointerCancel={(event) => {
+                                if (!latchModeEnabled) {
+                                  (event.target as HTMLElement).releasePointerCapture?.(event.pointerId);
+                                  stopTalk(channel.id);
+                                }
+                              }}
+                              onPointerDown={(event) => {
+                                if (!latchModeEnabled) {
+                                  event.preventDefault();
+                                  (event.target as HTMLElement).setPointerCapture?.(event.pointerId);
+                                  startTalk(channel.id);
+                                }
+                              }}
+                              onPointerUp={(event) => {
+                                if (!latchModeEnabled) {
+                                  (event.target as HTMLElement).releasePointerCapture?.(event.pointerId);
+                                  stopTalk(channel.id);
+                                }
+                              }}
+                              size="talk"
+                              type="button"
+                            >
+                              {!permission?.canTalk
+                                ? "Talk locked"
+                                : talking
+                                  ? "Talking"
+                                  : "Talk"}
+                            </Button>
+                          </div>
 
-                                  if (event.key === " " || event.key === "Enter") {
-                                    event.preventDefault();
-                                    stopTalk(channel.id);
-                                  }
-                                }}
-                                onPointerCancel={(event) => {
-                                  if (!latchModeEnabled) {
-                                    (event.target as HTMLElement).releasePointerCapture?.(event.pointerId);
-                                    stopTalk(channel.id);
-                                  }
-                                }}
-                                onPointerDown={(event) => {
-                                  if (!latchModeEnabled) {
-                                    event.preventDefault();
-                                    (event.target as HTMLElement).setPointerCapture?.(event.pointerId);
-                                    startTalk(channel.id);
-                                  }
-                                }}
-                                onPointerUp={(event) => {
-                                  if (!latchModeEnabled) {
-                                    (event.target as HTMLElement).releasePointerCapture?.(event.pointerId);
-                                    stopTalk(channel.id);
-                                  }
-                                }}
-                                size="talk"
-                                type="button"
-                              >
-                                {!permission?.canTalk
-                                  ? "Talk locked"
-                                  : talking
-                                    ? "Talking"
-                                    : "Talk"}
-                              </Button>
+                          <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
+                            <div className="space-y-2">
+                              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                                <label htmlFor={`channel-volume-${channel.id}`}>Monitor volume</label>
+                                <span>{monitorVolume}%</span>
+                              </div>
+                              <input
+                                className={sliderClassName}
+                                id={`channel-volume-${channel.id}`}
+                                max={100}
+                                min={0}
+                                onChange={(event) =>
+                                  setChannelVolumes((current) => ({
+                                    ...current,
+                                    [channel.id]: Number(event.target.value),
+                                  }))
+                                }
+                                step={1}
+                                type="range"
+                                value={monitorVolume}
+                              />
                             </div>
+                            <Button
+                              aria-pressed={latchModeEnabled}
+                              disabled={!permission?.canTalk}
+                              onClick={() => toggleLatchMode(channel.id)}
+                              type="button"
+                              variant={latchModeEnabled ? "secondary" : "outline"}
+                            >
+                              {latchModeEnabled ? "Latch on" : "Latch off"}
+                            </Button>
+                          </div>
 
-                            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-                              <div className="space-y-2">
-                                <div className="flex items-center justify-between text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                                  <label htmlFor={`channel-volume-${channel.id}`}>Monitor volume</label>
-                                  <span>{monitorVolume}%</span>
-                                </div>
+                          <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
+                            <div className="flex flex-col gap-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                              <span className="inline-flex items-center gap-2">
+                                <span
+                                  aria-hidden="true"
+                                  className="h-2.5 w-2.5 rounded-full"
+                                  style={{ backgroundColor: channel.color }}
+                                />
+                                Remote talkers
+                              </span>
+                              <span className="shrink-0">
+                                {talkersOnChannel.length ? `${talkersOnChannel.length} live` : "Silent"}
+                              </span>
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {talkersOnChannel.length ? (
+                                talkersOnChannel.map((username) => (
+                                  <Badge key={`${channel.id}-${username}`} variant="accent">
+                                    {username}
+                                  </Badge>
+                                ))
+                              ) : (
+                                <span className="text-sm text-muted-foreground">
+                                  No remote talkers routed here right now.
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardDescription>{audioReady ? "Audio settings" : "Browser audio"}</CardDescription>
+                    <CardTitle>{audioReady ? "Audio armed for comms" : "Arm browser audio"}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <p className="text-sm leading-6 text-muted-foreground">
+                      {audioReady
+                        ? "Mic selection, input confidence, and monitor mix stay here while the channel grid remains focused on talk and listen."
+                        : "Browser audio is only surfaced after sign-in, because that is the first moment it becomes actionable for the operator."}
+                    </p>
+                    {!audioReady ? (
+                      <Button
+                        className="w-full justify-center"
+                        disabled={state.realtimeState !== "connected" || audioBusy}
+                        onClick={() => void handleArmAudio()}
+                        type="button"
+                        variant="secondary"
+                      >
+                        {audioBusy
+                          ? "Arming audio..."
+                          : audioArmed
+                            ? "Restore browser audio"
+                            : "Arm audio context"}
+                      </Button>
+                    ) : null}
+                    {audioReady ? (
+                      <>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground" htmlFor="mic-input">
+                            Mic input
+                          </label>
+                          <select
+                            className={inputClassName}
+                            disabled={!inputDevices.length || audioBusy}
+                            id="mic-input"
+                            onChange={(event) => void handleInputDeviceChange(event.target.value)}
+                            value={selectedInputDeviceId}
+                          >
+                            {inputDevices.length ? null : (
+                              <option value="">Grant mic access to load inputs</option>
+                            )}
+                            {inputDevices.map((device) => (
+                              <option key={device.deviceId} value={device.deviceId}>
+                                {device.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <SignalMeter label="Mic input level" value={inputLevel} />
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                            <label htmlFor="master-volume">Master monitor volume</label>
+                            <span>{masterVolume}%</span>
+                          </div>
+                          <input
+                            className={sliderClassName}
+                            id="master-volume"
+                            max={100}
+                            min={0}
+                            onChange={(event) => setMasterVolume(Number(event.target.value))}
+                            step={1}
+                            type="range"
+                            value={masterVolume}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                            Audio processing
+                          </p>
+                          <div className="grid gap-2">
+                            {([
+                              ["noiseSuppression", "Noise suppression"],
+                              ["autoGainControl", "Auto gain control"],
+                              ["echoCancellation", "Echo cancellation"],
+                            ] as const).map(([key, label]) => (
+                              <label
+                                className="flex cursor-pointer items-center justify-between rounded-lg border border-border/60 bg-background/35 px-3 py-2"
+                                key={key}
+                              >
+                                <span className="text-sm text-foreground">{label}</span>
                                 <input
-                                  className={sliderClassName}
-                                  id={`channel-volume-${channel.id}`}
-                                  max={100}
-                                  min={0}
-                                  onChange={(event) =>
-                                    setChannelVolumes((current) => ({
-                                      ...current,
-                                      [channel.id]: Number(event.target.value),
+                                  checked={audioProcessing[key]}
+                                  className="h-4 w-4 accent-primary"
+                                  onChange={() =>
+                                    setAudioProcessing((prev) => ({
+                                      ...prev,
+                                      [key]: !prev[key],
                                     }))
                                   }
-                                  step={1}
-                                  type="range"
-                                  value={monitorVolume}
+                                  type="checkbox"
                                 />
-                              </div>
-                              <Button
-                                aria-pressed={latchModeEnabled}
-                                disabled={!permission?.canTalk}
-                                onClick={() => toggleLatchMode(channel.id)}
-                                type="button"
-                                variant={latchModeEnabled ? "secondary" : "outline"}
-                              >
-                                {latchModeEnabled ? "Latch on" : "Latch off"}
-                              </Button>
-                            </div>
-
-                            <Separator.Root
-                              className="h-px w-full bg-border/70"
-                              decorative
-                              orientation="horizontal"
-                            />
-
-                            <div className="space-y-3">
-                              <div className="flex items-center justify-between text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                                <span className="inline-flex items-center gap-2">
-                                  <span
-                                    aria-hidden="true"
-                                    className="h-2.5 w-2.5 rounded-full"
-                                    style={{ backgroundColor: channel.color }}
-                                  />
-                                  Live monitor status
-                                </span>
-                                <span>{talkersOnChannel.length} heard now</span>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                {talkersOnChannel.length ? (
-                                  talkersOnChannel.map((username) => (
-                                    <Badge key={`${channel.id}-${username}`} variant="accent">
-                                      {username}
-                                    </Badge>
-                                  ))
-                                ) : (
-                                  <span className="text-sm text-muted-foreground">
-                                    No remote talkers routed to this channel right now.
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : (
-                <Card>
-                  <CardContent className="text-sm leading-6 text-muted-foreground">
-                    Sign in to load the assigned channels for this operator and keep the final
-                    control layout stable.
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    ) : null}
+                    {audioError ? (
+                      <div className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
+                        {audioError}
+                      </div>
+                    ) : null}
                   </CardContent>
                 </Card>
-              )}
-            </div>
 
-            <div className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardDescription>Audio activation</CardDescription>
-                  <CardTitle>Arm browser audio</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <p className="text-sm leading-6 text-muted-foreground">
-                    Required before the first live monitor on Safari and mobile browsers so the
-                    AudioContext can resume on a user gesture and hidden playback elements can
-                    start cleanly.
-                  </p>
-                  <Button
-                    className="w-full justify-center"
-                    disabled={!state.session || state.realtimeState !== "connected" || audioBusy}
-                    onClick={() => void handleArmAudio()}
-                    type="button"
-                    variant="secondary"
-                  >
-                    {audioBusy
-                      ? "Arming audio..."
-                      : audioReady
-                        ? "Audio armed"
-                        : "Arm audio context"}
-                  </Button>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground" htmlFor="mic-input">
-                      Mic input
-                    </label>
-                    <select
-                      className={inputClassName}
-                      disabled={!inputDevices.length || audioBusy}
-                      id="mic-input"
-                      onChange={(event) => void handleInputDeviceChange(event.target.value)}
-                      value={selectedInputDeviceId}
-                    >
-                      {inputDevices.length ? null : <option value="">Grant mic access to load inputs</option>}
-                      {inputDevices.map((device) => (
-                        <option key={device.deviceId} value={device.deviceId}>
-                          {device.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  {audioError ? (
-                    <div className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
-                      {audioError}
+                <Card>
+                  <CardHeader>
+                    <CardDescription>Session overview</CardDescription>
+                    <CardTitle>Live link and monitor state</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                      <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
+                        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                          Connection
+                        </p>
+                        <p className="mt-2 font-medium text-foreground">{connectionBadge.label}</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {state.status.connectedUsers} live operator
+                          {state.status.connectedUsers === 1 ? "" : "s"} on this server.
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
+                        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                          Approx. browser RTT
+                        </p>
+                        <p className="mt-2 font-medium text-foreground">{latencyLabel}</p>
+                      </div>
+                      <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
+                        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                          Monitor routes
+                        </p>
+                        <p className="mt-2 font-medium text-foreground">
+                          {listenChannelIds.length} active listen route
+                          {listenChannelIds.length === 1 ? "" : "s"}
+                        </p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Local volume trim follows each enabled channel.
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
+                        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                          Heard now
+                        </p>
+                        <p className="mt-2 font-medium text-foreground">
+                          {liveRemoteTalkerUsernames.length} remote talker
+                          {liveRemoteTalkerUsernames.length === 1 ? "" : "s"}
+                        </p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Active voices currently routed into this client.
+                        </p>
+                      </div>
                     </div>
-                  ) : null}
-                </CardContent>
-              </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardDescription>Mic confidence</CardDescription>
-                  <CardTitle>Input meter and mix</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <SignalMeter label="Mic input level" value={inputLevel} />
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                      <label htmlFor="master-volume">Master monitor volume</label>
-                      <span>{masterVolume}%</span>
+                    <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
+                      <div className="flex items-start gap-3">
+                        <RadioTower className="mt-1 h-4 w-4 shrink-0 text-primary" />
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                            Current server
+                          </p>
+                          <a
+                            className="break-all text-sm font-medium text-primary underline-offset-4 hover:underline"
+                            href={currentConnectUrl}
+                          >
+                            {currentConnectUrl}
+                          </a>
+                        </div>
+                      </div>
                     </div>
-                    <input
-                      className={sliderClassName}
-                      id="master-volume"
-                      max={100}
-                      min={0}
-                      onChange={(event) => setMasterVolume(Number(event.target.value))}
-                      step={1}
-                      type="range"
-                      value={masterVolume}
-                    />
-                  </div>
-                  <div className="flex items-start gap-3 text-sm leading-6 text-muted-foreground">
-                    <Mic className="mt-1 h-4 w-4 shrink-0 text-primary" />
-                    Mic metering comes from the live browser capture path, and channel volume trim
-                    immediately updates each remote playback element.
-                  </div>
-                </CardContent>
-              </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardDescription>Reconnect protection</CardDescription>
-                  <CardTitle>Live signaling and talkers</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4 text-sm text-muted-foreground">
-                  <div className="flex items-start gap-3">
-                    <Wifi className="mt-1 h-4 w-4 shrink-0 text-primary" />
-                    <div className="space-y-1">
-                      <p className="font-medium text-foreground">{connectionBadge.label}</p>
-                      <p>
-                        {state.status?.connectedUsers ?? 0} live operator
-                        {state.status?.connectedUsers === 1 ? "" : "s"} on this server.
-                      </p>
+                    <div className="space-y-3">
+                      <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                        <Activity className="h-3.5 w-3.5 text-primary" />
+                        Live remote talkers
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {liveRemoteTalkerUsernames.length ? (
+                          liveRemoteTalkerUsernames.map((username) => (
+                            <Badge key={username} variant="accent">
+                              {username}
+                            </Badge>
+                          ))
+                        ) : (
+                          <span className="text-sm text-muted-foreground">
+                            No active remote talkers right now.
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <Activity className="mt-1 h-4 w-4 shrink-0 text-primary" />
-                    <div className="space-y-1">
-                      <p className="font-medium text-foreground">Approx. browser RTT</p>
-                      <p>{latencyLabel}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <Volume2 className="mt-1 h-4 w-4 shrink-0 text-primary" />
-                    <div className="space-y-1">
-                      <p className="font-medium text-foreground">Monitor routes</p>
-                      <p>
-                        {listenChannelIds.length} listen-enabled channel
-                        {listenChannelIds.length === 1 ? "" : "s"} with local volume control.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <Headphones className="mt-1 h-4 w-4 shrink-0 text-primary" />
-                    <div className="space-y-1">
-                      <p className="font-medium text-foreground">Heard now</p>
-                      <p>
-                        {remoteTalkers.length} remote talker
-                        {remoteTalkers.length === 1 ? "" : "s"} currently routed into this client.
-                      </p>
-                    </div>
-                  </div>
-                  <Separator.Root
-                    className="h-px w-full bg-border/70"
-                    decorative
-                    orientation="horizontal"
-                  />
-                  <div className="space-y-3">
-                    <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                      <Activity className="h-3.5 w-3.5 text-primary" />
-                      Live remote talkers
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {remoteTalkers.length ? (
-                        remoteTalkers.map((talker) => (
-                          <Badge key={talker.consumerId} variant="accent">
-                            {talker.producerUsername}
-                          </Badge>
-                        ))
-                      ) : (
-                        <span className="text-sm text-muted-foreground">
-                          No active remote talkers right now.
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </section>
+
+                    {state.realtimeError ? (
+                      <div className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
+                        {state.realtimeError}
+                      </div>
+                    ) : null}
+                  </CardContent>
+                </Card>
+              </div>
+            </section>
+          )
         ) : null}
       </div>
     </main>

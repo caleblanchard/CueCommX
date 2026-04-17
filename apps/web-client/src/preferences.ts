@@ -1,4 +1,17 @@
+export interface AudioProcessingPreferences {
+  autoGainControl: boolean;
+  echoCancellation: boolean;
+  noiseSuppression: boolean;
+}
+
+export const DEFAULT_AUDIO_PROCESSING: AudioProcessingPreferences = {
+  autoGainControl: true,
+  echoCancellation: true,
+  noiseSuppression: true,
+};
+
 export interface WebClientPreferences {
+  audioProcessing: AudioProcessingPreferences;
   channelVolumes: Record<string, number>;
   latchModeChannelIds: string[];
   masterVolume: number;
@@ -20,6 +33,7 @@ export interface StoredSession {
 }
 
 export const DEFAULT_WEB_CLIENT_PREFERENCES: WebClientPreferences = {
+  audioProcessing: { ...DEFAULT_AUDIO_PROCESSING },
   channelVolumes: {},
   latchModeChannelIds: [],
   masterVolume: 100,
@@ -51,6 +65,23 @@ function toVolumeMap(value: unknown): Record<string, number> {
   );
 }
 
+function toAudioProcessing(value: unknown): AudioProcessingPreferences {
+  if (typeof value !== "object" || value === null) {
+    return { ...DEFAULT_AUDIO_PROCESSING };
+  }
+
+  const obj = value as Record<string, unknown>;
+
+  return {
+    autoGainControl:
+      typeof obj.autoGainControl === "boolean" ? obj.autoGainControl : DEFAULT_AUDIO_PROCESSING.autoGainControl,
+    echoCancellation:
+      typeof obj.echoCancellation === "boolean" ? obj.echoCancellation : DEFAULT_AUDIO_PROCESSING.echoCancellation,
+    noiseSuppression:
+      typeof obj.noiseSuppression === "boolean" ? obj.noiseSuppression : DEFAULT_AUDIO_PROCESSING.noiseSuppression,
+  };
+}
+
 export function parseWebClientPreferences(input: string | null | undefined): WebClientPreferences {
   if (!input) {
     return DEFAULT_WEB_CLIENT_PREFERENCES;
@@ -58,6 +89,7 @@ export function parseWebClientPreferences(input: string | null | undefined): Web
 
   try {
     const parsed = JSON.parse(input) as {
+      audioProcessing?: unknown;
       channelVolumes?: unknown;
       latchModeChannelIds?: unknown;
       masterVolume?: unknown;
@@ -66,6 +98,7 @@ export function parseWebClientPreferences(input: string | null | undefined): Web
     };
 
     return {
+      audioProcessing: toAudioProcessing(parsed.audioProcessing),
       channelVolumes: toVolumeMap(parsed.channelVolumes),
       latchModeChannelIds: toStringArray(parsed.latchModeChannelIds),
       masterVolume:
