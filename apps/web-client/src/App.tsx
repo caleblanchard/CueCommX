@@ -25,6 +25,8 @@ import {
   Keyboard,
   Megaphone,
   Mic,
+  Phone,
+  PhoneOff,
   RadioTower,
   Volume2,
   Wifi,
@@ -295,6 +297,18 @@ export default function App() {
   const [activeGroupId, setActiveGroupId] = useState<string | undefined>(
     persistedPreferences.activeGroupId,
   );
+  const [onlineUsers, setOnlineUsers] = useState<Array<{ id: string; username: string }>>([]);
+  const [directCall, setDirectCall] = useState<{
+    callId: string;
+    peerUserId: string;
+    peerUsername: string;
+    state: "requesting" | "ringing" | "active";
+  } | null>(null);
+  const [incomingCall, setIncomingCall] = useState<{
+    callId: string;
+    fromUserId: string;
+    fromUsername: string;
+  } | null>(null);
 
   const connectionBadge = getConnectionBadge(state.realtimeState);
   const assignedPermissions = useMemo(
@@ -635,6 +649,33 @@ export default function App() {
             setIncomingSignals((prev) => prev.filter((s) => s.signalId !== message.payload.signalId));
           }
 
+          if (message.type === "online:users") {
+            setOnlineUsers(message.payload.users);
+          }
+
+          if (message.type === "direct:incoming") {
+            setIncomingCall({
+              callId: message.payload.callId,
+              fromUserId: message.payload.fromUserId,
+              fromUsername: message.payload.fromUsername,
+            });
+          }
+
+          if (message.type === "direct:active") {
+            setIncomingCall(null);
+            setDirectCall({
+              callId: message.payload.callId,
+              peerUserId: message.payload.peerUserId,
+              peerUsername: message.payload.peerUsername,
+              state: "active",
+            });
+          }
+
+          if (message.type === "direct:ended") {
+            setDirectCall(null);
+            setIncomingCall(null);
+          }
+
           return current;
         });
       },
@@ -699,6 +740,9 @@ export default function App() {
       setInputLevel(0);
       setRemoteTalkers([]);
       setConnectionQuality(undefined);
+      setOnlineUsers([]);
+      setDirectCall(null);
+      setIncomingCall(null);
     };
   }, [state.session?.sessionToken]);
 
@@ -1161,6 +1205,52 @@ export default function App() {
     setSignalMenuChannelId(undefined);
   }
 
+  function requestDirectCall(targetUserId: string): void {
+    if (directCall || incomingCall) {
+      return;
+    }
+
+    realtimeClientRef.current?.requestDirectCall(targetUserId);
+    const targetUser = onlineUsers.find((u) => u.id === targetUserId);
+
+    setDirectCall({
+      callId: "",
+      peerUserId: targetUserId,
+      peerUsername: targetUser?.username ?? "Unknown",
+      state: "requesting",
+    });
+  }
+
+  function acceptIncomingCall(): void {
+    if (!incomingCall) {
+      return;
+    }
+
+    realtimeClientRef.current?.acceptDirectCall(incomingCall.callId);
+  }
+
+  function rejectIncomingCall(): void {
+    if (!incomingCall) {
+      return;
+    }
+
+    realtimeClientRef.current?.rejectDirectCall(incomingCall.callId);
+    setIncomingCall(null);
+  }
+
+  function endCurrentDirectCall(): void {
+    if (!directCall) {
+      return;
+    }
+
+    realtimeClientRef.current?.endDirectCall(directCall.callId);
+    setDirectCall(null);
+  }
+
+  const callableUsers = onlineUsers.filter(
+    (u) => u.id !== state.session?.user.id,
+  );
+
   return (
     <main className="min-h-screen">
       <div className="mx-auto flex max-w-7xl flex-col gap-6 px-6 py-8 sm:px-8 lg:px-10">
@@ -1532,6 +1622,81 @@ export default function App() {
                       </button>
                     ))}
                   </div>
+                ) : null}
+
+                {incomingCall ? (
+                  <div className="flex items-center gap-3 rounded-xl border border-blue-500/50 bg-blue-500/10 px-4 py-3 text-sm font-medium text-blue-400 animate-pulse">
+                    <Phone className="h-4 w-4" />
+                    <span className="flex-1">
+                      📞 Incoming call from {incomingCall.fromUsername}
+                    </span>
+                    <Button
+                      onClick={acceptIncomingCall}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      Accept
+                    </Button>
+                    <Button
+                      onClick={rejectIncomingCall}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                ) : null}
+
+                {directCall ? (
+                  <div className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm font-medium ${
+                    directCall.state === "active"
+                      ? "border-green-500/50 bg-green-500/10 text-green-400"
+                      : "border-blue-500/50 bg-blue-500/10 text-blue-400"
+                  }`}>
+                    <Phone className="h-4 w-4" />
+                    <span className="flex-1">
+                      {directCall.state === "active"
+                        ? `🔗 Direct call with ${directCall.peerUsername}`
+                        : `📞 Calling ${directCall.peerUsername}...`}
+                    </span>
+                    <Button
+                      onClick={endCurrentDirectCall}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <PhoneOff className="h-4 w-4 mr-1" />
+                      End Call
+                    </Button>
+                  </div>
+                ) : null}
+
+                {!directCall && !incomingCall && callableUsers.length > 0 && audioReady ? (
+                  <Card>
+                    <CardHeader>
+                      <CardDescription>Point-to-point</CardDescription>
+                      <CardTitle>Direct Call</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex flex-wrap gap-2">
+                        {callableUsers.map((user) => (
+                          <Button
+                            disabled={state.realtimeState !== "connected"}
+                            key={user.id}
+                            onClick={() => requestDirectCall(user.id)}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            <Phone className="h-3.5 w-3.5 mr-1.5" />
+                            {user.username}
+                          </Button>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
                 ) : null}
 
                 <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(24rem,1fr))]">

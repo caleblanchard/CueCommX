@@ -28,6 +28,7 @@ export const AdminDashboardUserSchema = ManagedUserSchema.extend({
   talking: z.boolean(),
   connectionQuality: ConnectionQualitySchema.optional(),
   preflightStatus: PreflightStatusSchema.optional(),
+  directCallPeer: z.string().min(1).optional(),
 });
 export type AdminDashboardUser = z.infer<typeof AdminDashboardUserSchema>;
 

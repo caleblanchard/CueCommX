@@ -192,6 +192,83 @@ export const SignalClearedMessageSchema = z.object({
 });
 export type SignalClearedMessage = z.infer<typeof SignalClearedMessageSchema>;
 
+// --- Direct Call messages ---
+
+export const DirectCallRequestMessageSchema = z.object({
+  type: z.literal("direct:request"),
+  payload: z.object({
+    targetUserId: z.string().min(1),
+  }),
+});
+export type DirectCallRequestMessage = z.infer<typeof DirectCallRequestMessageSchema>;
+
+export const DirectCallAcceptMessageSchema = z.object({
+  type: z.literal("direct:accept"),
+  payload: z.object({
+    callId: z.string().min(1),
+  }),
+});
+export type DirectCallAcceptMessage = z.infer<typeof DirectCallAcceptMessageSchema>;
+
+export const DirectCallRejectMessageSchema = z.object({
+  type: z.literal("direct:reject"),
+  payload: z.object({
+    callId: z.string().min(1),
+  }),
+});
+export type DirectCallRejectMessage = z.infer<typeof DirectCallRejectMessageSchema>;
+
+export const DirectCallEndMessageSchema = z.object({
+  type: z.literal("direct:end"),
+  payload: z.object({
+    callId: z.string().min(1),
+  }),
+});
+export type DirectCallEndMessage = z.infer<typeof DirectCallEndMessageSchema>;
+
+export const DirectCallIncomingMessageSchema = z.object({
+  type: z.literal("direct:incoming"),
+  payload: z.object({
+    callId: z.string().min(1),
+    fromUserId: z.string().min(1),
+    fromUsername: z.string().min(1),
+  }),
+});
+export type DirectCallIncomingMessage = z.infer<typeof DirectCallIncomingMessageSchema>;
+
+export const DirectCallActiveMessageSchema = z.object({
+  type: z.literal("direct:active"),
+  payload: z.object({
+    callId: z.string().min(1),
+    peerUserId: z.string().min(1),
+    peerUsername: z.string().min(1),
+  }),
+});
+export type DirectCallActiveMessage = z.infer<typeof DirectCallActiveMessageSchema>;
+
+export const DirectCallEndedReasonSchema = z.enum(["rejected", "ended", "unavailable", "busy"]);
+export type DirectCallEndedReason = z.infer<typeof DirectCallEndedReasonSchema>;
+
+export const DirectCallEndedMessageSchema = z.object({
+  type: z.literal("direct:ended"),
+  payload: z.object({
+    callId: z.string().min(1),
+    reason: DirectCallEndedReasonSchema,
+  }),
+});
+export type DirectCallEndedMessage = z.infer<typeof DirectCallEndedMessageSchema>;
+
+export const OnlineUsersMessageSchema = z.object({
+  type: z.literal("online:users"),
+  payload: z.object({
+    users: z.array(z.object({
+      id: z.string().min(1),
+      username: z.string().min(1),
+    })),
+  }),
+});
+export type OnlineUsersMessage = z.infer<typeof OnlineUsersMessageSchema>;
+
 // --- Talk messages ---
 
 export const TalkStartMessageSchema = z.object({
@@ -231,6 +308,10 @@ export const ClientSignalingMessageSchema = z.discriminatedUnion("type", [
   AllPageStopMessageSchema,
   SignalSendMessageSchema,
   SignalAcknowledgeMessageSchema,
+  DirectCallRequestMessageSchema,
+  DirectCallAcceptMessageSchema,
+  DirectCallRejectMessageSchema,
+  DirectCallEndMessageSchema,
   MediaCapabilitiesRequestMessageSchema,
   MediaTransportCreateRequestMessageSchema,
   MediaTransportConnectRequestMessageSchema,
@@ -252,6 +333,10 @@ export const ServerSignalingMessageSchema = z.discriminatedUnion("type", [
   AllPageInactiveMessageSchema,
   SignalReceivedMessageSchema,
   SignalClearedMessageSchema,
+  DirectCallIncomingMessageSchema,
+  DirectCallActiveMessageSchema,
+  DirectCallEndedMessageSchema,
+  OnlineUsersMessageSchema,
   MediaCapabilitiesMessageSchema,
   MediaTransportCreatedMessageSchema,
   MediaTransportConnectedMessageSchema,
@@ -287,6 +372,14 @@ export const SignalingMessageSchema = z.discriminatedUnion("type", [
   SignalAcknowledgeMessageSchema,
   SignalReceivedMessageSchema,
   SignalClearedMessageSchema,
+  DirectCallRequestMessageSchema,
+  DirectCallAcceptMessageSchema,
+  DirectCallRejectMessageSchema,
+  DirectCallEndMessageSchema,
+  DirectCallIncomingMessageSchema,
+  DirectCallActiveMessageSchema,
+  DirectCallEndedMessageSchema,
+  OnlineUsersMessageSchema,
   MediaCapabilitiesRequestMessageSchema,
   MediaCapabilitiesMessageSchema,
   MediaTransportCreateRequestMessageSchema,

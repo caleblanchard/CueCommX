@@ -58,6 +58,18 @@ interface ActiveSignal {
   timer: ReturnType<typeof setTimeout>;
 }
 
+interface DirectCall {
+  callId: string;
+  initiatorSessionToken: string;
+  initiatorUserId: string;
+  initiatorUsername: string;
+  targetSessionToken?: string;
+  targetUserId: string;
+  targetUsername: string;
+  state: "ringing" | "active";
+  ringTimeout: ReturnType<typeof setTimeout>;
+}
+
 function parseRequestHost(headersHost?: string): string | undefined {
   if (!headersHost) {
     return undefined;
@@ -124,6 +136,10 @@ export class RealtimeService {
 
   private readonly activeSignals = new Map<string, ActiveSignal>();
 
+  private readonly directCalls = new Map<string, DirectCall>();
+
+  private directCallSequence = 0;
+
   private signalSequence = 0;
 
   private readonly path: string;
@@ -161,6 +177,12 @@ export class RealtimeService {
     }
 
     this.activeSignals.clear();
+
+    for (const call of this.directCalls.values()) {
+      clearTimeout(call.ringTimeout);
+    }
+
+    this.directCalls.clear();
 
     for (const connection of closingConnections) {
       connection.socket.close(1001, "server shutdown");
@@ -586,6 +608,263 @@ export class RealtimeService {
     }
   }
 
+  // --- Direct Calls ---
+
+  private findConnectionByUserId(userId: string): { record: ConnectionRecord; auth: AuthenticatedConnection } | undefined {
+    for (const record of this.connections.values()) {
+      if (record.authenticated?.user.id === userId) {
+        return { record, auth: record.authenticated };
+      }
+    }
+
+    return undefined;
+  }
+
+  private findDirectCallForUser(sessionToken: string): DirectCall | undefined {
+    for (const call of this.directCalls.values()) {
+      if (call.initiatorSessionToken === sessionToken || call.targetSessionToken === sessionToken) {
+        return call;
+      }
+    }
+
+    return undefined;
+  }
+
+  private handleDirectCallRequest(connection: AuthenticatedConnection, targetUserId: string): void {
+    if (targetUserId === connection.user.id) {
+      this.sendSignalError(connection, "invalid-message", "Cannot call yourself.");
+      return;
+    }
+
+    // Check if initiator is already in a direct call
+    if (this.findDirectCallForUser(connection.sessionToken)) {
+      this.sendSignalError(connection, "conflict", "You are already in a direct call.");
+      return;
+    }
+
+    // Find target user
+    const target = this.findConnectionByUserId(targetUserId);
+
+    if (!target) {
+      this.sendMessage(this.findSocket(connection), {
+        type: "direct:ended",
+        payload: { callId: "", reason: "unavailable" },
+      });
+      return;
+    }
+
+    // Check if target is already in a direct call
+    if (this.findDirectCallForUser(target.auth.sessionToken)) {
+      this.sendMessage(this.findSocket(connection), {
+        type: "direct:ended",
+        payload: { callId: "", reason: "busy" },
+      });
+      return;
+    }
+
+    this.directCallSequence += 1;
+    const callId = `dc-${this.directCallSequence}-${Date.now()}`;
+
+    const ringTimeout = setTimeout(() => {
+      this.endDirectCall(callId, "unavailable");
+    }, 30_000);
+
+    const call: DirectCall = {
+      callId,
+      initiatorSessionToken: connection.sessionToken,
+      initiatorUserId: connection.user.id,
+      initiatorUsername: connection.user.username,
+      targetSessionToken: target.auth.sessionToken,
+      targetUserId,
+      targetUsername: target.auth.user.username,
+      state: "ringing",
+      ringTimeout,
+    };
+
+    this.directCalls.set(callId, call);
+
+    // Notify target of incoming call
+    this.sendMessage(target.record.socket, {
+      type: "direct:incoming",
+      payload: {
+        callId,
+        fromUserId: connection.user.id,
+        fromUsername: connection.user.username,
+      },
+    });
+  }
+
+  private async handleDirectCallAccept(connection: AuthenticatedConnection, callId: string): Promise<void> {
+    const call = this.directCalls.get(callId);
+
+    if (!call || call.state !== "ringing") {
+      this.sendSignalError(connection, "invalid-state", "No ringing call found with that ID.");
+      return;
+    }
+
+    if (call.targetSessionToken !== connection.sessionToken) {
+      this.sendSignalError(connection, "forbidden", "Only the call target can accept.");
+      return;
+    }
+
+    clearTimeout(call.ringTimeout);
+    call.state = "active";
+
+    const initiator = this.findAuthenticatedBySessionToken(call.initiatorSessionToken);
+
+    // Notify both parties
+    if (initiator) {
+      this.sendMessage(this.findSocket(initiator), {
+        type: "direct:active",
+        payload: {
+          callId,
+          peerUserId: connection.user.id,
+          peerUsername: connection.user.username,
+        },
+      });
+    }
+
+    this.sendMessage(this.findSocket(connection), {
+      type: "direct:active",
+      payload: {
+        callId,
+        peerUserId: call.initiatorUserId,
+        peerUsername: call.initiatorUsername,
+      },
+    });
+
+    // Set up audio routing via media reconciliation
+    if (initiator) {
+      await this.syncMediaState(initiator);
+    }
+
+    await this.syncMediaState(connection);
+    this.broadcastAdminDashboard();
+  }
+
+  private handleDirectCallReject(connection: AuthenticatedConnection, callId: string): void {
+    const call = this.directCalls.get(callId);
+
+    if (!call || call.state !== "ringing") {
+      this.sendSignalError(connection, "invalid-state", "No ringing call found with that ID.");
+      return;
+    }
+
+    if (call.targetSessionToken !== connection.sessionToken) {
+      this.sendSignalError(connection, "forbidden", "Only the call target can reject.");
+      return;
+    }
+
+    this.endDirectCall(callId, "rejected");
+  }
+
+  private handleDirectCallEndRequest(connection: AuthenticatedConnection, callId: string): void {
+    const call = this.directCalls.get(callId);
+
+    if (!call) {
+      this.sendSignalError(connection, "invalid-state", "No call found with that ID.");
+      return;
+    }
+
+    if (call.initiatorSessionToken !== connection.sessionToken && call.targetSessionToken !== connection.sessionToken) {
+      this.sendSignalError(connection, "forbidden", "You are not part of this call.");
+      return;
+    }
+
+    void this.endDirectCall(callId, "ended");
+  }
+
+  private async endDirectCall(callId: string, reason: "rejected" | "ended" | "unavailable" | "busy"): Promise<void> {
+    const call = this.directCalls.get(callId);
+
+    if (!call) {
+      return;
+    }
+
+    clearTimeout(call.ringTimeout);
+    const wasActive = call.state === "active";
+    this.directCalls.delete(callId);
+
+    const endedMessage: ServerSignalingMessage = {
+      type: "direct:ended",
+      payload: { callId, reason },
+    };
+
+    const initiator = this.findAuthenticatedBySessionToken(call.initiatorSessionToken);
+    const target = call.targetSessionToken
+      ? this.findAuthenticatedBySessionToken(call.targetSessionToken)
+      : undefined;
+
+    if (initiator) {
+      this.sendMessage(this.findSocket(initiator), endedMessage);
+    }
+
+    if (target) {
+      this.sendMessage(this.findSocket(target), endedMessage);
+    }
+
+    // Reconcile media to remove direct call consumers
+    if (wasActive) {
+      if (initiator) {
+        await this.syncMediaState(initiator);
+      }
+
+      if (target) {
+        await this.syncMediaState(target);
+      }
+
+      this.broadcastAdminDashboard();
+    }
+  }
+
+  private broadcastOnlineUsers(): void {
+    const onlineUsers: Array<{ id: string; username: string }> = [];
+
+    for (const record of this.connections.values()) {
+      if (!record.authenticated) {
+        continue;
+      }
+
+      if (!onlineUsers.some((u) => u.id === record.authenticated!.user.id)) {
+        onlineUsers.push({
+          id: record.authenticated.user.id,
+          username: record.authenticated.user.username,
+        });
+      }
+    }
+
+    onlineUsers.sort((a, b) => a.username.localeCompare(b.username));
+
+    const message: ServerSignalingMessage = {
+      type: "online:users",
+      payload: { users: onlineUsers },
+    };
+
+    for (const record of this.connections.values()) {
+      if (record.authenticated) {
+        this.sendMessage(record.socket, message);
+      }
+    }
+  }
+
+  private getDirectCallPeerUsername(userId: string): string | undefined {
+    for (const call of this.directCalls.values()) {
+      if (call.state !== "active") {
+        continue;
+      }
+
+      if (call.initiatorUserId === userId) {
+        return call.targetUsername;
+      }
+
+      if (call.targetUserId === userId) {
+        return call.initiatorUsername;
+      }
+    }
+
+    return undefined;
+  }
+
   private findAuthenticatedBySessionToken(sessionToken: string): AuthenticatedConnection | undefined {
     for (const record of this.connections.values()) {
       if (record.authenticated?.sessionToken === sessionToken) {
@@ -801,6 +1080,7 @@ export class RealtimeService {
       )) ?? [],
     );
     this.broadcastPresence();
+    this.broadcastOnlineUsers();
 
     return authenticated;
   }
@@ -853,6 +1133,13 @@ export class RealtimeService {
         }
       }
 
+      // End any active direct calls for this user
+      const activeCall = this.findDirectCallForUser(connection.authenticated.sessionToken);
+
+      if (activeCall) {
+        await this.endDirectCall(activeCall.callId, "ended");
+      }
+
       connection.authenticated.state = {
         ...connection.authenticated.state,
         talkChannelIds: [],
@@ -868,6 +1155,7 @@ export class RealtimeService {
         : [],
     );
     this.broadcastPresence();
+    this.broadcastOnlineUsers();
   }
 
   private async refreshAuthenticatedConnection(connection: ConnectionRecord): Promise<void> {
@@ -960,6 +1248,7 @@ export class RealtimeService {
           activeTalkChannelIds,
           connectionQuality: qualityByUser.get(user.id),
           preflightStatus: preflightByUser.get(user.id),
+          directCallPeer: this.getDirectCallPeerUsername(user.id),
           groupIds: this.options.database.getUserGroupIds(user.id),
         };
       }),
@@ -1081,6 +1370,26 @@ export class RealtimeService {
         return;
       }
 
+      if (parsed.type === "direct:request") {
+        this.handleDirectCallRequest(connection.authenticated, parsed.payload.targetUserId);
+        return;
+      }
+
+      if (parsed.type === "direct:accept") {
+        await this.handleDirectCallAccept(connection.authenticated, parsed.payload.callId);
+        return;
+      }
+
+      if (parsed.type === "direct:reject") {
+        this.handleDirectCallReject(connection.authenticated, parsed.payload.callId);
+        return;
+      }
+
+      if (parsed.type === "direct:end") {
+        this.handleDirectCallEndRequest(connection.authenticated, parsed.payload.callId);
+        return;
+      }
+
       if (this.isMediaRequestMessage(parsed)) {
         try {
           await this.dispatchMediaMessages(
@@ -1163,9 +1472,20 @@ export class RealtimeService {
   }
 
   private buildMediaSessionContext(connection: AuthenticatedConnection): MediaSessionContext {
+    // Find if this connection is in an active direct call
+    const activeCall = this.findDirectCallForUser(connection.sessionToken);
+    let directCallPeerSessionToken: string | undefined;
+
+    if (activeCall?.state === "active") {
+      directCallPeerSessionToken = activeCall.initiatorSessionToken === connection.sessionToken
+        ? activeCall.targetSessionToken
+        : activeCall.initiatorSessionToken;
+    }
+
     return {
       channels: connection.channels,
       connectHost: connection.connectHost,
+      directCallPeerSessionToken,
       sessionToken: connection.sessionToken,
       state: connection.state,
       user: connection.user,

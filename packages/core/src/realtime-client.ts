@@ -219,6 +219,34 @@ export class CueCommXRealtimeClient {
     });
   }
 
+  requestDirectCall(targetUserId: string): void {
+    this.sendClientMessage({
+      type: "direct:request",
+      payload: { targetUserId },
+    });
+  }
+
+  acceptDirectCall(callId: string): void {
+    this.sendClientMessage({
+      type: "direct:accept",
+      payload: { callId },
+    });
+  }
+
+  rejectDirectCall(callId: string): void {
+    this.sendClientMessage({
+      type: "direct:reject",
+      payload: { callId },
+    });
+  }
+
+  endDirectCall(callId: string): void {
+    this.sendClientMessage({
+      type: "direct:end",
+      payload: { callId },
+    });
+  }
+
   async requestMediaCapabilities(): Promise<MediaRtpCapabilities> {
     const response = await this.sendRequest("media:capabilities", (requestId) => ({
       type: "media:capabilities:get",

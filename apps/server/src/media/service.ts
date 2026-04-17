@@ -41,6 +41,7 @@ import { buildDesiredMediaRoutes } from "./routes.js";
 export interface MediaSessionContext {
   channels: ChannelInfo[];
   connectHost?: string;
+  directCallPeerSessionToken?: string;
   sessionToken: string;
   state: OperatorState;
   user: UserInfo;
@@ -91,6 +92,7 @@ interface MediaPeerSession {
   channels: ChannelInfo[];
   connectHost?: string;
   consumersByProducerSession: Map<string, MediaConsumerRecord>;
+  directCallPeerSessionToken?: string;
   producer?: Producer;
   recvTransport?: WebRtcTransport;
   sendTransport?: WebRtcTransport;
@@ -731,6 +733,7 @@ export class CueCommXMediaService implements RealtimeMediaService {
 
     const notifications: TargetedServerMessage[] = [];
     const sessionSnapshots = [...this.sessions.values()].map((session) => ({
+      directCallPeerSessionToken: session.directCallPeerSessionToken,
       sessionToken: session.sessionToken,
       userId: session.user.id,
       talkChannelIds: session.state.talkChannelIds,
@@ -882,6 +885,7 @@ export class CueCommXMediaService implements RealtimeMediaService {
     if (existing) {
       existing.channels = sessionContext.channels;
       existing.connectHost = sessionContext.connectHost;
+      existing.directCallPeerSessionToken = sessionContext.directCallPeerSessionToken;
       existing.state = sessionContext.state;
       existing.user = sessionContext.user;
       return existing;
@@ -891,6 +895,7 @@ export class CueCommXMediaService implements RealtimeMediaService {
       channels: sessionContext.channels,
       connectHost: sessionContext.connectHost,
       consumersByProducerSession: new Map(),
+      directCallPeerSessionToken: sessionContext.directCallPeerSessionToken,
       sessionToken: sessionContext.sessionToken,
       state: sessionContext.state,
       user: sessionContext.user,
