@@ -20,7 +20,9 @@ These features address the most common requests from professional AV users and f
 
 ---
 
-### 1.1 VOX (Voice-Activated) Mode
+### 1.1 VOX (Voice-Activated) Mode ✅ IMPLEMENTED
+
+> **Status:** Implemented in commit `564ee1f`. Web client has full VOX support with adjustable threshold and hold time. VoxDetector class in `apps/web-client/src/media/vox-detector.ts`. Preferences persisted. Mobile app does not yet have VOX UI (web-only for now).
 
 **Description:**
 Voice-operated exchange (VOX) automatically activates the user's microphone when they speak, without requiring them to press and hold a Talk button. An adjustable threshold determines what audio level triggers transmission.
@@ -76,7 +78,9 @@ class VoxDetector {
 
 ---
 
-### 1.2 All-Page (System-Wide Broadcast)
+### 1.2 All-Page (System-Wide Broadcast) ✅ IMPLEMENTED
+
+> **Status:** Implemented in commit `564ee1f`. Server-side routing, protocol messages (`allpage:start`/`allpage:stop`/`allpage:active`), admin permission checks, and web client UI all complete. Admin UI shows All-Page controls.
 
 **Description:**
 An admin or authorized user can press an "All-Page" button to broadcast their voice to ALL channels simultaneously, temporarily overriding normal channel routing. All other talk activity is suppressed while All-Page is active.
@@ -189,7 +193,9 @@ Without this, switching groups disconnects you from critical channels. Unity Int
 
 ---
 
-### 1.6 Admin Force-Mute & Unlatch (Advanced)
+### 1.6 Admin Force-Mute & Unlatch (Advanced) ✅ IMPLEMENTED
+
+> **Status:** Implemented in commit `28f16ef`. Server-side force-mute per user, unlatch-all per channel, protocol messages, admin UI controls, and client-side visual notifications all complete.
 
 > **Note:** Basic force-mute is included in the MVP admin panel. This feature covers advanced unlatch-all-channel functionality and richer admin controls.
 
@@ -236,7 +242,9 @@ Client:
 
 ---
 
-### 1.7 Call Signaling (Visual & Audible Alerts)
+### 1.7 Call Signaling (Visual & Audible Alerts) ✅ IMPLEMENTED
+
+> **Status:** Implemented in commit `564ee1f`. Protocol messages (`call:send`/`call:received`), server routing, web client send/receive UI with visual flash indicators, and audible alert tones all complete.
 
 **Description:**
 Users can send a "call" signal to a channel or specific user. This produces a visual flash and optional audible tone on the receiving end, even if the receiver isn't currently listening to that channel.
@@ -266,7 +274,9 @@ Client UI:
 
 ---
 
-### 1.8 Operator Role (Advanced Permissions)
+### 1.8 Operator Role (Advanced Permissions) ✅ IMPLEMENTED
+
+> **Status:** Implemented in commit `28f16ef`. Three-role permission matrix (admin/operator/user), operator-specific capabilities (force-mute, unlatch, All-Page, view all), and role-based UI visibility all complete.
 
 > **Note:** The MVP includes the 3-role system (admin/operator/user) in the data model. This feature covers the full permission matrix and operator-specific UI capabilities.
 
@@ -296,7 +306,9 @@ const rolePermissions = {
 
 ---
 
-### 1.9 Noise Suppression & Automatic Gain Control
+### 1.9 Noise Suppression & Automatic Gain Control ✅ IMPLEMENTED
+
+> **Status:** Implemented in commit `28f16ef`. WebRTC built-in noiseSuppression and autoGainControl enabled via getUserMedia constraints. User-facing toggles in web client preferences with persistence. Mobile uses platform defaults.
 
 > **Moved UP from Tier 2.** Nearly free to implement using built-in WebRTC constraints. Critical for noisy HoW environments.
 
@@ -357,7 +369,9 @@ Camera operators need to hear the speaker to know when to cut. Stage managers ne
 
 ---
 
-### 1.11 Connection Quality Indicators
+### 1.11 Connection Quality Indicators ✅ IMPLEMENTED
+
+> **Status:** Implemented in commit `e39137f`. Client-side WebRTC stats collection, quality level calculation (good/fair/poor), quality badge in web client UI, and server-side stats reporting via protocol messages all complete.
 
 > **Moved UP from Tier 2.** Essential for troubleshooting WiFi issues during live services — problems must be identified before they disrupt communications.
 
@@ -412,7 +426,9 @@ In broadcast, IFB is how a director talks to an on-air talent while they're list
 
 ---
 
-### 1.13 Preflight Audio Test
+### 1.13 Preflight Audio Test ✅ IMPLEMENTED
+
+> **Status:** Implemented in commit `e39137f`. Web client has full preflight test flow: test tone playback, mic recording + playback, level analysis, pass/fail indicator. PreflightAudioTest class in `apps/web-client/src/media/preflight-audio-test.ts`.
 
 > **New feature** — critical for volunteer-heavy environments where users may have misconfigured audio.
 
