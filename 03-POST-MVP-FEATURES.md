@@ -108,7 +108,7 @@ Client-side:
 
 ---
 
-### 1.3 Private / Direct User-to-User Communication
+### 1.3 Private / Direct User-to-User Communication ✅ IMPLEMENTED
 
 **Description:**
 A user can initiate a private conversation with one other user, bypassing the channel system. This creates a temporary point-to-point audio link that only those two users can hear.
@@ -130,7 +130,7 @@ Essential in production environments. A director may need to give private notes 
 
 ---
 
-### 1.4 Groups (Channel Collections)
+### 1.4 Groups (Channel Collections) ✅ IMPLEMENTED
 
 **Description:**
 Groups are named presets of channels that are presented together in the client UI. A user assigned to a group sees only the channels in that group. Users can switch between groups to access different sets of channels.
@@ -173,7 +173,7 @@ Client:
 
 ---
 
-### 1.5 Global / Sticky Channels
+### 1.5 Global / Sticky Channels ✅ IMPLEMENTED
 
 **Description:**
 Channels marked as "global" remain visible and active regardless of which group the user switches to. For example, the "Production" channel might be global, so the director always has it available whether they're viewing the Camera group or the Audio group.
@@ -341,7 +341,7 @@ const stream = await navigator.mediaDevices.getUserMedia({
 
 ---
 
-### 1.10 Program Audio Feeds
+### 1.10 Program Audio Feeds ✅ IMPLEMENTED
 
 > **Moved UP from Tier 2.** Critical for houses of worship where crew must hear the worship mix, pastor, or other audio to do their jobs.
 
@@ -401,7 +401,7 @@ On WiFi networks, some users may experience poor connections. Visible quality in
 
 ---
 
-### 1.12 IFB (Interrupted Fold-Back)
+### 1.12 IFB (Interrupted Fold-Back) ✅ IMPLEMENTED
 
 > **New feature** — standard in broadcast and increasingly requested in large HoW productions.
 
