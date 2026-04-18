@@ -241,6 +241,8 @@ export default function App() {
   const [channelName, setChannelName] = useState("");
   const [channelColor, setChannelColor] = useState("#22C55E");
   const [channelIsGlobal, setChannelIsGlobal] = useState(false);
+  const [channelType, setChannelType] = useState<"intercom" | "program">("intercom");
+  const [channelSourceUserId, setChannelSourceUserId] = useState<string>("");
   const [editingGroupId, setEditingGroupId] = useState<string | undefined>();
   const [groupName, setGroupName] = useState("");
   const [groupChannelIds, setGroupChannelIds] = useState<string[]>([]);
@@ -478,6 +480,8 @@ export default function App() {
     setChannelName("");
     setChannelColor("#22C55E");
     setChannelIsGlobal(false);
+    setChannelType("intercom");
+    setChannelSourceUserId("");
   }
 
   function resetGroupForm(): void {
@@ -524,6 +528,10 @@ export default function App() {
             name: channelName,
             color: channelColor,
             isGlobal: channelIsGlobal,
+            channelType,
+            ...(channelType === "program" && channelSourceUserId
+              ? { sourceUserId: channelSourceUserId }
+              : {}),
           }),
         },
       );
@@ -929,6 +937,8 @@ export default function App() {
     setChannelName(channel.name);
     setChannelColor(channel.color);
     setChannelIsGlobal(channel.isGlobal ?? false);
+    setChannelType(channel.channelType ?? "intercom");
+    setChannelSourceUserId(channel.sourceUserId ?? "");
   }
 
   function handleEditGroup(group: GroupInfo): void {
@@ -1952,6 +1962,51 @@ export default function App() {
                         Global channel (always visible regardless of active group)
                       </label>
 
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-foreground">Channel type</label>
+                        <div className="flex gap-4">
+                          <label className="inline-flex items-center gap-2 text-sm text-foreground">
+                            <input
+                              checked={channelType === "intercom"}
+                              name="channelType"
+                              onChange={() => setChannelType("intercom")}
+                              type="radio"
+                            />
+                            Intercom (two-way talk)
+                          </label>
+                          <label className="inline-flex items-center gap-2 text-sm text-foreground">
+                            <input
+                              checked={channelType === "program"}
+                              name="channelType"
+                              onChange={() => setChannelType("program")}
+                              type="radio"
+                            />
+                            📡 Program (one-way feed)
+                          </label>
+                        </div>
+                      </div>
+
+                      {channelType === "program" ? (
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground" htmlFor="sourceUser">
+                            Source user (who produces audio on this feed)
+                          </label>
+                          <select
+                            className="w-full rounded-xl border border-border/70 bg-background/60 px-4 py-2.5 text-sm text-foreground"
+                            id="sourceUser"
+                            onChange={(event) => setChannelSourceUserId(event.target.value)}
+                            value={channelSourceUserId}
+                          >
+                            <option value="">— Select a source user —</option>
+                            {state.users.map((user) => (
+                              <option key={user.id} value={user.id}>
+                                {user.username} ({user.role})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : null}
+
                       <div className="flex flex-wrap gap-3">
                         <Button disabled={state.channelFormPending} type="submit">
                           {state.channelFormPending
@@ -2010,6 +2065,9 @@ export default function App() {
                               <Badge variant="neutral">{channel.color}</Badge>
                               {channel.isGlobal ? (
                                 <Badge variant="accent">Global</Badge>
+                              ) : null}
+                              {channel.channelType === "program" ? (
+                                <Badge variant="accent">📡 Program</Badge>
                               ) : null}
                               {state.session ? (
                                 <>

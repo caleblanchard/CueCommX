@@ -2,6 +2,7 @@ export interface MediaRoutingSession {
   directCallPeerSessionToken?: string;
   hasProducer: boolean;
   hasRecvTransport: boolean;
+  ifbPeerSessionToken?: string;
   listenChannelIds: string[];
   sessionToken: string;
   talkChannelIds: string[];
@@ -16,6 +17,7 @@ export interface DesiredMediaRoute {
 }
 
 export const DIRECT_CALL_CHANNEL_ID = "__direct_call__";
+export const IFB_CHANNEL_ID = "__ifb__";
 
 export function buildDesiredMediaRoutes(
   sessions: readonly MediaRoutingSession[],
@@ -80,6 +82,35 @@ export function buildDesiredMediaRoutes(
         } else {
           routes.push({
             activeChannelIds: [DIRECT_CALL_CHANNEL_ID],
+            listenerSessionToken: listener.sessionToken,
+            producerSessionToken: peer.sessionToken,
+            producerUserId: peer.userId,
+          });
+        }
+      }
+    }
+
+    // IFB route: if this listener is the IFB target, add a route from the director
+    if (listener.ifbPeerSessionToken) {
+      const peer = sessionByToken.get(listener.ifbPeerSessionToken);
+
+      if (peer && peer.hasProducer && peer.userId !== listener.userId) {
+        const existing = routes.find(
+          (r) =>
+            r.listenerSessionToken === listener.sessionToken &&
+            r.producerSessionToken === peer.sessionToken,
+        );
+
+        if (existing) {
+          if (!existing.activeChannelIds.includes(IFB_CHANNEL_ID)) {
+            existing.activeChannelIds = [
+              ...existing.activeChannelIds,
+              IFB_CHANNEL_ID,
+            ].sort((left, right) => left.localeCompare(right));
+          }
+        } else {
+          routes.push({
+            activeChannelIds: [IFB_CHANNEL_ID],
             listenerSessionToken: listener.sessionToken,
             producerSessionToken: peer.sessionToken,
             producerUserId: peer.userId,

@@ -42,6 +42,7 @@ export interface MediaSessionContext {
   channels: ChannelInfo[];
   connectHost?: string;
   directCallPeerSessionToken?: string;
+  ifbPeerSessionToken?: string;
   sessionToken: string;
   state: OperatorState;
   user: UserInfo;
@@ -93,6 +94,7 @@ interface MediaPeerSession {
   connectHost?: string;
   consumersByProducerSession: Map<string, MediaConsumerRecord>;
   directCallPeerSessionToken?: string;
+  ifbPeerSessionToken?: string;
   producer?: Producer;
   recvTransport?: WebRtcTransport;
   sendTransport?: WebRtcTransport;
@@ -734,6 +736,7 @@ export class CueCommXMediaService implements RealtimeMediaService {
     const notifications: TargetedServerMessage[] = [];
     const sessionSnapshots = [...this.sessions.values()].map((session) => ({
       directCallPeerSessionToken: session.directCallPeerSessionToken,
+      ifbPeerSessionToken: session.ifbPeerSessionToken,
       sessionToken: session.sessionToken,
       userId: session.user.id,
       talkChannelIds: session.state.talkChannelIds,
@@ -886,6 +889,7 @@ export class CueCommXMediaService implements RealtimeMediaService {
       existing.channels = sessionContext.channels;
       existing.connectHost = sessionContext.connectHost;
       existing.directCallPeerSessionToken = sessionContext.directCallPeerSessionToken;
+      existing.ifbPeerSessionToken = sessionContext.ifbPeerSessionToken;
       existing.state = sessionContext.state;
       existing.user = sessionContext.user;
       return existing;
@@ -896,6 +900,7 @@ export class CueCommXMediaService implements RealtimeMediaService {
       connectHost: sessionContext.connectHost,
       consumersByProducerSession: new Map(),
       directCallPeerSessionToken: sessionContext.directCallPeerSessionToken,
+      ifbPeerSessionToken: sessionContext.ifbPeerSessionToken,
       sessionToken: sessionContext.sessionToken,
       state: sessionContext.state,
       user: sessionContext.user,

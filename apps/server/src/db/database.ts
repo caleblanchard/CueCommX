@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import type {
   ChannelInfo,
   ChannelPermission,
+  ChannelType,
   GroupInfo,
   UserInfo,
   UserRole,
@@ -63,14 +64,16 @@ export class DatabaseService {
 
   listChannels(): ChannelInfo[] {
     const rows = this.connection
-      .prepare("SELECT id, name, color, COALESCE(is_global, 0) as isGlobal FROM channels ORDER BY sort_order ASC, name ASC")
-      .all() as Array<{ id: string; name: string; color: string; isGlobal: number }>;
+      .prepare("SELECT id, name, color, COALESCE(is_global, 0) as isGlobal, COALESCE(channel_type, 'intercom') as channelType, source_user_id as sourceUserId FROM channels ORDER BY sort_order ASC, name ASC")
+      .all() as Array<{ id: string; name: string; color: string; isGlobal: number; channelType: string; sourceUserId: string | null }>;
 
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
       color: row.color,
       isGlobal: row.isGlobal === 1,
+      channelType: (row.channelType === "program" ? "program" : "intercom") as ChannelType,
+      ...(row.sourceUserId ? { sourceUserId: row.sourceUserId } : {}),
     }));
   }
 
@@ -78,12 +81,14 @@ export class DatabaseService {
     const row = this.connection
       .prepare(
         `
-          SELECT id, name, color, COALESCE(is_global, 0) as isGlobal
+          SELECT id, name, color, COALESCE(is_global, 0) as isGlobal,
+                 COALESCE(channel_type, 'intercom') as channelType,
+                 source_user_id as sourceUserId
           FROM channels
           WHERE id = ?
         `,
       )
-      .get(channelId) as { id: string; name: string; color: string; isGlobal: number } | undefined;
+      .get(channelId) as { id: string; name: string; color: string; isGlobal: number; channelType: string; sourceUserId: string | null } | undefined;
 
     if (!row) {
       return undefined;
@@ -94,6 +99,8 @@ export class DatabaseService {
       name: row.name,
       color: row.color,
       isGlobal: row.isGlobal === 1,
+      channelType: (row.channelType === "program" ? "program" : "intercom") as ChannelType,
+      ...(row.sourceUserId ? { sourceUserId: row.sourceUserId } : {}),
     };
   }
 
@@ -101,12 +108,14 @@ export class DatabaseService {
     const row = this.connection
       .prepare(
         `
-          SELECT id, name, color, COALESCE(is_global, 0) as isGlobal
+          SELECT id, name, color, COALESCE(is_global, 0) as isGlobal,
+                 COALESCE(channel_type, 'intercom') as channelType,
+                 source_user_id as sourceUserId
           FROM channels
           WHERE lower(name) = lower(?)
         `,
       )
-      .get(name) as { id: string; name: string; color: string; isGlobal: number } | undefined;
+      .get(name) as { id: string; name: string; color: string; isGlobal: number; channelType: string; sourceUserId: string | null } | undefined;
 
     if (!row) {
       return undefined;
@@ -117,6 +126,8 @@ export class DatabaseService {
       name: row.name,
       color: row.color,
       isGlobal: row.isGlobal === 1,
+      channelType: (row.channelType === "program" ? "program" : "intercom") as ChannelType,
+      ...(row.sourceUserId ? { sourceUserId: row.sourceUserId } : {}),
     };
   }
 
@@ -209,7 +220,7 @@ export class DatabaseService {
       .filter((user): user is UserInfo => Boolean(user));
   }
 
-  createChannel(input: { color: string; name: string; isGlobal?: boolean }): ChannelInfo {
+  createChannel(input: { color: string; name: string; isGlobal?: boolean; channelType?: ChannelType; sourceUserId?: string }): ChannelInfo {
     const baseChannelId = `ch-${toChannelSlug(input.name)}`;
     let channelId = baseChannelId;
     let suffix = 2;
@@ -226,8 +237,8 @@ export class DatabaseService {
     this.connection
       .prepare(
         `
-          INSERT INTO channels (id, name, color, sort_order, is_global)
-          VALUES (@id, @name, @color, @sortOrder, @isGlobal)
+          INSERT INTO channels (id, name, color, sort_order, is_global, channel_type, source_user_id)
+          VALUES (@id, @name, @color, @sortOrder, @isGlobal, @channelType, @sourceUserId)
         `,
       )
       .run({
@@ -236,6 +247,8 @@ export class DatabaseService {
         color: input.color,
         sortOrder: row.maxSortOrder + 1,
         isGlobal: input.isGlobal ? 1 : 0,
+        channelType: input.channelType ?? "intercom",
+        sourceUserId: input.sourceUserId ?? null,
       });
 
     const channel = this.getChannel(channelId);
@@ -277,7 +290,9 @@ export class DatabaseService {
       .prepare(
         `
           SELECT DISTINCT channels.id, channels.name, channels.color,
-                 COALESCE(channels.is_global, 0) as isGlobal
+                 COALESCE(channels.is_global, 0) as isGlobal,
+                 COALESCE(channels.channel_type, 'intercom') as channelType,
+                 channels.source_user_id as sourceUserId
           FROM channels
           INNER JOIN channel_permissions
             ON channel_permissions.channel_id = channels.id
@@ -286,13 +301,15 @@ export class DatabaseService {
           ORDER BY channels.sort_order ASC, channels.name ASC
         `,
       )
-      .all(userId) as Array<{ id: string; name: string; color: string; isGlobal: number }>;
+      .all(userId) as Array<{ id: string; name: string; color: string; isGlobal: number; channelType: string; sourceUserId: string | null }>;
 
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
       color: row.color,
       isGlobal: row.isGlobal === 1,
+      channelType: (row.channelType === "program" ? "program" : "intercom") as ChannelType,
+      ...(row.sourceUserId ? { sourceUserId: row.sourceUserId } : {}),
     }));
   }
 
@@ -379,6 +396,8 @@ export class DatabaseService {
       color: string;
       name: string;
       isGlobal?: boolean;
+      channelType?: ChannelType;
+      sourceUserId?: string;
     },
   ): void {
     this.connection
@@ -387,7 +406,9 @@ export class DatabaseService {
           UPDATE channels
           SET name = @name,
               color = @color,
-              is_global = @isGlobal
+              is_global = @isGlobal,
+              channel_type = @channelType,
+              source_user_id = @sourceUserId
           WHERE id = @id
         `,
       )
@@ -396,6 +417,8 @@ export class DatabaseService {
         name: input.name,
         color: input.color,
         isGlobal: input.isGlobal ? 1 : 0,
+        channelType: input.channelType ?? "intercom",
+        sourceUserId: input.sourceUserId ?? null,
       });
   }
 
@@ -578,6 +601,12 @@ export class DatabaseService {
     const columns = this.connection.pragma("table_info(channels)") as Array<{ name: string }>;
     if (!columns.some((c) => c.name === "is_global")) {
       this.connection.exec("ALTER TABLE channels ADD COLUMN is_global BOOLEAN NOT NULL DEFAULT 0");
+    }
+    if (!columns.some((c) => c.name === "channel_type")) {
+      this.connection.exec("ALTER TABLE channels ADD COLUMN channel_type TEXT NOT NULL DEFAULT 'intercom'");
+    }
+    if (!columns.some((c) => c.name === "source_user_id")) {
+      this.connection.exec("ALTER TABLE channels ADD COLUMN source_user_id TEXT");
     }
 
     this.ensureCaseInsensitiveUsernameUniqueness();

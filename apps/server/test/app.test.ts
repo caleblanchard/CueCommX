@@ -417,8 +417,8 @@ describe("createApp", () => {
     expect(setupBody.channels).toHaveLength(5);
     expect(setupBody.channels).toEqual(
       expect.arrayContaining([
-        { id: "ch-production", name: "Production", color: "#EF4444", isGlobal: false },
-        { id: "ch-audio", name: "Audio", color: "#3B82F6", isGlobal: false },
+        expect.objectContaining({ id: "ch-production", name: "Production", color: "#EF4444", isGlobal: false }),
+        expect.objectContaining({ id: "ch-audio", name: "Audio", color: "#3B82F6", isGlobal: false }),
       ]),
     );
 

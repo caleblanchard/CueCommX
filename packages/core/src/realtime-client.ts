@@ -247,6 +247,20 @@ export class CueCommXRealtimeClient {
     });
   }
 
+  startIFB(targetUserId: string): void {
+    this.sendClientMessage({
+      type: "ifb:start",
+      payload: { targetUserId },
+    });
+  }
+
+  stopIFB(): void {
+    this.sendClientMessage({
+      type: "ifb:stop",
+      payload: {},
+    });
+  }
+
   async requestMediaCapabilities(): Promise<MediaRtpCapabilities> {
     const response = await this.sendRequest("media:capabilities", (requestId) => ({
       type: "media:capabilities:get",

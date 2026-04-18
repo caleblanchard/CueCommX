@@ -12,11 +12,16 @@ export const ChannelPermissionSchema = z.object({
 });
 export type ChannelPermission = z.infer<typeof ChannelPermissionSchema>;
 
+export const ChannelTypeSchema = z.enum(["intercom", "program"]);
+export type ChannelType = z.infer<typeof ChannelTypeSchema>;
+
 export const ChannelInfoSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   color: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
   isGlobal: z.boolean().optional().default(false),
+  channelType: ChannelTypeSchema.optional().default("intercom"),
+  sourceUserId: z.string().min(1).optional(),
 });
 export type ChannelInfo = z.infer<typeof ChannelInfoSchema>;
 

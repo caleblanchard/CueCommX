@@ -70,6 +70,14 @@ interface DirectCall {
   ringTimeout: ReturnType<typeof setTimeout>;
 }
 
+interface IFBState {
+  directorSessionToken: string;
+  directorUserId: string;
+  directorUsername: string;
+  targetSessionToken: string;
+  targetUserId: string;
+}
+
 function parseRequestHost(headersHost?: string): string | undefined {
   if (!headersHost) {
     return undefined;
@@ -140,6 +148,8 @@ export class RealtimeService {
 
   private directCallSequence = 0;
 
+  private ifbState: IFBState | undefined;
+
   private signalSequence = 0;
 
   private readonly path: string;
@@ -171,6 +181,7 @@ export class RealtimeService {
     this.connections.clear();
     this.operatorStates.clear();
     this.allPageState = undefined;
+    this.ifbState = undefined;
 
     for (const signal of this.activeSignals.values()) {
       clearTimeout(signal.timer);
@@ -817,6 +828,101 @@ export class RealtimeService {
     }
   }
 
+  // --- IFB (Interrupted Fold-Back) ---
+
+  private static readonly DEFAULT_IFB_DUCK_LEVEL = 0.1;
+
+  private async handleIFBStart(connection: AuthenticatedConnection, targetUserId: string): Promise<void> {
+    const role = connection.user.role;
+
+    if (role !== "admin" && role !== "operator") {
+      this.sendSignalError(connection, "forbidden", "Only admins and operators can use IFB.");
+      return;
+    }
+
+    if (targetUserId === connection.user.id) {
+      this.sendSignalError(connection, "invalid-message", "Cannot IFB yourself.");
+      return;
+    }
+
+    if (this.ifbState) {
+      this.sendSignalError(connection, "conflict", "An IFB session is already active.");
+      return;
+    }
+
+    const target = this.findConnectionByUserId(targetUserId);
+
+    if (!target) {
+      this.sendSignalError(connection, "invalid-state", "Target user is not online.");
+      return;
+    }
+
+    this.ifbState = {
+      directorSessionToken: connection.sessionToken,
+      directorUserId: connection.user.id,
+      directorUsername: connection.user.username,
+      targetSessionToken: target.auth.sessionToken,
+      targetUserId,
+    };
+
+    // Notify target that IFB is active
+    this.sendMessage(target.record.socket, {
+      type: "ifb:active",
+      payload: {
+        fromUserId: connection.user.id,
+        fromUsername: connection.user.username,
+        duckLevel: RealtimeService.DEFAULT_IFB_DUCK_LEVEL,
+      },
+    });
+
+    // Reconcile media to add IFB audio route from director to target
+    await this.syncMediaState(connection);
+    await this.syncMediaState(target.auth);
+    this.broadcastAdminDashboard();
+  }
+
+  private async handleIFBStop(connection: AuthenticatedConnection): Promise<void> {
+    if (!this.ifbState) {
+      this.sendSignalError(connection, "invalid-state", "No IFB session is active.");
+      return;
+    }
+
+    if (this.ifbState.directorSessionToken !== connection.sessionToken && connection.user.role !== "admin") {
+      this.sendSignalError(connection, "forbidden", "Only the IFB director or an admin can stop IFB.");
+      return;
+    }
+
+    await this.endIFB();
+  }
+
+  private async endIFB(): Promise<void> {
+    if (!this.ifbState) {
+      return;
+    }
+
+    const { directorSessionToken, targetSessionToken } = this.ifbState;
+    this.ifbState = undefined;
+
+    // Notify target that IFB ended
+    const targetConnection = this.findAuthenticatedBySessionToken(targetSessionToken);
+
+    if (targetConnection) {
+      this.sendMessage(this.findSocket(targetConnection), {
+        type: "ifb:inactive",
+        payload: {},
+      });
+      await this.syncMediaState(targetConnection);
+    }
+
+    const directorConnection = this.findAuthenticatedBySessionToken(directorSessionToken);
+
+    if (directorConnection) {
+      await this.syncMediaState(directorConnection);
+    }
+
+    this.broadcastAdminDashboard();
+  }
+
   private broadcastOnlineUsers(): void {
     const onlineUsers: Array<{ id: string; username: string }> = [];
 
@@ -981,6 +1087,16 @@ export class RealtimeService {
         this.sendSignalError(connection, "forbidden", "This operator cannot talk on that channel.");
         return;
       }
+
+      // Block non-source users from talking on program channels
+      if (mode === "start") {
+        const channel = connection.channels.find((ch) => ch.id === channelId);
+
+        if (channel?.channelType === "program" && channel.sourceUserId !== connection.user.id) {
+          this.sendSignalError(connection, "forbidden", "Only the designated source can talk on a program channel.");
+          return;
+        }
+      }
     }
 
     const nextTalkChannelIds =
@@ -1138,6 +1254,15 @@ export class RealtimeService {
 
       if (activeCall) {
         await this.endDirectCall(activeCall.callId, "ended");
+      }
+
+      // End IFB if this user was the director or target
+      if (
+        this.ifbState &&
+        (this.ifbState.directorSessionToken === connection.authenticated.sessionToken ||
+          this.ifbState.targetSessionToken === connection.authenticated.sessionToken)
+      ) {
+        await this.endIFB();
       }
 
       connection.authenticated.state = {
@@ -1390,6 +1515,16 @@ export class RealtimeService {
         return;
       }
 
+      if (parsed.type === "ifb:start") {
+        await this.handleIFBStart(connection.authenticated, parsed.payload.targetUserId);
+        return;
+      }
+
+      if (parsed.type === "ifb:stop") {
+        await this.handleIFBStop(connection.authenticated);
+        return;
+      }
+
       if (this.isMediaRequestMessage(parsed)) {
         try {
           await this.dispatchMediaMessages(
@@ -1482,10 +1617,18 @@ export class RealtimeService {
         : activeCall.initiatorSessionToken;
     }
 
+    // Find if this connection is the IFB target (receives director audio)
+    let ifbPeerSessionToken: string | undefined;
+
+    if (this.ifbState?.targetSessionToken === connection.sessionToken) {
+      ifbPeerSessionToken = this.ifbState.directorSessionToken;
+    }
+
     return {
       channels: connection.channels,
       connectHost: connection.connectHost,
       directCallPeerSessionToken,
+      ifbPeerSessionToken,
       sessionToken: connection.sessionToken,
       state: connection.state,
       user: connection.user,

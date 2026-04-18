@@ -1,11 +1,13 @@
 import { z } from "zod";
 
-import { ChannelInfoSchema } from "./models.js";
+import { ChannelInfoSchema, ChannelTypeSchema } from "./models.js";
 
 const channelMutationBaseSchema = z.object({
   name: z.string().trim().min(1),
   color: z.string().trim().regex(/^#[0-9A-Fa-f]{6}$/),
   isGlobal: z.boolean().optional().default(false),
+  channelType: ChannelTypeSchema.optional().default("intercom"),
+  sourceUserId: z.string().min(1).optional(),
 });
 
 export const CreateChannelRequestSchema = channelMutationBaseSchema;

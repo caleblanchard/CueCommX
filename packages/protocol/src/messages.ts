@@ -296,6 +296,38 @@ export const ListenToggleMessageSchema = z.object({
 });
 export type ListenToggleMessage = z.infer<typeof ListenToggleMessageSchema>;
 
+// --- IFB (Interrupted Fold-Back) messages ---
+
+export const IFBStartMessageSchema = z.object({
+  type: z.literal("ifb:start"),
+  payload: z.object({
+    targetUserId: z.string().min(1),
+  }),
+});
+export type IFBStartMessage = z.infer<typeof IFBStartMessageSchema>;
+
+export const IFBStopMessageSchema = z.object({
+  type: z.literal("ifb:stop"),
+  payload: z.object({}),
+});
+export type IFBStopMessage = z.infer<typeof IFBStopMessageSchema>;
+
+export const IFBActiveMessageSchema = z.object({
+  type: z.literal("ifb:active"),
+  payload: z.object({
+    fromUserId: z.string().min(1),
+    fromUsername: z.string().min(1),
+    duckLevel: z.number().min(0).max(1),
+  }),
+});
+export type IFBActiveMessage = z.infer<typeof IFBActiveMessageSchema>;
+
+export const IFBInactiveMessageSchema = z.object({
+  type: z.literal("ifb:inactive"),
+  payload: z.object({}),
+});
+export type IFBInactiveMessage = z.infer<typeof IFBInactiveMessageSchema>;
+
 export const ClientSignalingMessageSchema = z.discriminatedUnion("type", [
   AuthRequestSchema,
   SessionAuthenticateMessageSchema,
@@ -312,6 +344,8 @@ export const ClientSignalingMessageSchema = z.discriminatedUnion("type", [
   DirectCallAcceptMessageSchema,
   DirectCallRejectMessageSchema,
   DirectCallEndMessageSchema,
+  IFBStartMessageSchema,
+  IFBStopMessageSchema,
   MediaCapabilitiesRequestMessageSchema,
   MediaTransportCreateRequestMessageSchema,
   MediaTransportConnectRequestMessageSchema,
@@ -337,6 +371,8 @@ export const ServerSignalingMessageSchema = z.discriminatedUnion("type", [
   DirectCallActiveMessageSchema,
   DirectCallEndedMessageSchema,
   OnlineUsersMessageSchema,
+  IFBActiveMessageSchema,
+  IFBInactiveMessageSchema,
   MediaCapabilitiesMessageSchema,
   MediaTransportCreatedMessageSchema,
   MediaTransportConnectedMessageSchema,
@@ -380,6 +416,10 @@ export const SignalingMessageSchema = z.discriminatedUnion("type", [
   DirectCallActiveMessageSchema,
   DirectCallEndedMessageSchema,
   OnlineUsersMessageSchema,
+  IFBStartMessageSchema,
+  IFBStopMessageSchema,
+  IFBActiveMessageSchema,
+  IFBInactiveMessageSchema,
   MediaCapabilitiesRequestMessageSchema,
   MediaCapabilitiesMessageSchema,
   MediaTransportCreateRequestMessageSchema,

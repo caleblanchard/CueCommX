@@ -309,6 +309,11 @@ export default function App() {
     fromUserId: string;
     fromUsername: string;
   } | null>(null);
+  const [ifbState, setIFBState] = useState<{
+    fromUserId: string;
+    fromUsername: string;
+    duckLevel: number;
+  } | null>(null);
 
   const connectionBadge = getConnectionBadge(state.realtimeState);
   const assignedPermissions = useMemo(
@@ -358,12 +363,15 @@ export default function App() {
   const mixChannelVolumes = useMemo(
     () =>
       Object.fromEntries(
-        (state.session?.channels ?? []).map((channel) => [
-          channel.id,
-          toFraction(channelVolumes[channel.id] ?? 100),
-        ]),
+        (state.session?.channels ?? []).map((channel) => {
+          const baseVolume = toFraction(channelVolumes[channel.id] ?? 100);
+          const duckedVolume = ifbState && channel.channelType === "program"
+            ? baseVolume * ifbState.duckLevel
+            : baseVolume;
+          return [channel.id, duckedVolume];
+        }),
       ),
-    [channelVolumes, state.session?.channels],
+    [channelVolumes, state.session?.channels, ifbState],
   );
   const remoteTalkersByChannel = useMemo(() => {
     const next = new Map<string, string[]>();
@@ -674,6 +682,18 @@ export default function App() {
           if (message.type === "direct:ended") {
             setDirectCall(null);
             setIncomingCall(null);
+          }
+
+          if (message.type === "ifb:active") {
+            setIFBState({
+              fromUserId: message.payload.fromUserId,
+              fromUsername: message.payload.fromUsername,
+              duckLevel: message.payload.duckLevel,
+            });
+          }
+
+          if (message.type === "ifb:inactive") {
+            setIFBState(null);
           }
 
           return current;
@@ -1699,6 +1719,56 @@ export default function App() {
                   </Card>
                 ) : null}
 
+                {/* IFB active indicator */}
+                {ifbState ? (
+                  <Card className="border-amber-500/50 bg-amber-500/10">
+                    <CardContent className="flex items-center justify-between gap-4 p-4">
+                      <div className="flex items-center gap-3">
+                        <Headphones className="h-5 w-5 text-amber-500" />
+                        <div>
+                          <p className="font-semibold text-amber-200">IFB Active</p>
+                          <p className="text-sm text-muted-foreground">
+                            {ifbState.fromUsername} is speaking to you — program audio ducked
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : null}
+
+                {/* IFB controls for admins/operators */}
+                {(state.session?.user.role === "admin" || state.session?.user.role === "operator") &&
+                 audioReady &&
+                 callableUsers.length > 0 &&
+                 !directCall ? (
+                  <Card>
+                    <CardHeader>
+                      <CardDescription>Interrupted Fold-Back</CardDescription>
+                      <CardTitle>IFB Talk</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="mb-3 text-sm text-muted-foreground">
+                        Speak directly to a user while ducking their program audio.
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {callableUsers.map((user) => (
+                          <Button
+                            disabled={state.realtimeState !== "connected"}
+                            key={user.id}
+                            onClick={() => realtimeClientRef.current?.startIFB(user.id)}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            <Headphones className="h-3.5 w-3.5 mr-1.5" />
+                            {user.username}
+                          </Button>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : null}
+
                 <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(24rem,1fr))]">
                   {visibleChannels.map((channel) => {
                     const permission = findPermission(assignedPermissions, channel.id);
@@ -1713,6 +1783,8 @@ export default function App() {
                     const allPageBlocked = !!allPageActive && allPageActive.userId !== state.session?.user.id;
                     const talkersOnChannel = remoteTalkersByChannel.get(channel.id) ?? [];
                     const monitorVolume = channelVolumes[channel.id] ?? 100;
+                    const isProgramChannel = channel.channelType === "program";
+                    const isSource = isProgramChannel && channel.sourceUserId === state.session?.user.id;
 
                     return (
                       <Card className="overflow-hidden" key={channel.id}>
@@ -1722,18 +1794,25 @@ export default function App() {
                               <div className="min-w-0 space-y-1">
                                 <CardTitle>{channel.name}</CardTitle>
                                 <p className="text-sm leading-6 text-muted-foreground">
-                                {!permission?.canTalk && permission?.canListen
-                                  ? "Listen-only route."
-                                  : !permission?.canListen && permission?.canTalk
-                                    ? "Talk-only route."
-                                    : permission?.canListen || permission?.canTalk
-                                      ? controlsReady
-                                        ? "Ready for live comms."
-                                        : "Waiting on browser audio."
-                                      : "No operator controls assigned."}
+                                {isProgramChannel
+                                  ? isSource
+                                    ? "You are the broadcast source for this program feed."
+                                    : "Listen-only program feed."
+                                  : !permission?.canTalk && permission?.canListen
+                                    ? "Listen-only route."
+                                    : !permission?.canListen && permission?.canTalk
+                                      ? "Talk-only route."
+                                      : permission?.canListen || permission?.canTalk
+                                        ? controlsReady
+                                          ? "Ready for live comms."
+                                          : "Waiting on browser audio."
+                                        : "No operator controls assigned."}
                               </p>
                             </div>
                               <div className="flex shrink-0 flex-wrap items-center gap-2 md:justify-end">
+                                {isProgramChannel ? (
+                                  <Badge variant="accent">📡 Program</Badge>
+                                ) : null}
                                 <Badge
                                   className="min-w-[6.5rem] shrink-0 justify-center"
                                   variant={talking ? "success" : listening ? "accent" : "neutral"}
@@ -1750,7 +1829,7 @@ export default function App() {
                           </div>
                         </CardHeader>
                         <CardContent className="space-y-4">
-                          <div className="grid gap-3 sm:grid-cols-2">
+                          <div className={`grid gap-3 ${isProgramChannel && !isSource ? "" : "sm:grid-cols-2"}`}>
                             <Button
                               aria-pressed={listening}
                               disabled={!controlsReady || !permission?.canListen}
@@ -1764,6 +1843,7 @@ export default function App() {
                                   ? "Listening"
                                   : "Listen off"}
                             </Button>
+                            {isProgramChannel && !isSource ? null : (
                             <Button
                               aria-pressed={talking}
                               disabled={!controlsReady || !permission?.canTalk || voxModeEnabled || allPageBlocked}
@@ -1837,6 +1917,7 @@ export default function App() {
                                       ? "Talking"
                                       : "Talk"}
                             </Button>
+                            )}
                           </div>
 
                           <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">

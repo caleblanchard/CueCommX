@@ -437,6 +437,7 @@ describe("channel management schemas", () => {
       name: "Front of House",
       color: "#22C55E",
       isGlobal: false,
+      channelType: "intercom",
     });
   });
 
