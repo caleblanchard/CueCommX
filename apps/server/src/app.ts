@@ -297,10 +297,12 @@ export function createApp(options: CreateAppOptions) {
 
       if (user.pinHash) {
         if (!parsed.data.pin || !verifyPin(parsed.data.pin, user.pinHash)) {
+          try { database.logEvent({ event_type: "user:login_failed", username: parsed.data.username, severity: "warn" }); } catch { /* never crash */ }
           return reply.code(401).send(createFailureResponse("Invalid username or PIN."));
         }
       }
 
+      try { database.logEvent({ event_type: "user:login", user_id: user.id, username: user.username }); } catch { /* never crash */ }
       return reply.code(200).send(createSuccessResponse(database, sessionStore, user.id));
     });
 
@@ -374,6 +376,7 @@ export function createApp(options: CreateAppOptions) {
       });
       database.replaceChannelPermissions(userId, normalizeChannelPermissions(parsed.data.channelPermissions));
       database.replaceUserGroups(userId, parsed.data.groupIds);
+      try { database.logEvent({ event_type: "user:created", username: parsed.data.username, user_id: userId }); } catch { /* never crash */ }
 
       return reply.code(201).send(createManagedUserResponse(database, realtimeService, userId));
     });
@@ -456,7 +459,9 @@ export function createApp(options: CreateAppOptions) {
         return reply.code(404).send(createFailureResponse("User not found."));
       }
 
+      const targetUser = database.getUser(userId);
       await realtimeService.forceMuteUser(userId);
+      try { database.logEvent({ event_type: "admin:force_mute", username: targetUser?.username, details: "Force-muted by admin" }); } catch { /* never crash */ }
 
       return reply.code(204).send();
     });
@@ -518,6 +523,7 @@ export function createApp(options: CreateAppOptions) {
 
       database.deleteUser(userId);
       realtimeService.disconnectUser(userId, "User removed by admin");
+      try { database.logEvent({ event_type: "user:deleted", username: existingUser.username, user_id: userId }); } catch { /* never crash */ }
 
       return reply.code(204).send();
     });
@@ -636,6 +642,43 @@ export function createApp(options: CreateAppOptions) {
       await realtimeService.refreshAllSessions();
 
       return reply.code(204).send();
+    });
+
+    // --- Event log endpoints ---
+
+    configuredApp.get("/api/admin/event-log", async (request, reply) => {
+      const sessionContext = requireAdminSession(request, reply, database, sessionStore);
+
+      if (!sessionContext) {
+        return reply;
+      }
+
+      const query = request.query as Record<string, string | undefined>;
+
+      return database.getEventLog({
+        event_type: query.event_type,
+        user_id: query.user_id,
+        severity: query.severity,
+        since: query.since,
+        until: query.until,
+        limit: query.limit ? Number(query.limit) : undefined,
+        offset: query.offset ? Number(query.offset) : undefined,
+      });
+    });
+
+    configuredApp.delete("/api/admin/event-log", async (request, reply) => {
+      const sessionContext = requireAdminSession(request, reply, database, sessionStore);
+
+      if (!sessionContext) {
+        return reply;
+      }
+
+      const body = (request.body ?? {}) as { olderThanDays?: number };
+      const olderThanDays = typeof body.olderThanDays === "number" ? body.olderThanDays : 30;
+
+      const pruned = database.pruneEventLog(olderThanDays);
+
+      return { pruned };
     });
 
     // --- Group endpoints ---

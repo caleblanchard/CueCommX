@@ -30,11 +30,22 @@ export const DEFAULT_SIDETONE_SETTINGS: SidetoneSettings = {
   level: 15,
 };
 
+export interface DuckingSettings {
+  enabled: boolean;
+  level: number;
+}
+
+export const DEFAULT_DUCKING_SETTINGS: DuckingSettings = {
+  enabled: true,
+  level: 30,
+};
+
 export interface WebClientPreferences {
   activeGroupId?: string;
   audioProcessing: AudioProcessingPreferences;
   channelPans: Record<string, number>;
   channelVolumes: Record<string, number>;
+  ducking: DuckingSettings;
   latchModeChannelIds: string[];
   masterVolume: number;
   preferredListenChannelIds: string[];
@@ -62,6 +73,7 @@ export const DEFAULT_WEB_CLIENT_PREFERENCES: WebClientPreferences = {
   audioProcessing: { ...DEFAULT_AUDIO_PROCESSING },
   channelPans: {},
   channelVolumes: {},
+  ducking: { ...DEFAULT_DUCKING_SETTINGS },
   latchModeChannelIds: [],
   masterVolume: 100,
   preferredListenChannelIds: [],
@@ -159,6 +171,22 @@ function toSidetoneSettings(value: unknown): SidetoneSettings {
   };
 }
 
+function toDuckingSettings(value: unknown): DuckingSettings {
+  if (typeof value !== "object" || value === null) {
+    return { ...DEFAULT_DUCKING_SETTINGS };
+  }
+
+  const obj = value as Record<string, unknown>;
+
+  return {
+    enabled: typeof obj.enabled === "boolean" ? obj.enabled : DEFAULT_DUCKING_SETTINGS.enabled,
+    level:
+      typeof obj.level === "number" && Number.isFinite(obj.level)
+        ? Math.max(10, Math.min(80, Math.round(obj.level)))
+        : DEFAULT_DUCKING_SETTINGS.level,
+  };
+}
+
 export function parseWebClientPreferences(input: string | null | undefined): WebClientPreferences {
   if (!input) {
     return DEFAULT_WEB_CLIENT_PREFERENCES;
@@ -170,6 +198,7 @@ export function parseWebClientPreferences(input: string | null | undefined): Web
       audioProcessing?: unknown;
       channelPans?: unknown;
       channelVolumes?: unknown;
+      ducking?: unknown;
       latchModeChannelIds?: unknown;
       masterVolume?: unknown;
       preferredListenChannelIds?: unknown;
@@ -187,6 +216,7 @@ export function parseWebClientPreferences(input: string | null | undefined): Web
       audioProcessing: toAudioProcessing(parsed.audioProcessing),
       channelPans: toPanMap(parsed.channelPans),
       channelVolumes: toVolumeMap(parsed.channelVolumes),
+      ducking: toDuckingSettings(parsed.ducking),
       latchModeChannelIds: toStringArray(parsed.latchModeChannelIds),
       masterVolume:
         typeof parsed.masterVolume === "number" && Number.isFinite(parsed.masterVolume)

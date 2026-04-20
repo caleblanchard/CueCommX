@@ -1995,6 +1995,73 @@ describe("createApp", () => {
     await app.close();
   });
 
+  it("returns channel priority in channel data and supports updating it", async () => {
+    const app = createApp({
+      config: {
+        serverName: "Main Church",
+        host: "0.0.0.0",
+        port: 3000,
+        httpsPort: 3443,
+        rtcMinPort: 40000,
+        rtcMaxPort: 41000,
+        announcedIp: undefined,
+        dataDir: workingDirectory,
+        dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"),
+        maxUsers: 30,
+        maxChannels: 16,
+        logLevel: "info",
+      },
+      database,
+    });
+
+    const setupResponse = await app.inject({
+      method: "POST",
+      url: "/api/auth/setup-admin",
+      payload: { username: "Chuck", pin: "1234" },
+    });
+    const adminToken = setupResponse.json().sessionToken as string;
+
+    // Default channels should have priority (Production = 8, others = 5)
+    const channelsResponse = await app.inject({
+      method: "GET",
+      url: "/api/channels",
+    });
+
+    const channels = channelsResponse.json() as Array<{ id: string; priority: number }>;
+    const production = channels.find((ch) => ch.id === "ch-production");
+    const audio = channels.find((ch) => ch.id === "ch-audio");
+
+    expect(production?.priority).toBe(8);
+    expect(audio?.priority).toBe(5);
+
+    // Create a channel with explicit priority
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/channels",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { name: "Director", color: "#FF0000", priority: 10 },
+    });
+
+    expect(createResponse.statusCode).toBe(201);
+    expect(createResponse.json()).toMatchObject({ name: "Director", priority: 10 });
+
+    const directorId = createResponse.json().id as string;
+
+    // Update the priority
+    const updateResponse = await app.inject({
+      method: "PUT",
+      url: `/api/channels/${directorId}`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { name: "Director", color: "#FF0000", priority: 3 },
+    });
+
+    expect(updateResponse.statusCode).toBe(200);
+    expect(updateResponse.json()).toMatchObject({ name: "Director", priority: 3 });
+
+    await app.close();
+  });
+
   it("refreshes connected operator state when an admin deletes a channel", async () => {
     const operatorId = database.createUser({
       username: "A2",
@@ -3431,6 +3498,147 @@ describe("createApp", () => {
       payload: { masterVolume: 50 },
     });
     expect(putResponse.statusCode).toBe(401);
+
+    await app.close();
+  });
+
+  it("logs events and allows admin to query and prune the event log", async () => {
+    const app = createApp({
+      config: {
+        serverName: "Main Church",
+        host: "0.0.0.0",
+        port: 3000,
+        httpsPort: 3443,
+        rtcMinPort: 40000,
+        rtcMaxPort: 41000,
+        announcedIp: undefined,
+        dataDir: workingDirectory,
+        dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"),
+        maxUsers: 30,
+        maxChannels: 16,
+        logLevel: "info",
+      },
+      database,
+    });
+
+    // Setup admin to generate a login event
+    const setupResponse = await app.inject({
+      method: "POST",
+      url: "/api/auth/setup-admin",
+      payload: { username: "EventAdmin", pin: "1234" },
+    });
+    const adminToken = setupResponse.json().sessionToken as string;
+
+    // Login to generate another event
+    await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { username: "EventAdmin", pin: "1234" },
+    });
+
+    // Query event log
+    const logResponse = await app.inject({
+      method: "GET",
+      url: "/api/admin/event-log",
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(logResponse.statusCode).toBe(200);
+
+    const entries = logResponse.json() as Array<{ event_type: string; username: string }>;
+    expect(entries.length).toBeGreaterThanOrEqual(1);
+    const loginEvents = entries.filter((e) => e.event_type === "user:login");
+    expect(loginEvents.length).toBeGreaterThanOrEqual(1);
+    expect(loginEvents[0]?.username).toBe("EventAdmin");
+
+    // Filter by event_type
+    const filteredResponse = await app.inject({
+      method: "GET",
+      url: "/api/admin/event-log?event_type=user:login",
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(filteredResponse.statusCode).toBe(200);
+    const filteredEntries = filteredResponse.json() as Array<{ event_type: string }>;
+    expect(filteredEntries.every((e) => e.event_type === "user:login")).toBe(true);
+
+    // Prune all events
+    const pruneResponse = await app.inject({
+      method: "DELETE",
+      url: "/api/admin/event-log",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { olderThanDays: 0 },
+    });
+    expect(pruneResponse.statusCode).toBe(200);
+    expect(pruneResponse.json()).toMatchObject({ pruned: expect.any(Number) });
+
+    await app.close();
+  });
+
+  it("returns 403 for non-admins accessing event-log endpoints", async () => {
+    const app = createApp({
+      config: {
+        serverName: "Main Church",
+        host: "0.0.0.0",
+        port: 3000,
+        httpsPort: 3443,
+        rtcMinPort: 40000,
+        rtcMaxPort: 41000,
+        announcedIp: undefined,
+        dataDir: workingDirectory,
+        dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"),
+        maxUsers: 30,
+        maxChannels: 16,
+        logLevel: "info",
+      },
+      database,
+    });
+
+    const setupResponse = await app.inject({
+      method: "POST",
+      url: "/api/auth/setup-admin",
+      payload: { username: "Admin", pin: "1234" },
+    });
+    const adminToken = setupResponse.json().sessionToken as string;
+
+    // Create a regular user
+    const createUserResponse = await app.inject({
+      method: "POST",
+      url: "/api/users",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        username: "RegularUser",
+        role: "user",
+        channelPermissions: [],
+        groupIds: [],
+      },
+    });
+    expect(createUserResponse.statusCode).toBe(201);
+
+    // Login as regular user
+    const loginResponse = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { username: "RegularUser" },
+    });
+    const userToken = loginResponse.json().sessionToken as string;
+
+    // Non-admin GET should fail
+    const getResponse = await app.inject({
+      method: "GET",
+      url: "/api/admin/event-log",
+      headers: { authorization: `Bearer ${userToken}` },
+    });
+    expect(getResponse.statusCode).toBe(403);
+
+    // Non-admin DELETE should fail
+    const deleteResponse = await app.inject({
+      method: "DELETE",
+      url: "/api/admin/event-log",
+      headers: { authorization: `Bearer ${userToken}` },
+      payload: { olderThanDays: 30 },
+    });
+    expect(deleteResponse.statusCode).toBe(403);
 
     await app.close();
   });

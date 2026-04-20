@@ -443,6 +443,7 @@ describe("channel management schemas", () => {
       color: "#22C55E",
       isGlobal: false,
       channelType: "intercom",
+      priority: 5,
     });
   });
 
@@ -481,6 +482,65 @@ describe("channel management schemas", () => {
       name: "Front of House",
       color: "#22C55E",
     });
+  });
+
+  it("accepts ChannelInfoSchema with an explicit priority", () => {
+    const channel = ChannelInfoSchema.parse({
+      id: "ch-production",
+      name: "Production",
+      color: "#EF4444",
+      priority: 8,
+    });
+
+    expect(channel.priority).toBe(8);
+  });
+
+  it("defaults ChannelInfoSchema priority to 5 when omitted", () => {
+    const channel = ChannelInfoSchema.parse({
+      id: "ch-audio",
+      name: "Audio",
+      color: "#3B82F6",
+    });
+
+    expect(channel.priority).toBe(5);
+  });
+
+  it("rejects ChannelInfoSchema priority outside 1-10 range", () => {
+    expect(() =>
+      ChannelInfoSchema.parse({
+        id: "ch-x",
+        name: "X",
+        color: "#000000",
+        priority: 0,
+      }),
+    ).toThrowError();
+
+    expect(() =>
+      ChannelInfoSchema.parse({
+        id: "ch-x",
+        name: "X",
+        color: "#000000",
+        priority: 11,
+      }),
+    ).toThrowError();
+  });
+
+  it("accepts create and update channel requests with priority", () => {
+    const create = CreateChannelRequestSchema.parse({
+      name: "Director",
+      color: "#FF0000",
+      priority: 10,
+    });
+
+    expect(create.priority).toBe(10);
+
+    const update = UpdateChannelRequestSchema.parse({
+      name: "Director",
+      color: "#FF0000",
+      priority: 3,
+    });
+
+    expect(update.priority).toBe(3);
   });
 });
 

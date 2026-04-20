@@ -67,7 +67,11 @@ interface RemoteConsumerRecord {
 
 interface MixSettings {
   activeListenChannelIds: string[];
+  activeTalkerChannelIds: string[];
+  channelPriorities: Record<string, number>;
   channelVolumes: Record<string, number>;
+  duckingEnabled: boolean;
+  duckLevel: number;
   masterVolume: number;
 }
 
@@ -79,7 +83,11 @@ type ProducerTrack = NonNullable<ProducerOptions["track"]>;
 
 const DEFAULT_MIX_SETTINGS: MixSettings = {
   activeListenChannelIds: [],
+  activeTalkerChannelIds: [],
+  channelPriorities: {},
   channelVolumes: {},
+  duckingEnabled: true,
+  duckLevel: 0.3,
   masterVolume: 1,
 };
 
@@ -129,7 +137,22 @@ function getRemoteConsumerVolume(activeChannelIds: readonly string[], settings: 
     ...matchingChannelIds.map((channelId) => settings.channelVolumes[channelId] ?? 1),
   );
 
-  return clampVolume(settings.masterVolume * loudestChannel);
+  let volume = clampVolume(settings.masterVolume * loudestChannel);
+
+  if (settings.duckingEnabled && settings.activeTalkerChannelIds.length > 0) {
+    const highestActivePriority = Math.max(
+      ...settings.activeTalkerChannelIds.map((id) => settings.channelPriorities[id] ?? 5),
+    );
+    const consumerMaxPriority = Math.max(
+      ...matchingChannelIds.map((id) => settings.channelPriorities[id] ?? 5),
+    );
+
+    if (consumerMaxPriority < highestActivePriority) {
+      volume *= settings.duckLevel;
+    }
+  }
+
+  return clampVolume(volume);
 }
 
 function toMediasoupParameterMap(

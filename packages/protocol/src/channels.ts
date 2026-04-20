@@ -8,6 +8,7 @@ const channelMutationBaseSchema = z.object({
   isGlobal: z.boolean().optional().default(false),
   channelType: ChannelTypeSchema.optional().default("intercom"),
   sourceUserId: z.string().min(1).optional(),
+  priority: z.number().int().min(1).max(10).optional().default(5),
 });
 
 export const CreateChannelRequestSchema = channelMutationBaseSchema;

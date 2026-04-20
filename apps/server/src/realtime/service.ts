@@ -379,6 +379,8 @@ export class RealtimeService {
       previousTalkStates,
     };
 
+    try { this.options.database.logEvent({ event_type: "allpage:start", user_id: connection.user.id, username: connection.user.username }); } catch { /* never crash */ }
+
     // Start pager talking on all channels they have talk permission for
     const allTalkChannelIds = connection.user.channelPermissions
       .filter((p) => p.canTalk)
@@ -487,6 +489,8 @@ export class RealtimeService {
       this.sendOperatorState(record.authenticated);
       await this.syncMediaState(record.authenticated);
     }
+
+    try { this.options.database.logEvent({ event_type: "allpage:stop", user_id: connection.user.id, username: connection.user.username }); } catch { /* never crash */ }
 
     this.allPageState = undefined;
 
@@ -1115,6 +1119,13 @@ export class RealtimeService {
     this.sendOperatorState(connection);
     await this.syncMediaState(connection);
     this.broadcastAdminDashboard();
+
+    try {
+      const eventType = mode === "start" ? "talk:start" : "talk:stop";
+      for (const channelId of channelIds) {
+        this.options.database.logEvent({ event_type: eventType, user_id: connection.user.id, username: connection.user.username, channel_id: channelId });
+      }
+    } catch { /* never crash */ }
   }
 
   private async authenticateConnection(
@@ -1198,6 +1209,8 @@ export class RealtimeService {
     this.broadcastPresence();
     this.broadcastOnlineUsers();
 
+    try { this.options.database.logEvent({ event_type: "user:connected", user_id: user.id, username: user.username }); } catch { /* never crash */ }
+
     return authenticated;
   }
 
@@ -1271,6 +1284,10 @@ export class RealtimeService {
         talking: false,
       };
       this.operatorStates.set(connection.authenticated.sessionToken, connection.authenticated.state);
+    }
+
+    if (connection.authenticated) {
+      try { this.options.database.logEvent({ event_type: "user:disconnected", user_id: connection.authenticated.user.id, username: connection.authenticated.user.username }); } catch { /* never crash */ }
     }
 
     this.connections.delete(socket);

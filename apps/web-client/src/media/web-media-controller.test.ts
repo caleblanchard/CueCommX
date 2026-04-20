@@ -53,16 +53,103 @@ describe("getRemoteConsumerVolume", () => {
   it("uses the loudest routed listen channel and master volume", () => {
     const settings: MixSettings = {
       activeListenChannelIds: ["ch-audio", "ch-stage"],
+      activeTalkerChannelIds: [],
       channelPans: {},
+      channelPriorities: {},
       channelVolumes: {
         "ch-audio": 0.4,
         "ch-stage": 0.8,
       },
+      duckingEnabled: false,
+      duckLevel: 0.3,
       masterVolume: 0.5,
     };
 
     expect(getRemoteConsumerVolume(["ch-audio", "ch-stage"], settings)).toBe(0.4);
     expect(getRemoteConsumerVolume(["ch-video"], settings)).toBe(0);
+  });
+
+  it("ducks lower-priority channels when a higher-priority channel has active talkers", () => {
+    const settings: MixSettings = {
+      activeListenChannelIds: ["ch-audio", "ch-production"],
+      activeTalkerChannelIds: ["ch-production"],
+      channelPans: {},
+      channelPriorities: {
+        "ch-audio": 5,
+        "ch-production": 8,
+      },
+      channelVolumes: {
+        "ch-audio": 1,
+        "ch-production": 1,
+      },
+      duckingEnabled: true,
+      duckLevel: 0.3,
+      masterVolume: 1,
+    };
+
+    // ch-audio (priority 5) should be ducked because ch-production (priority 8) is active
+    expect(getRemoteConsumerVolume(["ch-audio"], settings)).toBeCloseTo(0.3, 5);
+
+    // ch-production (priority 8) should NOT be ducked — it is the highest priority active
+    expect(getRemoteConsumerVolume(["ch-production"], settings)).toBe(1);
+  });
+
+  it("does not duck when ducking is disabled", () => {
+    const settings: MixSettings = {
+      activeListenChannelIds: ["ch-audio", "ch-production"],
+      activeTalkerChannelIds: ["ch-production"],
+      channelPans: {},
+      channelPriorities: {
+        "ch-audio": 5,
+        "ch-production": 8,
+      },
+      channelVolumes: {
+        "ch-audio": 1,
+        "ch-production": 1,
+      },
+      duckingEnabled: false,
+      duckLevel: 0.3,
+      masterVolume: 1,
+    };
+
+    expect(getRemoteConsumerVolume(["ch-audio"], settings)).toBe(1);
+  });
+
+  it("does not duck channels at the same priority as the active talker", () => {
+    const settings: MixSettings = {
+      activeListenChannelIds: ["ch-audio", "ch-stage"],
+      activeTalkerChannelIds: ["ch-audio"],
+      channelPans: {},
+      channelPriorities: {
+        "ch-audio": 5,
+        "ch-stage": 5,
+      },
+      channelVolumes: {
+        "ch-audio": 1,
+        "ch-stage": 1,
+      },
+      duckingEnabled: true,
+      duckLevel: 0.3,
+      masterVolume: 1,
+    };
+
+    // Same priority — no ducking
+    expect(getRemoteConsumerVolume(["ch-stage"], settings)).toBe(1);
+  });
+
+  it("does not duck when no channels have active talkers", () => {
+    const settings: MixSettings = {
+      activeListenChannelIds: ["ch-audio"],
+      activeTalkerChannelIds: [],
+      channelPans: {},
+      channelPriorities: { "ch-audio": 5 },
+      channelVolumes: { "ch-audio": 0.8 },
+      duckingEnabled: true,
+      duckLevel: 0.3,
+      masterVolume: 1,
+    };
+
+    expect(getRemoteConsumerVolume(["ch-audio"], settings)).toBe(0.8);
   });
 });
 

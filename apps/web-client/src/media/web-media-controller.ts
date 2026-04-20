@@ -45,12 +45,14 @@ export interface WebMediaControllerOptions {
   onError?: (error: Error) => void;
   onInputDevicesChange?: (devices: MediaDeviceOption[]) => void;
   onLocalLevelChange?: (level: number) => void;
+  onRemoteLevelsChange?: (levels: Record<string, number>) => void;
   onRemoteTalkersChange?: (talkers: RemoteTalkerSnapshot[]) => void;
   realtimeClient: CueCommXRealtimeClient;
 }
 
 interface RemoteConsumerRecord {
   activeChannelIds: string[];
+  analyserNode?: AnalyserNode;
   audioElement: HTMLAudioElement;
   consumer: Consumer;
   gainNode?: GainNode;
@@ -62,15 +64,23 @@ interface RemoteConsumerRecord {
 
 export interface MixSettings {
   activeListenChannelIds: string[];
+  activeTalkerChannelIds: string[];
   channelPans: Record<string, number>;
+  channelPriorities: Record<string, number>;
   channelVolumes: Record<string, number>;
+  duckingEnabled: boolean;
+  duckLevel: number;
   masterVolume: number;
 }
 
 const DEFAULT_MIX_SETTINGS: MixSettings = {
   activeListenChannelIds: [],
+  activeTalkerChannelIds: [],
   channelPans: {},
+  channelPriorities: {},
   channelVolumes: {},
+  duckingEnabled: false,
+  duckLevel: 0.3,
   masterVolume: 1,
 };
 
@@ -333,7 +343,23 @@ export function getRemoteConsumerVolume(
     ...matchingChannelIds.map((channelId) => settings.channelVolumes[channelId] ?? 1),
   );
 
-  return clampVolume(settings.masterVolume * loudestChannel);
+  let volume = clampVolume(settings.masterVolume * loudestChannel);
+
+  // Audio ducking: reduce volume of lower-priority channels when
+  // a higher-priority channel has active talkers
+  if (settings.duckingEnabled && settings.activeTalkerChannelIds.length > 0) {
+    const highestActivePriority = Math.max(
+      ...settings.activeTalkerChannelIds.map((id) => settings.channelPriorities[id] ?? 5),
+    );
+    const consumerMaxPriority = Math.max(
+      ...matchingChannelIds.map((id) => settings.channelPriorities[id] ?? 5),
+    );
+    if (consumerMaxPriority < highestActivePriority) {
+      volume *= settings.duckLevel;
+    }
+  }
+
+  return volume;
 }
 
 export function getRemoteConsumerPan(
@@ -458,6 +484,8 @@ export class WebMediaController {
 
   private readonly remoteConsumers = new Map<string, RemoteConsumerRecord>();
 
+  private remoteLevelTimer: number | undefined;
+
   private recvTransport: Transport | undefined;
 
   private sendTransport: Transport | undefined;
@@ -519,6 +547,7 @@ export class WebMediaController {
   async close(): Promise<void> {
     this.resetConnection();
     this.stopMeter();
+    this.stopRemoteLevelMeter();
     this.stopQualityMonitor();
 
     if (this.sidetoneGainNode) {
@@ -566,6 +595,7 @@ export class WebMediaController {
 
   resetConnection(): void {
     this.stopQualityMonitor();
+    this.stopRemoteLevelMeter();
     this.producer?.close();
     this.producer = undefined;
     this.sendTransport?.close();
@@ -693,19 +723,24 @@ export class WebMediaController {
         try {
           const sourceNode = this.audioContext.createMediaElementSource(audioElement);
           const gainNode = this.audioContext.createGain();
+          const analyserNode = this.audioContext.createAnalyser();
+          analyserNode.fftSize = 256;
+          analyserNode.smoothingTimeConstant = 0.3;
           sourceNode.connect(gainNode);
+          gainNode.connect(analyserNode);
 
           if (typeof StereoPannerNode !== "undefined") {
             const panNode = this.audioContext.createStereoPanner();
-            gainNode.connect(panNode);
+            analyserNode.connect(panNode);
             panNode.connect(this.audioContext.destination);
             record.panNode = panNode;
           } else {
-            gainNode.connect(this.audioContext.destination);
+            analyserNode.connect(this.audioContext.destination);
           }
 
           record.sourceNode = sourceNode;
           record.gainNode = gainNode;
+          record.analyserNode = analyserNode;
         } catch {
           // Fall back to audioElement.volume if Web Audio routing fails
         }
@@ -714,6 +749,7 @@ export class WebMediaController {
       this.remoteConsumers.set(payload.consumerId, record);
       this.updateMix(this.mixSettings);
       this.emitRemoteTalkers();
+      this.startRemoteLevelMeter();
       await this.options.realtimeClient.resumeMediaConsumer(payload.consumerId);
       void audioElement.play().catch(() => undefined);
     } catch (error) {
@@ -952,6 +988,49 @@ export class WebMediaController {
 
     window.clearInterval(this.inputLevelTimer);
     this.inputLevelTimer = undefined;
+  }
+
+  private startRemoteLevelMeter(): void {
+    if (this.remoteLevelTimer) {
+      return;
+    }
+
+    this.remoteLevelTimer = window.setInterval(() => {
+      const channelLevels: Record<string, number> = {};
+
+      for (const record of this.remoteConsumers.values()) {
+        if (!record.analyserNode) {
+          continue;
+        }
+
+        const buffer = new Uint8Array(record.analyserNode.fftSize);
+        record.analyserNode.getByteTimeDomainData(buffer);
+        let sumSquares = 0;
+
+        for (const sample of buffer) {
+          const normalized = sample / 128 - 1;
+          sumSquares += normalized * normalized;
+        }
+
+        const rms = Math.sqrt(sumSquares / buffer.length);
+        const level = Math.min(100, Math.round(rms * 180));
+
+        for (const channelId of record.activeChannelIds) {
+          channelLevels[channelId] = Math.max(channelLevels[channelId] ?? 0, level);
+        }
+      }
+
+      this.options.onRemoteLevelsChange?.(channelLevels);
+    }, 150);
+  }
+
+  private stopRemoteLevelMeter(): void {
+    if (!this.remoteLevelTimer) {
+      return;
+    }
+
+    window.clearInterval(this.remoteLevelTimer);
+    this.remoteLevelTimer = undefined;
   }
 
   private attachLocalStream(stream: MediaStream): void {

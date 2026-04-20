@@ -59,7 +59,9 @@ import {
   type AudioProcessingPreferences,
   clearStoredSession,
   DEFAULT_AUDIO_PROCESSING,
+  DEFAULT_DUCKING_SETTINGS,
   DEFAULT_SIDETONE_SETTINGS,
+  type DuckingSettings,
   hasStoredPreferredListenChannelIds,
   loadStoredSession,
   loadWebClientPreferences,
@@ -278,6 +280,7 @@ export default function App() {
     persistedPreferences.preferredListenChannelIds,
   );
   const [remoteTalkers, setRemoteTalkers] = useState<RemoteTalkerSnapshot[]>([]);
+  const [remoteLevels, setRemoteLevels] = useState<Record<string, number>>({});
   const [connectionQuality, setConnectionQuality] = useState<ConnectionQuality | undefined>(undefined);
   const [preflightState, setPreflightState] = useState<PreflightState>({
     micLevel: 0,
@@ -295,6 +298,7 @@ export default function App() {
   const [voxSettings, setVoxSettings] = useState<VoxSettings>(persistedPreferences.voxSettings);
   const [channelPans, setChannelPans] = useState<Record<string, number>>(persistedPreferences.channelPans);
   const [sidetone, setSidetone] = useState<SidetoneSettings>(persistedPreferences.sidetone ?? { ...DEFAULT_SIDETONE_SETTINGS });
+  const [ducking, setDucking] = useState<DuckingSettings>(persistedPreferences.ducking ?? { ...DEFAULT_DUCKING_SETTINGS });
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileNotice, setProfileNotice] = useState<string>();
   const voxDetectorRef = useRef<VoxDetector | null>(null);
@@ -737,6 +741,13 @@ export default function App() {
 
         setInputLevel(level);
       },
+      onRemoteLevelsChange: (levels) => {
+        if (!active) {
+          return;
+        }
+
+        setRemoteLevels(levels);
+      },
       onRemoteTalkersChange: (talkers) => {
         if (!active) {
           return;
@@ -765,6 +776,7 @@ export default function App() {
       setInputDevices([]);
       setInputLevel(0);
       setRemoteTalkers([]);
+      setRemoteLevels({});
       setConnectionQuality(undefined);
       setOnlineUsers([]);
       setDirectCall(null);
@@ -845,6 +857,7 @@ export default function App() {
       audioProcessing,
       channelPans,
       channelVolumes,
+      ducking,
       latchModeChannelIds,
       masterVolume,
       preferredListenChannelIds,
@@ -858,6 +871,7 @@ export default function App() {
     audioProcessing,
     channelPans,
     channelVolumes,
+    ducking,
     hasPersistedListenPreferences,
     latchModeChannelIds,
     masterVolume,
@@ -986,11 +1000,17 @@ export default function App() {
   useEffect(() => {
     mediaControllerRef.current?.updateMix({
       activeListenChannelIds: listenChannelIds,
+      activeTalkerChannelIds: remoteTalkers.flatMap((t) => t.activeChannelIds),
       channelPans,
+      channelPriorities: Object.fromEntries(
+        (state.session?.channels ?? []).map((ch) => [ch.id, ch.priority ?? 5]),
+      ),
       channelVolumes: mixChannelVolumes,
+      duckingEnabled: ducking.enabled,
+      duckLevel: ducking.level / 100,
       masterVolume: toFraction(masterVolume),
     });
-  }, [channelPans, listenChannelIds, masterVolume, mixChannelVolumes]);
+  }, [channelPans, ducking, listenChannelIds, masterVolume, mixChannelVolumes, remoteTalkers, state.session?.channels]);
 
   useEffect(() => {
     if (!audioArmed || !mediaControllerRef.current) {
@@ -1002,6 +1022,7 @@ export default function App() {
       setAudioReady(false);
       setInputLevel(0);
       setRemoteTalkers([]);
+      setRemoteLevels({});
       return;
     }
 
@@ -1087,6 +1108,13 @@ export default function App() {
             level: typeof st.level === "number" ? st.level : 15,
           });
         }
+        if (sp.ducking && typeof sp.ducking === "object") {
+          const dk = sp.ducking as Record<string, unknown>;
+          setDucking({
+            enabled: typeof dk.enabled === "boolean" ? dk.enabled : true,
+            level: typeof dk.level === "number" ? dk.level : 30,
+          });
+        }
         if (sp.voxSettings && typeof sp.voxSettings === "object") {
           const vs = sp.voxSettings as Record<string, unknown>;
           setVoxSettings({
@@ -1121,6 +1149,7 @@ export default function App() {
         masterVolume,
         channelVolumes,
         channelPans,
+        ducking,
         latchModeChannelIds,
         voxModeChannelIds,
         voxSettings,
@@ -2156,6 +2185,23 @@ export default function App() {
                               )}
                             </div>
                           </div>
+
+                          {/* Per-channel audio level meter */}
+                          {talkersOnChannel.length > 0 ? (
+                            <div className="mt-3">
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <Volume2 className="h-3 w-3" />
+                                <span>Channel level</span>
+                                <span className="ml-auto">{remoteLevels[channel.id] ?? 0}%</span>
+                              </div>
+                              <div className="relative mt-1 h-2 overflow-hidden rounded-full bg-secondary/70">
+                                <div
+                                  className="h-full rounded-full bg-[linear-gradient(90deg,hsl(var(--primary))_0%,#10B981_55%,#F59E0B_100%)] transition-[width] duration-150"
+                                  style={{ width: `${remoteLevels[channel.id] ?? 0}%` }}
+                                />
+                              </div>
+                            </div>
+                          ) : null}
                         </CardContent>
                       </Card>
                     );
@@ -2353,6 +2399,50 @@ export default function App() {
                             ) : null}
                           </div>
                         </div>
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                            Audio ducking
+                          </p>
+                          <div className="space-y-3 rounded-lg border border-border/60 bg-background/35 p-3">
+                            <label className="flex cursor-pointer items-center justify-between">
+                              <span className="text-sm text-foreground">Enable auto-ducking</span>
+                              <input
+                                checked={ducking.enabled}
+                                className="h-4 w-4 accent-primary"
+                                onChange={() =>
+                                  setDucking((prev) => ({ ...prev, enabled: !prev.enabled }))
+                                }
+                                type="checkbox"
+                              />
+                            </label>
+                            {ducking.enabled ? (
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                                  <label htmlFor="duck-level">Duck level</label>
+                                  <span>{ducking.level}%</span>
+                                </div>
+                                <input
+                                  className={sliderClassName}
+                                  id="duck-level"
+                                  max={80}
+                                  min={10}
+                                  onChange={(event) =>
+                                    setDucking((prev) => ({
+                                      ...prev,
+                                      level: Number(event.target.value),
+                                    }))
+                                  }
+                                  step={5}
+                                  type="range"
+                                  value={ducking.level}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                  Lower-priority channels reduce to this level when a higher-priority channel is active.
+                                </p>
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
                         <div className="flex gap-2">
                           <Button
                             className="flex-1 justify-center"
@@ -2419,6 +2509,39 @@ export default function App() {
                         {audioError}
                       </div>
                     ) : null}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardDescription>Quick reference</CardDescription>
+                    <CardTitle className="flex items-center gap-2">
+                      <Keyboard className="h-4 w-4" />
+                      Keyboard shortcuts
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid gap-2 text-sm">
+                      <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/35 px-3 py-2">
+                        <span className="text-muted-foreground">Push-to-talk (first channel)</span>
+                        <kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">Space</kbd>
+                      </div>
+                      <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/35 px-3 py-2">
+                        <span className="text-muted-foreground">Talk on channel 1–9</span>
+                        <kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">1</kbd>–<kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">9</kbd>
+                      </div>
+                      <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/35 px-3 py-2">
+                        <span className="text-muted-foreground">Toggle listen channel 1–9</span>
+                        <kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">F1</kbd>–<kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">F9</kbd>
+                      </div>
+                      <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/35 px-3 py-2">
+                        <span className="text-muted-foreground">Stop all talk</span>
+                        <kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">Esc</kbd>
+                      </div>
+                    </div>
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      Shortcuts are active when audio is armed and no input field is focused. Hold number keys for momentary PTT.
+                    </p>
                   </CardContent>
                 </Card>
 

@@ -243,6 +243,7 @@ export default function App() {
   const [channelIsGlobal, setChannelIsGlobal] = useState(false);
   const [channelType, setChannelType] = useState<"intercom" | "program">("intercom");
   const [channelSourceUserId, setChannelSourceUserId] = useState<string>("");
+  const [channelPriority, setChannelPriority] = useState(5);
   const [editingGroupId, setEditingGroupId] = useState<string | undefined>();
   const [groupName, setGroupName] = useState("");
   const [groupChannelIds, setGroupChannelIds] = useState<string[]>([]);
@@ -482,6 +483,7 @@ export default function App() {
     setChannelIsGlobal(false);
     setChannelType("intercom");
     setChannelSourceUserId("");
+    setChannelPriority(5);
   }
 
   function resetGroupForm(): void {
@@ -529,6 +531,7 @@ export default function App() {
             color: channelColor,
             isGlobal: channelIsGlobal,
             channelType,
+            priority: channelPriority,
             ...(channelType === "program" && channelSourceUserId
               ? { sourceUserId: channelSourceUserId }
               : {}),
@@ -939,6 +942,7 @@ export default function App() {
     setChannelIsGlobal(channel.isGlobal ?? false);
     setChannelType(channel.channelType ?? "intercom");
     setChannelSourceUserId(channel.sourceUserId ?? "");
+    setChannelPriority(channel.priority ?? 5);
   }
 
   function handleEditGroup(group: GroupInfo): void {
@@ -2006,6 +2010,27 @@ export default function App() {
                           </select>
                         </div>
                       ) : null}
+
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-foreground" htmlFor="channelPriority">
+                          Priority (1 = lowest, 10 = highest)
+                        </label>
+                        <select
+                          className="w-full rounded-xl border border-border/70 bg-background/60 px-4 py-2.5 text-sm text-foreground"
+                          id="channelPriority"
+                          onChange={(event) => setChannelPriority(Number(event.target.value))}
+                          value={channelPriority}
+                        >
+                          {Array.from({ length: 10 }, (_, i) => i + 1).map((p) => (
+                            <option key={p} value={p}>
+                              {p}{p === 5 ? " (default)" : p >= 8 ? " (high)" : p <= 2 ? " (low)" : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-xs text-muted-foreground">
+                          Higher-priority channels duck (reduce volume of) lower-priority channels when active.
+                        </p>
+                      </div>
 
                       <div className="flex flex-wrap gap-3">
                         <Button disabled={state.channelFormPending} type="submit">

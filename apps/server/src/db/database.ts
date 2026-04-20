@@ -17,6 +17,18 @@ export interface DatabaseOptions {
   dbPath: string;
 }
 
+export interface EventLogEntry {
+  id: number;
+  timestamp: string;
+  event_type: string;
+  user_id: string | null;
+  username: string | null;
+  channel_id: string | null;
+  channel_name: string | null;
+  details: string | null;
+  severity: string;
+}
+
 interface UserRow {
   id: string;
   pinHash: string | null;
@@ -64,8 +76,8 @@ export class DatabaseService {
 
   listChannels(): ChannelInfo[] {
     const rows = this.connection
-      .prepare("SELECT id, name, color, COALESCE(is_global, 0) as isGlobal, COALESCE(channel_type, 'intercom') as channelType, source_user_id as sourceUserId FROM channels ORDER BY sort_order ASC, name ASC")
-      .all() as Array<{ id: string; name: string; color: string; isGlobal: number; channelType: string; sourceUserId: string | null }>;
+      .prepare("SELECT id, name, color, COALESCE(is_global, 0) as isGlobal, COALESCE(channel_type, 'intercom') as channelType, source_user_id as sourceUserId, COALESCE(priority, 5) as priority FROM channels ORDER BY sort_order ASC, name ASC")
+      .all() as Array<{ id: string; name: string; color: string; isGlobal: number; channelType: string; sourceUserId: string | null; priority: number }>;
 
     return rows.map((row) => ({
       id: row.id,
@@ -74,6 +86,7 @@ export class DatabaseService {
       isGlobal: row.isGlobal === 1,
       channelType: (row.channelType === "program" ? "program" : "intercom") as ChannelType,
       ...(row.sourceUserId ? { sourceUserId: row.sourceUserId } : {}),
+      priority: row.priority,
     }));
   }
 
@@ -83,12 +96,13 @@ export class DatabaseService {
         `
           SELECT id, name, color, COALESCE(is_global, 0) as isGlobal,
                  COALESCE(channel_type, 'intercom') as channelType,
-                 source_user_id as sourceUserId
+                 source_user_id as sourceUserId,
+                 COALESCE(priority, 5) as priority
           FROM channels
           WHERE id = ?
         `,
       )
-      .get(channelId) as { id: string; name: string; color: string; isGlobal: number; channelType: string; sourceUserId: string | null } | undefined;
+      .get(channelId) as { id: string; name: string; color: string; isGlobal: number; channelType: string; sourceUserId: string | null; priority: number } | undefined;
 
     if (!row) {
       return undefined;
@@ -101,6 +115,7 @@ export class DatabaseService {
       isGlobal: row.isGlobal === 1,
       channelType: (row.channelType === "program" ? "program" : "intercom") as ChannelType,
       ...(row.sourceUserId ? { sourceUserId: row.sourceUserId } : {}),
+      priority: row.priority,
     };
   }
 
@@ -110,12 +125,13 @@ export class DatabaseService {
         `
           SELECT id, name, color, COALESCE(is_global, 0) as isGlobal,
                  COALESCE(channel_type, 'intercom') as channelType,
-                 source_user_id as sourceUserId
+                 source_user_id as sourceUserId,
+                 COALESCE(priority, 5) as priority
           FROM channels
           WHERE lower(name) = lower(?)
         `,
       )
-      .get(name) as { id: string; name: string; color: string; isGlobal: number; channelType: string; sourceUserId: string | null } | undefined;
+      .get(name) as { id: string; name: string; color: string; isGlobal: number; channelType: string; sourceUserId: string | null; priority: number } | undefined;
 
     if (!row) {
       return undefined;
@@ -128,6 +144,7 @@ export class DatabaseService {
       isGlobal: row.isGlobal === 1,
       channelType: (row.channelType === "program" ? "program" : "intercom") as ChannelType,
       ...(row.sourceUserId ? { sourceUserId: row.sourceUserId } : {}),
+      priority: row.priority,
     };
   }
 
@@ -220,7 +237,7 @@ export class DatabaseService {
       .filter((user): user is UserInfo => Boolean(user));
   }
 
-  createChannel(input: { color: string; name: string; isGlobal?: boolean; channelType?: ChannelType; sourceUserId?: string }): ChannelInfo {
+  createChannel(input: { color: string; name: string; isGlobal?: boolean; channelType?: ChannelType; sourceUserId?: string; priority?: number }): ChannelInfo {
     const baseChannelId = `ch-${toChannelSlug(input.name)}`;
     let channelId = baseChannelId;
     let suffix = 2;
@@ -237,8 +254,8 @@ export class DatabaseService {
     this.connection
       .prepare(
         `
-          INSERT INTO channels (id, name, color, sort_order, is_global, channel_type, source_user_id)
-          VALUES (@id, @name, @color, @sortOrder, @isGlobal, @channelType, @sourceUserId)
+          INSERT INTO channels (id, name, color, sort_order, is_global, channel_type, source_user_id, priority)
+          VALUES (@id, @name, @color, @sortOrder, @isGlobal, @channelType, @sourceUserId, @priority)
         `,
       )
       .run({
@@ -249,6 +266,7 @@ export class DatabaseService {
         isGlobal: input.isGlobal ? 1 : 0,
         channelType: input.channelType ?? "intercom",
         sourceUserId: input.sourceUserId ?? null,
+        priority: input.priority ?? 5,
       });
 
     const channel = this.getChannel(channelId);
@@ -292,7 +310,8 @@ export class DatabaseService {
           SELECT DISTINCT channels.id, channels.name, channels.color,
                  COALESCE(channels.is_global, 0) as isGlobal,
                  COALESCE(channels.channel_type, 'intercom') as channelType,
-                 channels.source_user_id as sourceUserId
+                 channels.source_user_id as sourceUserId,
+                 COALESCE(channels.priority, 5) as priority
           FROM channels
           INNER JOIN channel_permissions
             ON channel_permissions.channel_id = channels.id
@@ -301,7 +320,7 @@ export class DatabaseService {
           ORDER BY channels.sort_order ASC, channels.name ASC
         `,
       )
-      .all(userId) as Array<{ id: string; name: string; color: string; isGlobal: number; channelType: string; sourceUserId: string | null }>;
+      .all(userId) as Array<{ id: string; name: string; color: string; isGlobal: number; channelType: string; sourceUserId: string | null; priority: number }>;
 
     return rows.map((row) => ({
       id: row.id,
@@ -310,6 +329,7 @@ export class DatabaseService {
       isGlobal: row.isGlobal === 1,
       channelType: (row.channelType === "program" ? "program" : "intercom") as ChannelType,
       ...(row.sourceUserId ? { sourceUserId: row.sourceUserId } : {}),
+      priority: row.priority,
     }));
   }
 
@@ -398,6 +418,7 @@ export class DatabaseService {
       isGlobal?: boolean;
       channelType?: ChannelType;
       sourceUserId?: string;
+      priority?: number;
     },
   ): void {
     this.connection
@@ -408,7 +429,8 @@ export class DatabaseService {
               color = @color,
               is_global = @isGlobal,
               channel_type = @channelType,
-              source_user_id = @sourceUserId
+              source_user_id = @sourceUserId,
+              priority = @priority
           WHERE id = @id
         `,
       )
@@ -419,6 +441,7 @@ export class DatabaseService {
         isGlobal: input.isGlobal ? 1 : 0,
         channelType: input.channelType ?? "intercom",
         sourceUserId: input.sourceUserId ?? null,
+        priority: input.priority ?? 5,
       });
   }
 
@@ -615,6 +638,86 @@ export class DatabaseService {
     }));
   }
 
+  // --- Event logging ---
+
+  logEvent(entry: {
+    event_type: string;
+    user_id?: string;
+    username?: string;
+    channel_id?: string;
+    channel_name?: string;
+    details?: string;
+    severity?: string;
+  }): void {
+    try {
+      this.connection.prepare(`
+        INSERT INTO event_log (event_type, user_id, username, channel_id, channel_name, details, severity)
+        VALUES (@event_type, @user_id, @username, @channel_id, @channel_name, @details, @severity)
+      `).run({
+        event_type: entry.event_type,
+        user_id: entry.user_id ?? null,
+        username: entry.username ?? null,
+        channel_id: entry.channel_id ?? null,
+        channel_name: entry.channel_name ?? null,
+        details: entry.details ?? null,
+        severity: entry.severity ?? "info",
+      });
+    } catch {
+      // Never crash the server for logging failures
+    }
+  }
+
+  getEventLog(filters?: {
+    event_type?: string;
+    user_id?: string;
+    severity?: string;
+    since?: string;
+    until?: string;
+    limit?: number;
+    offset?: number;
+  }): EventLogEntry[] {
+    const conditions: string[] = [];
+    const params: Record<string, unknown> = {};
+
+    if (filters?.event_type) {
+      conditions.push("event_type = @event_type");
+      params.event_type = filters.event_type;
+    }
+    if (filters?.user_id) {
+      conditions.push("user_id = @user_id");
+      params.user_id = filters.user_id;
+    }
+    if (filters?.severity) {
+      conditions.push("severity = @severity");
+      params.severity = filters.severity;
+    }
+    if (filters?.since) {
+      conditions.push("timestamp >= @since");
+      params.since = filters.since;
+    }
+    if (filters?.until) {
+      conditions.push("timestamp <= @until");
+      params.until = filters.until;
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const limit = filters?.limit ?? 100;
+    const offset = filters?.offset ?? 0;
+
+    return this.connection.prepare(`
+      SELECT * FROM event_log ${whereClause}
+      ORDER BY timestamp DESC
+      LIMIT @limit OFFSET @offset
+    `).all({ ...params, limit, offset }) as EventLogEntry[];
+  }
+
+  pruneEventLog(olderThanDays: number): number {
+    const result = this.connection.prepare(`
+      DELETE FROM event_log WHERE timestamp < datetime('now', @days || ' days')
+    `).run({ days: -olderThanDays });
+    return result.changes;
+  }
+
   private migrate(): void {
     const schema = readFileSync(new URL("./schema.sql", import.meta.url), "utf8");
     this.connection.exec(schema);
@@ -630,6 +733,10 @@ export class DatabaseService {
     if (!columns.some((c) => c.name === "source_user_id")) {
       this.connection.exec("ALTER TABLE channels ADD COLUMN source_user_id TEXT");
     }
+    if (!columns.some((c) => c.name === "priority")) {
+      this.connection.exec("ALTER TABLE channels ADD COLUMN priority INTEGER NOT NULL DEFAULT 5");
+    }
+    this.connection.exec("UPDATE channels SET priority = 8 WHERE id = 'ch-production' AND priority = 5");
 
     this.ensureCaseInsensitiveUsernameUniqueness();
     this.connection.exec(

@@ -467,6 +467,7 @@ export default function App() {
     fromUsername: string;
     duckLevel: number;
   } | null>(null);
+  const [duckingEnabled, setDuckingEnabled] = useState(true);
   const [voxEnabled, setVoxEnabled] = useState(false);
   const [voxThreshold, setVoxThreshold] = useState(15);
   const [preflightStep, setPreflightStep] = useState<"idle" | "recording" | "done">("idle");
@@ -960,10 +961,16 @@ export default function App() {
   useEffect(() => {
     mediaControllerRef.current?.updateMix({
       activeListenChannelIds: listenChannelIds,
+      activeTalkerChannelIds: remoteTalkers.flatMap((t) => t.activeChannelIds),
+      channelPriorities: Object.fromEntries(
+        activeChannels.map((ch) => [ch.id, (ch as ChannelInfo).priority ?? 5]),
+      ),
       channelVolumes: mixChannelVolumes,
+      duckingEnabled,
+      duckLevel: 0.3,
       masterVolume: toFraction(masterVolume),
     });
-  }, [listenChannelIds, masterVolume, mixChannelVolumes]);
+  }, [activeChannels, duckingEnabled, listenChannelIds, masterVolume, mixChannelVolumes, remoteTalkers]);
 
   const mediaStartingRef = useRef(false);
 
@@ -1900,6 +1907,24 @@ export default function App() {
                     </View>
                     <Text className="text-sm leading-6 text-muted-foreground">
                       Audio processing takes effect the next time audio is armed.
+                    </Text>
+                  </SectionCard>
+
+                  <SectionCard>
+                    <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                      Audio ducking
+                    </Text>
+                    <View className="flex-row items-center justify-between">
+                      <Text className="text-sm text-foreground">Auto-ducking</Text>
+                      <Switch
+                        trackColor={{ false: "#334155", true: "#5eead4" }}
+                        thumbColor="#ffffff"
+                        value={duckingEnabled}
+                        onValueChange={setDuckingEnabled}
+                      />
+                    </View>
+                    <Text className="text-sm leading-6 text-muted-foreground">
+                      Automatically reduce lower-priority channel volume when a higher-priority channel is active.
                     </Text>
                   </SectionCard>
 
