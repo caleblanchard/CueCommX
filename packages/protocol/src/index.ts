@@ -6,4 +6,5 @@ export * from "./groups.js";
 export * from "./media.js";
 export * from "./messages.js";
 export * from "./models.js";
+export * from "./preferences.js";
 export * from "./users.js";

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { ChannelInfoSchema, PROTOCOL_VERSION, UserInfoSchema } from "./models.js";
 import { GroupInfoSchema } from "./groups.js";
+import { UserPreferencesSchema } from "./preferences.js";
 
 export const AuthCredentialsSchema = z.object({
   username: z.string().trim().min(1),
@@ -22,6 +23,7 @@ export const AuthSuccessResponseSchema = z.object({
   user: UserInfoSchema,
   channels: z.array(ChannelInfoSchema),
   groups: z.array(GroupInfoSchema).optional().default([]),
+  preferences: UserPreferencesSchema.optional().default({}),
 });
 export type AuthSuccessResponse = z.infer<typeof AuthSuccessResponseSchema>;
 

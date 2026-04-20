@@ -15,6 +15,7 @@ import {
   LoginRequestSchema,
   ManagedUserSchema,
   PROTOCOL_VERSION,
+  SavePreferencesRequestSchema,
   SetupAdminRequestSchema,
   type AuthSuccessResponse,
   type ChannelPermission,
@@ -80,6 +81,7 @@ function createSuccessResponse(
     user,
     channels: database.listAssignedChannels(userId),
     groups,
+    preferences: database.getUserPreferences(userId),
   });
 }
 
@@ -300,6 +302,34 @@ export function createApp(options: CreateAppOptions) {
       }
 
       return reply.code(200).send(createSuccessResponse(database, sessionStore, user.id));
+    });
+
+    configuredApp.get("/api/preferences", async (request, reply) => {
+      const sessionContext = requireOperatorSession(request, reply, database, sessionStore);
+
+      if (!sessionContext) {
+        return reply;
+      }
+
+      return { preferences: database.getUserPreferences(sessionContext.user.id) };
+    });
+
+    configuredApp.put("/api/preferences", async (request, reply) => {
+      const sessionContext = requireOperatorSession(request, reply, database, sessionStore);
+
+      if (!sessionContext) {
+        return reply;
+      }
+
+      const parsed = SavePreferencesRequestSchema.safeParse(request.body);
+
+      if (!parsed.success) {
+        return reply.code(400).send(createFailureResponse(parsed.error.issues[0]?.message ?? "Invalid preferences."));
+      }
+
+      database.saveUserPreferences(sessionContext.user.id, parsed.data);
+
+      return { preferences: database.getUserPreferences(sessionContext.user.id) };
     });
 
     configuredApp.get("/api/users", async (request, reply) => {

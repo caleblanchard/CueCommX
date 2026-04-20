@@ -53,18 +53,23 @@ interface RemoteConsumerRecord {
   activeChannelIds: string[];
   audioElement: HTMLAudioElement;
   consumer: Consumer;
+  gainNode?: GainNode;
+  panNode?: StereoPannerNode;
   producerUserId: string;
   producerUsername: string;
+  sourceNode?: MediaElementAudioSourceNode;
 }
 
 export interface MixSettings {
   activeListenChannelIds: string[];
+  channelPans: Record<string, number>;
   channelVolumes: Record<string, number>;
   masterVolume: number;
 }
 
 const DEFAULT_MIX_SETTINGS: MixSettings = {
   activeListenChannelIds: [],
+  channelPans: {},
   channelVolumes: {},
   masterVolume: 1,
 };
@@ -331,6 +336,22 @@ export function getRemoteConsumerVolume(
   return clampVolume(settings.masterVolume * loudestChannel);
 }
 
+export function getRemoteConsumerPan(
+  activeChannelIds: readonly string[],
+  settings: MixSettings,
+): number {
+  const matchingIds = activeChannelIds.filter((id) =>
+    settings.activeListenChannelIds.includes(id),
+  );
+
+  if (matchingIds.length === 0) {
+    return 0;
+  }
+
+  const pans = matchingIds.map((id) => settings.channelPans[id] ?? 0);
+  return Math.max(-1, Math.min(1, pans.reduce((sum, p) => sum + p, 0) / pans.length));
+}
+
 const QUALITY_THRESHOLDS = {
   excellent: { maxRttMs: 30, maxLossPercent: 0.5, maxJitterMs: 5 },
   good: { maxRttMs: 50, maxLossPercent: 1, maxJitterMs: 15 },
@@ -441,6 +462,12 @@ export class WebMediaController {
 
   private sendTransport: Transport | undefined;
 
+  private sidetoneEnabled = false;
+
+  private sidetoneGainNode: GainNode | null = null;
+
+  private sidetoneLevel = 0.15;
+
   constructor(private readonly options: WebMediaControllerOptions) {}
 
   getVoxAudioNodes(): { audioContext: AudioContext; sourceNode: MediaStreamAudioSourceNode } | undefined {
@@ -451,6 +478,40 @@ export class WebMediaController {
     return { audioContext: this.audioContext, sourceNode: this.localAudioSource };
   }
 
+  enableSidetone(level: number): void {
+    this.sidetoneLevel = Math.max(0, Math.min(0.3, level));
+    this.sidetoneEnabled = true;
+
+    if (!this.audioContext || !this.localAudioSource) {
+      return;
+    }
+
+    if (!this.sidetoneGainNode) {
+      this.sidetoneGainNode = this.audioContext.createGain();
+      this.localAudioSource.connect(this.sidetoneGainNode);
+      this.sidetoneGainNode.connect(this.audioContext.destination);
+    }
+
+    this.sidetoneGainNode.gain.value = this.sidetoneLevel;
+  }
+
+  disableSidetone(): void {
+    this.sidetoneEnabled = false;
+
+    if (this.sidetoneGainNode) {
+      this.sidetoneGainNode.disconnect();
+      this.sidetoneGainNode = null;
+    }
+  }
+
+  setSidetoneLevel(level: number): void {
+    this.sidetoneLevel = Math.max(0, Math.min(0.3, level));
+
+    if (this.sidetoneGainNode) {
+      this.sidetoneGainNode.gain.value = this.sidetoneLevel;
+    }
+  }
+
   setAudioProcessing(processing: AudioProcessingPreferences): void {
     this.audioProcessing = { ...processing };
   }
@@ -459,6 +520,12 @@ export class WebMediaController {
     this.resetConnection();
     this.stopMeter();
     this.stopQualityMonitor();
+
+    if (this.sidetoneGainNode) {
+      this.sidetoneGainNode.disconnect();
+      this.sidetoneGainNode = null;
+    }
+
     this.localAudioSource?.disconnect();
     this.localAudioSource = undefined;
     this.analyserNode?.disconnect();
@@ -567,7 +634,19 @@ export class WebMediaController {
     };
 
     for (const record of this.remoteConsumers.values()) {
-      record.audioElement.volume = getRemoteConsumerVolume(record.activeChannelIds, this.mixSettings);
+      const volume = getRemoteConsumerVolume(record.activeChannelIds, this.mixSettings);
+
+      if (record.gainNode) {
+        record.gainNode.gain.value = volume;
+        record.audioElement.volume = 1;
+      } else {
+        record.audioElement.volume = volume;
+      }
+
+      if (record.panNode) {
+        const pan = getRemoteConsumerPan(record.activeChannelIds, this.mixSettings);
+        record.panNode.pan.value = pan;
+      }
     }
   }
 
@@ -609,6 +688,28 @@ export class WebMediaController {
         producerUserId: payload.producerUserId,
         producerUsername: payload.producerUsername,
       };
+
+      if (this.audioContext) {
+        try {
+          const sourceNode = this.audioContext.createMediaElementSource(audioElement);
+          const gainNode = this.audioContext.createGain();
+          sourceNode.connect(gainNode);
+
+          if (typeof StereoPannerNode !== "undefined") {
+            const panNode = this.audioContext.createStereoPanner();
+            gainNode.connect(panNode);
+            panNode.connect(this.audioContext.destination);
+            record.panNode = panNode;
+          } else {
+            gainNode.connect(this.audioContext.destination);
+          }
+
+          record.sourceNode = sourceNode;
+          record.gainNode = gainNode;
+        } catch {
+          // Fall back to audioElement.volume if Web Audio routing fails
+        }
+      }
 
       this.remoteConsumers.set(payload.consumerId, record);
       this.updateMix(this.mixSettings);
@@ -700,6 +801,9 @@ export class WebMediaController {
       return;
     }
 
+    record.panNode?.disconnect();
+    record.gainNode?.disconnect();
+    record.sourceNode?.disconnect();
     record.consumer.close();
     record.audioElement.pause();
     record.audioElement.removeAttribute("src");
@@ -853,6 +957,12 @@ export class WebMediaController {
   private attachLocalStream(stream: MediaStream): void {
     this.stopMeter();
     this.localAudioSource?.disconnect();
+
+    if (this.sidetoneGainNode) {
+      this.sidetoneGainNode.disconnect();
+      this.sidetoneGainNode = null;
+    }
+
     this.stopLocalStream();
     this.localStream = stream;
 
@@ -864,6 +974,14 @@ export class WebMediaController {
     this.analyserNode.fftSize = 256;
     this.localAudioSource = this.audioContext.createMediaStreamSource(stream);
     this.localAudioSource.connect(this.analyserNode);
+
+    if (this.sidetoneEnabled) {
+      this.sidetoneGainNode = this.audioContext.createGain();
+      this.sidetoneGainNode.gain.value = this.sidetoneLevel;
+      this.localAudioSource.connect(this.sidetoneGainNode);
+      this.sidetoneGainNode.connect(this.audioContext.destination);
+    }
+
     this.startMeter();
   }
 

@@ -53,6 +53,7 @@ describe("getRemoteConsumerVolume", () => {
   it("uses the loudest routed listen channel and master volume", () => {
     const settings: MixSettings = {
       activeListenChannelIds: ["ch-audio", "ch-stage"],
+      channelPans: {},
       channelVolumes: {
         "ch-audio": 0.4,
         "ch-stage": 0.8,

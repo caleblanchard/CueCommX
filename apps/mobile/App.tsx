@@ -444,6 +444,8 @@ export default function App() {
     echoCancellation: true,
   });
   const [connectionQuality, setConnectionQuality] = useState<ConnectionQuality | null>(null);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileNotice, setProfileNotice] = useState<string>();
   const [allPageActive, setAllPageActive] = useState<{ userId: string; username: string } | undefined>();
   const [incomingSignals, setIncomingSignals] = useState<Array<{ signalId: string; signalType: CallSignalType; fromUsername: string; targetChannelId?: string }>>([]);
   const [onlineUsers, setOnlineUsers] = useState<Array<{ id: string; username: string }>>([]);
@@ -1053,6 +1055,19 @@ export default function App() {
       });
 
       updateServerUrlInput(shell.baseUrl);
+
+      // Apply server-stored preferences if they exist
+      const serverPrefs = payload.preferences;
+      if (serverPrefs && typeof serverPrefs === "object" && Object.keys(serverPrefs).length > 0) {
+        const sp = serverPrefs as Record<string, unknown>;
+        if (typeof sp.masterVolume === "number") setMasterVolume(sp.masterVolume as number);
+        if (sp.channelVolumes && typeof sp.channelVolumes === "object") setChannelVolumes(sp.channelVolumes as Record<string, number>);
+        if (Array.isArray(sp.latchModeChannelIds)) {
+          const ids = sp.latchModeChannelIds as string[];
+          setTalkMode(ids.length > 0 ? "latched" : "momentary");
+        }
+      }
+
       setState((current) => ({
         ...current,
         discovery: shell.discovery,
@@ -1108,6 +1123,36 @@ export default function App() {
     setVoxEnabled(false);
     setPreflightStep("idle");
     setPreflightPassed(undefined);
+    setProfileNotice(undefined);
+  }
+
+  async function handleSaveProfile(): Promise<void> {
+    if (!state.session || !state.serverBaseUrl) return;
+    setProfileSaving(true);
+    setProfileNotice(undefined);
+    try {
+      const prefs = {
+        masterVolume,
+        channelVolumes,
+        audioProcessing,
+        activeGroupId,
+      };
+      const res = await fetch(`${state.serverBaseUrl}api/preferences`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${state.session.sessionToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(prefs),
+      });
+      if (!res.ok) throw new Error("Failed to save profile");
+      setProfileNotice("Profile saved");
+      setTimeout(() => setProfileNotice(undefined), 3000);
+    } catch (error) {
+      setProfileNotice(error instanceof Error ? error.message : "Save failed");
+    } finally {
+      setProfileSaving(false);
+    }
   }
 
   function handleDisconnect(): void {
@@ -1855,6 +1900,33 @@ export default function App() {
                     </View>
                     <Text className="text-sm leading-6 text-muted-foreground">
                       Audio processing takes effect the next time audio is armed.
+                    </Text>
+                  </SectionCard>
+
+                  <SectionCard>
+                    <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                      Web-only features
+                    </Text>
+                    <Text className="text-sm leading-6 text-muted-foreground">
+                      Sidetone (mic monitor) and split-ear stereo panning are available on the web client only. Mobile audio routing does not support these features.
+                    </Text>
+                  </SectionCard>
+
+                  <SectionCard>
+                    <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                      User profile
+                    </Text>
+                    <ActionButton
+                      disabled={profileSaving || !state.session}
+                      label={profileSaving ? "Saving…" : "Save profile to server"}
+                      onPress={() => void handleSaveProfile()}
+                      tone="secondary"
+                    />
+                    {profileNotice ? (
+                      <Text className="text-center text-xs text-muted-foreground">{profileNotice}</Text>
+                    ) : null}
+                    <Text className="text-sm leading-6 text-muted-foreground">
+                      Save your current volume, processing, and group settings to the server. Settings load automatically on next login.
                     </Text>
                   </SectionCard>
 

@@ -3267,4 +3267,171 @@ describe("createApp", () => {
 
     await app.close();
   });
+
+  it("saves and loads user preferences", async () => {
+    const userId = database.createUser({ username: "PrefUser", role: "operator", pinHash: hashPin("1111") });
+    database.grantChannelPermissions(userId, [{ channelId: "ch-production", canTalk: true, canListen: true }]);
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church",
+        host: "0.0.0.0",
+        port: 3000,
+        httpsPort: 3443,
+        rtcMinPort: 40000,
+        rtcMaxPort: 41000,
+        announcedIp: undefined,
+        dataDir: workingDirectory,
+        dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"),
+        maxUsers: 30,
+        maxChannels: 16,
+        logLevel: "info",
+      },
+      database,
+    });
+
+    const loginResponse = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { username: "PrefUser", pin: "1111" },
+    });
+    expect(loginResponse.statusCode).toBe(200);
+    const token = (loginResponse.json() as { sessionToken: string }).sessionToken;
+
+    const putResponse = await app.inject({
+      method: "PUT",
+      url: "/api/preferences",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { masterVolume: 80, talkMode: "latched" },
+    });
+    expect(putResponse.statusCode).toBe(200);
+    expect(putResponse.json()).toMatchObject({ preferences: { masterVolume: 80, talkMode: "latched" } });
+
+    const getResponse = await app.inject({
+      method: "GET",
+      url: "/api/preferences",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(getResponse.statusCode).toBe(200);
+    expect(getResponse.json()).toMatchObject({ preferences: { masterVolume: 80, talkMode: "latched" } });
+
+    await app.close();
+  });
+
+  it("returns preferences in login response", async () => {
+    const userId = database.createUser({ username: "PrefLogin", role: "operator", pinHash: hashPin("2222") });
+    database.grantChannelPermissions(userId, [{ channelId: "ch-production", canTalk: true, canListen: true }]);
+    database.saveUserPreferences(userId, { masterVolume: 60, talkMode: "momentary" });
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church",
+        host: "0.0.0.0",
+        port: 3000,
+        httpsPort: 3443,
+        rtcMinPort: 40000,
+        rtcMaxPort: 41000,
+        announcedIp: undefined,
+        dataDir: workingDirectory,
+        dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"),
+        maxUsers: 30,
+        maxChannels: 16,
+        logLevel: "info",
+      },
+      database,
+    });
+
+    const loginResponse = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { username: "PrefLogin", pin: "2222" },
+    });
+    expect(loginResponse.statusCode).toBe(200);
+    expect(loginResponse.json()).toMatchObject({
+      success: true,
+      preferences: { masterVolume: 60, talkMode: "momentary" },
+    });
+
+    await app.close();
+  });
+
+  it("returns empty preferences for new user", async () => {
+    const userId = database.createUser({ username: "FreshUser", role: "operator", pinHash: hashPin("3333") });
+    database.grantChannelPermissions(userId, [{ channelId: "ch-production", canTalk: true, canListen: true }]);
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church",
+        host: "0.0.0.0",
+        port: 3000,
+        httpsPort: 3443,
+        rtcMinPort: 40000,
+        rtcMaxPort: 41000,
+        announcedIp: undefined,
+        dataDir: workingDirectory,
+        dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"),
+        maxUsers: 30,
+        maxChannels: 16,
+        logLevel: "info",
+      },
+      database,
+    });
+
+    const loginResponse = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { username: "FreshUser", pin: "3333" },
+    });
+    expect(loginResponse.statusCode).toBe(200);
+    const token = (loginResponse.json() as { sessionToken: string }).sessionToken;
+
+    const getResponse = await app.inject({
+      method: "GET",
+      url: "/api/preferences",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(getResponse.statusCode).toBe(200);
+    expect(getResponse.json()).toEqual({ preferences: {} });
+
+    await app.close();
+  });
+
+  it("rejects preferences without auth", async () => {
+    const app = createApp({
+      config: {
+        serverName: "Main Church",
+        host: "0.0.0.0",
+        port: 3000,
+        httpsPort: 3443,
+        rtcMinPort: 40000,
+        rtcMaxPort: 41000,
+        announcedIp: undefined,
+        dataDir: workingDirectory,
+        dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"),
+        maxUsers: 30,
+        maxChannels: 16,
+        logLevel: "info",
+      },
+      database,
+    });
+
+    const getResponse = await app.inject({
+      method: "GET",
+      url: "/api/preferences",
+    });
+    expect(getResponse.statusCode).toBe(401);
+
+    const putResponse = await app.inject({
+      method: "PUT",
+      url: "/api/preferences",
+      payload: { masterVolume: 50 },
+    });
+    expect(putResponse.statusCode).toBe(401);
+
+    await app.close();
+  });
 });

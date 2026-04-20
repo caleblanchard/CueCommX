@@ -20,14 +20,26 @@ export const DEFAULT_VOX_SETTINGS: VoxSettings = {
   thresholdDb: -40,
 };
 
+export interface SidetoneSettings {
+  enabled: boolean;
+  level: number;
+}
+
+export const DEFAULT_SIDETONE_SETTINGS: SidetoneSettings = {
+  enabled: false,
+  level: 15,
+};
+
 export interface WebClientPreferences {
   activeGroupId?: string;
   audioProcessing: AudioProcessingPreferences;
+  channelPans: Record<string, number>;
   channelVolumes: Record<string, number>;
   latchModeChannelIds: string[];
   masterVolume: number;
   preferredListenChannelIds: string[];
   selectedInputDeviceId: string;
+  sidetone: SidetoneSettings;
   voxModeChannelIds: string[];
   voxSettings: VoxSettings;
 }
@@ -48,11 +60,13 @@ export interface StoredSession {
 export const DEFAULT_WEB_CLIENT_PREFERENCES: WebClientPreferences = {
   activeGroupId: undefined,
   audioProcessing: { ...DEFAULT_AUDIO_PROCESSING },
+  channelPans: {},
   channelVolumes: {},
   latchModeChannelIds: [],
   masterVolume: 100,
   preferredListenChannelIds: [],
   selectedInputDeviceId: "",
+  sidetone: { ...DEFAULT_SIDETONE_SETTINGS },
   voxModeChannelIds: [],
   voxSettings: { ...DEFAULT_VOX_SETTINGS },
 };
@@ -117,6 +131,34 @@ function toVoxSettings(value: unknown): VoxSettings {
   };
 }
 
+function toPanMap(value: unknown): Record<string, number> {
+  if (typeof value !== "object" || value === null) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1]))
+      .map(([channelId, pan]) => [channelId, Math.max(-1, Math.min(1, pan))]),
+  );
+}
+
+function toSidetoneSettings(value: unknown): SidetoneSettings {
+  if (typeof value !== "object" || value === null) {
+    return { ...DEFAULT_SIDETONE_SETTINGS };
+  }
+
+  const obj = value as Record<string, unknown>;
+
+  return {
+    enabled: typeof obj.enabled === "boolean" ? obj.enabled : DEFAULT_SIDETONE_SETTINGS.enabled,
+    level:
+      typeof obj.level === "number" && Number.isFinite(obj.level)
+        ? Math.max(0, Math.min(30, Math.round(obj.level)))
+        : DEFAULT_SIDETONE_SETTINGS.level,
+  };
+}
+
 export function parseWebClientPreferences(input: string | null | undefined): WebClientPreferences {
   if (!input) {
     return DEFAULT_WEB_CLIENT_PREFERENCES;
@@ -126,11 +168,13 @@ export function parseWebClientPreferences(input: string | null | undefined): Web
     const parsed = JSON.parse(input) as {
       activeGroupId?: unknown;
       audioProcessing?: unknown;
+      channelPans?: unknown;
       channelVolumes?: unknown;
       latchModeChannelIds?: unknown;
       masterVolume?: unknown;
       preferredListenChannelIds?: unknown;
       selectedInputDeviceId?: unknown;
+      sidetone?: unknown;
       voxModeChannelIds?: unknown;
       voxSettings?: unknown;
     };
@@ -141,6 +185,7 @@ export function parseWebClientPreferences(input: string | null | undefined): Web
           ? parsed.activeGroupId
           : undefined,
       audioProcessing: toAudioProcessing(parsed.audioProcessing),
+      channelPans: toPanMap(parsed.channelPans),
       channelVolumes: toVolumeMap(parsed.channelVolumes),
       latchModeChannelIds: toStringArray(parsed.latchModeChannelIds),
       masterVolume:
@@ -150,6 +195,7 @@ export function parseWebClientPreferences(input: string | null | undefined): Web
       preferredListenChannelIds: toStringArray(parsed.preferredListenChannelIds),
       selectedInputDeviceId:
         typeof parsed.selectedInputDeviceId === "string" ? parsed.selectedInputDeviceId : "",
+      sidetone: toSidetoneSettings(parsed.sidetone),
       voxModeChannelIds: toStringArray(parsed.voxModeChannelIds),
       voxSettings: toVoxSettings(parsed.voxSettings),
     };

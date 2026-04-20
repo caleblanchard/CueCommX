@@ -33,11 +33,13 @@ describe("parseWebClientPreferences", () => {
       ),
     ).toEqual({
       audioProcessing: { ...DEFAULT_AUDIO_PROCESSING },
+      channelPans: {},
       channelVolumes: { "ch-1": 35, "ch-2": 100 },
       latchModeChannelIds: ["ch-1"],
       masterVolume: 100,
       preferredListenChannelIds: ["ch-1", "ch-2"],
       selectedInputDeviceId: "mic-2",
+      sidetone: { enabled: false, level: 15 },
       voxModeChannelIds: [],
       voxSettings: { holdTimeMs: 500, thresholdDb: -40 },
     });
@@ -86,11 +88,13 @@ describe("load/saveWebClientPreferences", () => {
       },
       {
         audioProcessing: { autoGainControl: false, echoCancellation: true, noiseSuppression: true },
+        channelPans: {},
         channelVolumes: { "ch-1": 55 },
         latchModeChannelIds: ["ch-1"],
         masterVolume: 75,
         preferredListenChannelIds: ["ch-1"],
         selectedInputDeviceId: "usb-mic",
+        sidetone: { enabled: false, level: 15 },
         voxModeChannelIds: [],
         voxSettings: { holdTimeMs: 500, thresholdDb: -40 },
       },
@@ -104,11 +108,13 @@ describe("load/saveWebClientPreferences", () => {
       }),
     ).toEqual({
       audioProcessing: { autoGainControl: false, echoCancellation: true, noiseSuppression: true },
+      channelPans: {},
       channelVolumes: { "ch-1": 55 },
       latchModeChannelIds: ["ch-1"],
       masterVolume: 75,
       preferredListenChannelIds: ["ch-1"],
       selectedInputDeviceId: "usb-mic",
+      sidetone: { enabled: false, level: 15 },
       voxModeChannelIds: [],
       voxSettings: { holdTimeMs: 500, thresholdDb: -40 },
     });

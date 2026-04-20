@@ -17,10 +17,12 @@ import {
   ManagedUserSchema,
   OperatorStateSchema,
   PROTOCOL_VERSION,
+  SavePreferencesRequestSchema,
   SetupAdminRequestSchema,
   StatusResponseSchema,
   UpdateChannelRequestSchema,
   UpdateUserRequestSchema,
+  UserPreferencesSchema,
   UsersListResponseSchema,
   parseClientSignalingMessage,
   parseServerSignalingMessage,
@@ -779,5 +781,72 @@ describe("online users schema", () => {
       payload: { users: [{ id: "usr-1", username: "Admin" }] },
     });
     expect(msg.type).toBe("online:users");
+  });
+});
+
+describe("user preferences schemas", () => {
+  it("parses a full UserPreferences object", () => {
+    const prefs = UserPreferencesSchema.parse({
+      activeGroupId: "grp-1",
+      audioProcessing: { autoGainControl: false, echoCancellation: true, noiseSuppression: false },
+      channelPans: { "ch-production": -0.5, "ch-audio": 0.5 },
+      channelVolumes: { "ch-production": 80, "ch-audio": 60 },
+      latchModeChannelIds: ["ch-production"],
+      masterVolume: 75,
+      preferredListenChannelIds: ["ch-audio"],
+      sidetone: { enabled: true, level: 20 },
+      talkMode: "latched",
+      voxModeChannelIds: ["ch-audio"],
+      voxSettings: { holdTimeMs: 800, thresholdDb: -30 },
+    });
+
+    expect(prefs.masterVolume).toBe(75);
+    expect(prefs.talkMode).toBe("latched");
+    expect(prefs.sidetone?.level).toBe(20);
+    expect(prefs.channelPans?.["ch-production"]).toBe(-0.5);
+  });
+
+  it("defaults missing fields", () => {
+    const prefs = UserPreferencesSchema.parse({});
+
+    expect(prefs.masterVolume).toBeUndefined();
+    expect(prefs.talkMode).toBeUndefined();
+    expect(prefs.sidetone).toBeUndefined();
+    expect(prefs.audioProcessing).toBeUndefined();
+  });
+
+  it("validates sidetone level range", () => {
+    expect(() =>
+      UserPreferencesSchema.parse({ sidetone: { level: 50 } }),
+    ).toThrowError();
+
+    expect(() =>
+      UserPreferencesSchema.parse({ sidetone: { level: -1 } }),
+    ).toThrowError();
+
+    const valid = UserPreferencesSchema.parse({ sidetone: { level: 0 } });
+    expect(valid.sidetone?.level).toBe(0);
+
+    const validMax = UserPreferencesSchema.parse({ sidetone: { level: 30 } });
+    expect(validMax.sidetone?.level).toBe(30);
+  });
+
+  it("validates channel pan range", () => {
+    expect(() =>
+      UserPreferencesSchema.parse({ channelPans: { "ch-1": -2 } }),
+    ).toThrowError();
+
+    expect(() =>
+      UserPreferencesSchema.parse({ channelPans: { "ch-1": 1.5 } }),
+    ).toThrowError();
+
+    const valid = UserPreferencesSchema.parse({ channelPans: { "ch-1": -1, "ch-2": 1, "ch-3": 0 } });
+    expect(valid.channelPans?.["ch-1"]).toBe(-1);
+    expect(valid.channelPans?.["ch-2"]).toBe(1);
+  });
+
+  it("accepts SavePreferencesRequestSchema as alias", () => {
+    const req = SavePreferencesRequestSchema.parse({ masterVolume: 50 });
+    expect(req.masterVolume).toBe(50);
   });
 });

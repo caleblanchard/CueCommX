@@ -444,6 +444,28 @@ export class DatabaseService {
       .run(channelId);
   }
 
+  // --- User preferences ---
+
+  getUserPreferences(userId: string): Record<string, unknown> {
+    const row = this.connection
+      .prepare("SELECT settings_json FROM users WHERE id = ?")
+      .get(userId) as { settings_json: string } | undefined;
+
+    if (!row) return {};
+
+    try {
+      return JSON.parse(row.settings_json);
+    } catch {
+      return {};
+    }
+  }
+
+  saveUserPreferences(userId: string, preferences: Record<string, unknown>): void {
+    this.connection
+      .prepare("UPDATE users SET settings_json = ? WHERE id = ?")
+      .run(JSON.stringify(preferences), userId);
+  }
+
   // --- Group CRUD ---
 
   listGroups(): GroupInfo[] {

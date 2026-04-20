@@ -59,11 +59,13 @@ import {
   type AudioProcessingPreferences,
   clearStoredSession,
   DEFAULT_AUDIO_PROCESSING,
+  DEFAULT_SIDETONE_SETTINGS,
   hasStoredPreferredListenChannelIds,
   loadStoredSession,
   loadWebClientPreferences,
   saveStoredSession,
   saveWebClientPreferences,
+  type SidetoneSettings,
   type StorageLike,
   type VoxSettings,
   WEB_CLIENT_PREFERENCES_KEY,
@@ -291,6 +293,10 @@ export default function App() {
   const [incomingSignals, setIncomingSignals] = useState<Array<{ signalId: string; signalType: CallSignalType; fromUsername: string; targetChannelId?: string }>>([]);
   const [voxModeChannelIds, setVoxModeChannelIds] = useState<string[]>(persistedPreferences.voxModeChannelIds);
   const [voxSettings, setVoxSettings] = useState<VoxSettings>(persistedPreferences.voxSettings);
+  const [channelPans, setChannelPans] = useState<Record<string, number>>(persistedPreferences.channelPans);
+  const [sidetone, setSidetone] = useState<SidetoneSettings>(persistedPreferences.sidetone ?? { ...DEFAULT_SIDETONE_SETTINGS });
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileNotice, setProfileNotice] = useState<string>();
   const voxDetectorRef = useRef<VoxDetector | null>(null);
   const [signalMenuChannelId, setSignalMenuChannelId] = useState<string | undefined>();
   const [groups, setGroups] = useState<GroupInfo[]>([]);
@@ -837,23 +843,27 @@ export default function App() {
     saveWebClientPreferences(getBrowserStorage(), {
       activeGroupId,
       audioProcessing,
+      channelPans,
       channelVolumes,
       latchModeChannelIds,
       masterVolume,
       preferredListenChannelIds,
       selectedInputDeviceId,
+      sidetone,
       voxModeChannelIds,
       voxSettings,
     });
   }, [
     activeGroupId,
     audioProcessing,
+    channelPans,
     channelVolumes,
     hasPersistedListenPreferences,
     latchModeChannelIds,
     masterVolume,
     preferredListenChannelIds,
     selectedInputDeviceId,
+    sidetone,
     state.operatorState,
     voxModeChannelIds,
     voxSettings,
@@ -874,6 +884,17 @@ export default function App() {
   useEffect(() => {
     mediaControllerRef.current?.setAudioProcessing(audioProcessing);
   }, [audioProcessing]);
+
+  useEffect(() => {
+    const controller = mediaControllerRef.current;
+    if (!controller || !audioReady) return;
+
+    if (sidetone.enabled) {
+      controller.enableSidetone(sidetone.level / 100);
+    } else {
+      controller.disableSidetone();
+    }
+  }, [audioReady, sidetone]);
 
   useEffect(() => {
     if (!audioReady || voxModeChannelIds.length === 0) {
@@ -965,10 +986,11 @@ export default function App() {
   useEffect(() => {
     mediaControllerRef.current?.updateMix({
       activeListenChannelIds: listenChannelIds,
+      channelPans,
       channelVolumes: mixChannelVolumes,
       masterVolume: toFraction(masterVolume),
     });
-  }, [listenChannelIds, masterVolume, mixChannelVolumes]);
+  }, [channelPans, listenChannelIds, masterVolume, mixChannelVolumes]);
 
   useEffect(() => {
     if (!audioArmed || !mediaControllerRef.current) {
@@ -1049,6 +1071,31 @@ export default function App() {
         setGroups(payload.groups);
       }
 
+      // Apply server-stored preferences if they exist
+      const serverPrefs = payload.preferences;
+      if (serverPrefs && typeof serverPrefs === "object" && Object.keys(serverPrefs).length > 0) {
+        const sp = serverPrefs as Record<string, unknown>;
+        if (typeof sp.masterVolume === "number") setMasterVolume(sp.masterVolume as number);
+        if (sp.channelVolumes && typeof sp.channelVolumes === "object") setChannelVolumes(sp.channelVolumes as Record<string, number>);
+        if (sp.channelPans && typeof sp.channelPans === "object") setChannelPans(sp.channelPans as Record<string, number>);
+        if (Array.isArray(sp.latchModeChannelIds)) setLatchModeChannelIds(sp.latchModeChannelIds as string[]);
+        if (Array.isArray(sp.voxModeChannelIds)) setVoxModeChannelIds(sp.voxModeChannelIds as string[]);
+        if (sp.sidetone && typeof sp.sidetone === "object") {
+          const st = sp.sidetone as Record<string, unknown>;
+          setSidetone({
+            enabled: typeof st.enabled === "boolean" ? st.enabled : false,
+            level: typeof st.level === "number" ? st.level : 15,
+          });
+        }
+        if (sp.voxSettings && typeof sp.voxSettings === "object") {
+          const vs = sp.voxSettings as Record<string, unknown>;
+          setVoxSettings({
+            holdTimeMs: typeof vs.holdTimeMs === "number" ? vs.holdTimeMs : 500,
+            thresholdDb: typeof vs.thresholdDb === "number" ? vs.thresholdDb : -40,
+          });
+        }
+      }
+
       setState((current) => ({
         ...current,
         loginError: undefined,
@@ -1062,6 +1109,40 @@ export default function App() {
         loginPending: false,
         realtimeState: "idle",
       }));
+    }
+  }
+
+  async function handleSaveProfile(): Promise<void> {
+    if (!state.session) return;
+    setProfileSaving(true);
+    setProfileNotice(undefined);
+    try {
+      const prefs = {
+        masterVolume,
+        channelVolumes,
+        channelPans,
+        latchModeChannelIds,
+        voxModeChannelIds,
+        voxSettings,
+        sidetone,
+        audioProcessing,
+        activeGroupId,
+      };
+      const res = await fetch("/api/preferences", {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${state.session.sessionToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(prefs),
+      });
+      if (!res.ok) throw new Error("Failed to save profile");
+      setProfileNotice("Profile saved to server");
+      setTimeout(() => setProfileNotice(undefined), 3000);
+    } catch (error) {
+      setProfileNotice(error instanceof Error ? error.message : "Save failed");
+    } finally {
+      setProfileSaving(false);
     }
   }
 
@@ -1783,6 +1864,7 @@ export default function App() {
                     const allPageBlocked = !!allPageActive && allPageActive.userId !== state.session?.user.id;
                     const talkersOnChannel = remoteTalkersByChannel.get(channel.id) ?? [];
                     const monitorVolume = channelVolumes[channel.id] ?? 100;
+                    const channelPan = channelPans[channel.id] ?? 0;
                     const isProgramChannel = channel.channelType === "program";
                     const isSource = isProgramChannel && channel.sourceUserId === state.session?.user.id;
 
@@ -1940,6 +2022,27 @@ export default function App() {
                                 step={1}
                                 type="range"
                                 value={monitorVolume}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                                <label htmlFor={`channel-pan-${channel.id}`}>Stereo pan</label>
+                                <span>{channelPan === 0 ? "C" : channelPan < 0 ? `L${Math.round(Math.abs(channelPan) * 100)}` : `R${Math.round(channelPan * 100)}`}</span>
+                              </div>
+                              <input
+                                className={sliderClassName}
+                                id={`channel-pan-${channel.id}`}
+                                max={100}
+                                min={-100}
+                                onChange={(event) =>
+                                  setChannelPans((current) => ({
+                                    ...current,
+                                    [channel.id]: Number(event.target.value) / 100,
+                                  }))
+                                }
+                                step={5}
+                                type="range"
+                                value={Math.round(channelPan * 100)}
                               />
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
@@ -2206,6 +2309,64 @@ export default function App() {
                             </div>
                           </div>
                         </div>
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                            Sidetone (mic monitor)
+                          </p>
+                          <div className="space-y-3 rounded-lg border border-border/60 bg-background/35 p-3">
+                            <label className="flex cursor-pointer items-center justify-between">
+                              <span className="text-sm text-foreground">Enable sidetone</span>
+                              <input
+                                checked={sidetone.enabled}
+                                className="h-4 w-4 accent-primary"
+                                onChange={() =>
+                                  setSidetone((prev) => ({ ...prev, enabled: !prev.enabled }))
+                                }
+                                type="checkbox"
+                              />
+                            </label>
+                            {sidetone.enabled ? (
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                                  <label htmlFor="sidetone-level">Level</label>
+                                  <span>{sidetone.level}%</span>
+                                </div>
+                                <input
+                                  className={sliderClassName}
+                                  id="sidetone-level"
+                                  max={30}
+                                  min={0}
+                                  onChange={(event) =>
+                                    setSidetone((prev) => ({
+                                      ...prev,
+                                      level: Number(event.target.value),
+                                    }))
+                                  }
+                                  step={1}
+                                  type="range"
+                                  value={sidetone.level}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                  Hear your own mic in your headphones. Keep below 30% to avoid feedback.
+                                </p>
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            className="flex-1 justify-center"
+                            disabled={profileSaving || !state.session}
+                            onClick={() => void handleSaveProfile()}
+                            type="button"
+                            variant="outline"
+                          >
+                            {profileSaving ? "Saving…" : "Save profile to server"}
+                          </Button>
+                        </div>
+                        {profileNotice ? (
+                          <p className="text-center text-xs text-muted-foreground">{profileNotice}</p>
+                        ) : null}
                         <Button
                           className="w-full justify-center"
                           onClick={() => void handleStartPreflight()}
