@@ -28,6 +28,8 @@ const config: CueCommXExpoConfig = {
         NSAllowsArbitraryLoads: true,
         NSAllowsLocalNetworking: true,
       },
+      NSCameraUsageDescription:
+        "Allow CueCommX to use your camera to scan a server connection QR code.",
       UIBackgroundModes: ["audio"],
     },
   },
@@ -39,6 +41,10 @@ const config: CueCommXExpoConfig = {
       backgroundColor: "#020617",
     },
     permissions: [
+      "android.permission.CAMERA",
+      "android.permission.ACCESS_WIFI_STATE",
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.CHANGE_WIFI_MULTICAST_STATE",
       "android.permission.FOREGROUND_SERVICE",
       "android.permission.FOREGROUND_SERVICE_MICROPHONE",
       "android.permission.POST_NOTIFICATIONS",
@@ -49,6 +55,7 @@ const config: CueCommXExpoConfig = {
     predictiveBackGestureEnabled: false,
   },
   plugins: [
+    "expo-camera",
     "expo-dev-client",
     "expo-notifications",
     [

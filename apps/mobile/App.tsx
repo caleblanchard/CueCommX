@@ -1,4 +1,5 @@
 import { StatusBar } from "expo-status-bar";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Slider from "@react-native-community/slider";
 import {
@@ -49,6 +50,7 @@ import {
   loginMobileOperator,
 } from "./src/mobile-session";
 import { loadPersistedServerUrl, persistServerUrl } from "./src/server-url-storage";
+import { useServerDiscovery } from "./src/server-discovery";
 import {
   canArmMobileAudio,
   describeMobileAudioError,
@@ -522,6 +524,11 @@ export default function App() {
   const androidNotificationIdRef = useRef<string | undefined>(undefined);
   const mediaControllerRef = useRef<ReturnType<typeof createMobileMediaController> | null>(null);
   const realtimeClientRef = useRef<CueCommXRealtimeClient | null>(null);
+  const qrScannedRef = useRef(false);
+
+  const [qrScanOpen, setQrScanOpen] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const { servers: discoveredServers, scanning: discoveryScanning } = useServerDiscovery();
 
   const connectionBadge = getConnectionBadge(state.realtimeState);
   const assignedPermissions = state.session?.user.channelPermissions ?? [];
@@ -1153,6 +1160,52 @@ export default function App() {
     }
   }
 
+  async function handleOpenQrScanner(): Promise<void> {
+    if (!cameraPermission?.granted) {
+      const result = await requestCameraPermission();
+      if (!result.granted) return;
+    }
+    qrScannedRef.current = false;
+    setQrScanOpen(true);
+  }
+
+  function handleQrScanned(data: string): void {
+    if (qrScannedRef.current) return;
+    qrScannedRef.current = true;
+    setQrScanOpen(false);
+
+    const url = data.trim();
+    updateServerUrlInput(url);
+    void handleCheckServerUrl(url);
+  }
+
+  async function handleCheckServerUrl(url: string): Promise<void> {
+    setState((current) => ({
+      ...current,
+      serverError: undefined,
+      serverLoading: true,
+    }));
+
+    try {
+      const shell = await loadMobileServerShell(fetch, url);
+      updateServerUrlInput(shell.baseUrl);
+      setState((current) => ({
+        ...current,
+        discovery: shell.discovery,
+        serverBaseUrl: shell.baseUrl,
+        serverError: undefined,
+        serverLoading: false,
+        status: shell.status,
+      }));
+    } catch (error) {
+      setState((current) => ({
+        ...current,
+        serverError: error instanceof Error ? error.message : "CueCommX could not reach that server.",
+        serverLoading: false,
+      }));
+    }
+  }
+
   async function handleLogin(): Promise<void> {
     setState((current) => ({
       ...current,
@@ -1599,64 +1652,168 @@ export default function App() {
           className="flex-1"
         >
           {screen === "connect" ? (
-            <ScrollView
-              className="flex-1"
-              contentContainerStyle={{ flexGrow: 1, justifyContent: "center" }}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-            >
-              <View className="gap-8 px-6 py-10">
-                <View className="items-center gap-4">
-                  <View className="h-16 w-16 items-center justify-center rounded-2xl bg-primary/15">
-                    <Text className="text-3xl">{String.fromCodePoint(0x1f399)}</Text>
-                  </View>
-                  <Text className="text-3xl font-bold tracking-tight text-foreground">
-                    CueCommX
-                  </Text>
-                  <Text className="max-w-xs text-center text-base leading-6 text-muted-foreground">
-                    Connect to your local intercom server to get started.
-                  </Text>
-                </View>
+            <>
+              {/* QR Scanner Modal */}
+              <Modal
+                animationType="slide"
+                onRequestClose={() => setQrScanOpen(false)}
+                presentationStyle="fullScreen"
+                visible={qrScanOpen}
+              >
+                <View className="flex-1 bg-black">
+                  <SafeAreaView className="flex-1">
+                    <View className="flex-row items-center justify-between px-5 py-4">
+                      <Text className="text-lg font-semibold text-white">Scan QR Code</Text>
+                      <Pressable
+                        accessibilityLabel="Close scanner"
+                        className="rounded-full bg-white/15 px-4 py-2"
+                        onPress={() => setQrScanOpen(false)}
+                      >
+                        <Text className="text-sm font-medium text-white">Cancel</Text>
+                      </Pressable>
+                    </View>
 
-                <View className="gap-4">
-                  <View className="gap-2">
-                    <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                      Server address
+                    <View className="flex-1 items-center justify-center gap-6 px-8">
+                      <View className="w-full overflow-hidden rounded-2xl" style={{ aspectRatio: 1 }}>
+                        <CameraView
+                          barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+                          className="flex-1"
+                          facing="back"
+                          onBarcodeScanned={({ data }) => handleQrScanned(data)}
+                        />
+                      </View>
+                      <Text className="text-center text-sm leading-6 text-white/70">
+                        Point your camera at the QR code on the{"\n"}CueCommX admin dashboard.
+                      </Text>
+                    </View>
+                  </SafeAreaView>
+                </View>
+              </Modal>
+
+              <ScrollView
+                className="flex-1"
+                contentContainerStyle={{ flexGrow: 1, justifyContent: "center" }}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                <View className="gap-8 px-6 py-10">
+                  {/* Header */}
+                  <View className="items-center gap-4">
+                    <View className="h-16 w-16 items-center justify-center rounded-2xl bg-primary/15">
+                      <Text className="text-3xl">{String.fromCodePoint(0x1f399)}</Text>
+                    </View>
+                    <Text className="text-3xl font-bold tracking-tight text-foreground">
+                      CueCommX
                     </Text>
-                    <TextInput
-                      accessibilityLabel="Server URL"
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      className={inputClassName}
-                      keyboardType="url"
-                      onChangeText={updateServerUrlInput}
-                      onSubmitEditing={() => void handleCheckServer()}
-                      placeholder="192.168.1.100:3000"
-                      placeholderTextColor="#738094"
-                      returnKeyType="go"
-                      value={serverUrlInput}
-                    />
+                    <Text className="max-w-xs text-center text-base leading-6 text-muted-foreground">
+                      Connect to your local intercom server to get started.
+                    </Text>
                   </View>
 
-                  <ActionButton
-                    disabled={state.serverLoading || !serverUrlInput.trim()}
-                    label={state.serverLoading ? "Connecting..." : "Connect"}
-                    onPress={() => void handleCheckServer()}
-                  />
+                  {/* mDNS Discovered Servers */}
+                  {(discoveredServers.length > 0 || discoveryScanning) ? (
+                    <View className="gap-3">
+                      <View className="flex-row items-center gap-2">
+                        <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                          Nearby Servers
+                        </Text>
+                        {discoveryScanning ? (
+                          <ActivityIndicator color="#738094" size="small" />
+                        ) : null}
+                      </View>
+
+                      {discoveredServers.map((server) => (
+                        <Pressable
+                          accessibilityLabel={`Connect to ${server.name}`}
+                          accessibilityRole="button"
+                          className="flex-row items-center gap-4 rounded-xl border border-border bg-card p-4 active:opacity-70"
+                          key={server.id}
+                          onPress={() => void handleCheckServerUrl(server.url)}
+                        >
+                          <View className="h-10 w-10 items-center justify-center rounded-xl bg-primary/15">
+                            <Text className="text-xl">{String.fromCodePoint(0x1f4e1)}</Text>
+                          </View>
+                          <View className="flex-1 gap-0.5">
+                            <Text className="text-sm font-semibold text-foreground" numberOfLines={1}>
+                              {server.name}
+                            </Text>
+                            <Text className="text-xs text-muted-foreground" numberOfLines={1}>
+                              {server.url}
+                            </Text>
+                          </View>
+                          <Text className="text-muted-foreground">{String.fromCodePoint(0x203a)}</Text>
+                        </Pressable>
+                      ))}
+
+                      {discoveredServers.length === 0 && discoveryScanning ? (
+                        <View className="rounded-xl border border-border bg-card/50 p-4">
+                          <Text className="text-center text-sm text-muted-foreground">
+                            Scanning for servers on your network…
+                          </Text>
+                        </View>
+                      ) : null}
+
+                      <View className="flex-row items-center gap-3">
+                        <View className="h-px flex-1 bg-border" />
+                        <Text className="text-xs text-muted-foreground">or enter manually</Text>
+                        <View className="h-px flex-1 bg-border" />
+                      </View>
+                    </View>
+                  ) : null}
+
+                  {/* Manual Entry */}
+                  <View className="gap-4">
+                    <View className="gap-2">
+                      <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                        Server address
+                      </Text>
+                      <TextInput
+                        accessibilityLabel="Server URL"
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        className={inputClassName}
+                        keyboardType="url"
+                        onChangeText={updateServerUrlInput}
+                        onSubmitEditing={() => void handleCheckServer()}
+                        placeholder="192.168.1.100:3000"
+                        placeholderTextColor="#738094"
+                        returnKeyType="go"
+                        value={serverUrlInput}
+                      />
+                    </View>
+
+                    <View className="flex-row gap-3">
+                      <View className="flex-1">
+                        <ActionButton
+                          disabled={state.serverLoading || !serverUrlInput.trim()}
+                          label={state.serverLoading ? "Connecting..." : "Connect"}
+                          onPress={() => void handleCheckServer()}
+                        />
+                      </View>
+                      <Pressable
+                        accessibilityLabel="Scan QR code"
+                        accessibilityRole="button"
+                        className="h-12 w-12 items-center justify-center rounded-xl border border-border bg-card active:opacity-70"
+                        onPress={() => void handleOpenQrScanner()}
+                      >
+                        <Text className="text-xl">{String.fromCodePoint(0x1f4f7)}</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+
+                  {state.serverError ? (
+                    <View className="rounded-xl border border-destructive/30 bg-destructive/10 p-4">
+                      <Text className="text-sm leading-6 text-destructive">{state.serverError}</Text>
+                    </View>
+                  ) : null}
+
+                  <Text className="text-center text-xs leading-5 text-muted-foreground">
+                    Tap a nearby server, scan the admin QR code, or enter the IP address.{"\n"}
+                    LAN-only — no cloud relay required.
+                  </Text>
                 </View>
-
-                {state.serverError ? (
-                  <View className="rounded-xl border border-destructive/30 bg-destructive/10 p-4">
-                    <Text className="text-sm leading-6 text-destructive">{state.serverError}</Text>
-                  </View>
-                ) : null}
-
-                <Text className="text-center text-xs leading-5 text-muted-foreground">
-                  Enter the IP address or hostname of your CueCommX server.{"\n"}
-                  LAN-only — no cloud relay required.
-                </Text>
-              </View>
-            </ScrollView>
+              </ScrollView>
+            </>
           ) : screen === "login" ? (
             <ScrollView
               className="flex-1"
