@@ -2031,82 +2031,6 @@ export default function App() {
                   </div>
                 ) : null}
 
-                {!directCall && !incomingCall && callableUsers.length > 0 && audioReady ? (
-                  <Card>
-                    <CardHeader>
-                      <CardDescription>Point-to-point</CardDescription>
-                      <CardTitle>Direct Call</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="flex flex-wrap gap-2">
-                        {callableUsers.map((user) => (
-                          <Button
-                            disabled={state.realtimeState !== "connected"}
-                            key={user.id}
-                            onClick={() => requestDirectCall(user.id)}
-                            size="sm"
-                            type="button"
-                            variant="outline"
-                          >
-                            <Phone className="h-3.5 w-3.5 mr-1.5" />
-                            {user.username}
-                          </Button>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ) : null}
-
-                {/* IFB active indicator */}
-                {ifbState ? (
-                  <Card className="border-amber-500/50 bg-amber-500/10">
-                    <CardContent className="flex items-center justify-between gap-4 p-4">
-                      <div className="flex items-center gap-3">
-                        <Headphones className="h-5 w-5 text-amber-500" />
-                        <div>
-                          <p className="font-semibold text-amber-200">IFB Active</p>
-                          <p className="text-sm text-muted-foreground">
-                            {ifbState.fromUsername} is speaking to you — program audio ducked
-                          </p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ) : null}
-
-                {/* IFB controls for admins/operators */}
-                {(state.session?.user.role === "admin" || state.session?.user.role === "operator") &&
-                 audioReady &&
-                 callableUsers.length > 0 &&
-                 !directCall ? (
-                  <Card>
-                    <CardHeader>
-                      <CardDescription>Interrupted Fold-Back</CardDescription>
-                      <CardTitle>IFB Talk</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="mb-3 text-sm text-muted-foreground">
-                        Speak directly to a user while ducking their program audio.
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {callableUsers.map((user) => (
-                          <Button
-                            disabled={state.realtimeState !== "connected"}
-                            key={user.id}
-                            onClick={() => realtimeClientRef.current?.startIFB(user.id)}
-                            size="sm"
-                            type="button"
-                            variant="outline"
-                          >
-                            <Headphones className="h-3.5 w-3.5 mr-1.5" />
-                            {user.username}
-                          </Button>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ) : null}
-
                 <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(24rem,1fr))]">
                   {visibleChannels.map((channel) => {
                     const permission = findPermission(assignedPermissions, channel.id);
@@ -2458,6 +2382,90 @@ export default function App() {
                     );
                   })}
                 </div>
+
+                {!directCall && !incomingCall ? (
+                  <Card>
+                    <CardHeader>
+                      <CardDescription>Point-to-point</CardDescription>
+                      <CardTitle>Direct Call</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      {callableUsers.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No other users are online.</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {callableUsers.map((user) => (
+                            <Button
+                              disabled={state.realtimeState !== "connected" || !audioReady}
+                              key={user.id}
+                              onClick={() => requestDirectCall(user.id)}
+                              size="sm"
+                              title={!audioReady ? "Arm audio first" : undefined}
+                              type="button"
+                              variant="outline"
+                            >
+                              <Phone className="h-3.5 w-3.5 mr-1.5" />
+                              {user.username}
+                            </Button>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ) : null}
+
+                {/* IFB active indicator */}
+                {ifbState ? (
+                  <Card className="border-amber-500/50 bg-amber-500/10">
+                    <CardContent className="flex items-center justify-between gap-4 p-4">
+                      <div className="flex items-center gap-3">
+                        <Headphones className="h-5 w-5 text-amber-500" />
+                        <div>
+                          <p className="font-semibold text-amber-200">IFB Active</p>
+                          <p className="text-sm text-muted-foreground">
+                            {ifbState.fromUsername} is speaking to you — program audio ducked
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : null}
+
+                {/* IFB controls for admins/operators */}
+                {(state.session?.user.role === "admin" || state.session?.user.role === "operator") &&
+                 !directCall ? (
+                  <Card>
+                    <CardHeader>
+                      <CardDescription>Interrupted Fold-Back</CardDescription>
+                      <CardTitle>IFB Talk</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="mb-3 text-sm text-muted-foreground">
+                        Speak directly to a user while ducking their program audio.
+                      </p>
+                      {callableUsers.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No other users are online.</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {callableUsers.map((user) => (
+                            <Button
+                              disabled={state.realtimeState !== "connected" || !audioReady}
+                              key={user.id}
+                              onClick={() => realtimeClientRef.current?.startIFB(user.id)}
+                              size="sm"
+                              title={!audioReady ? "Arm audio first" : undefined}
+                              type="button"
+                              variant="outline"
+                            >
+                              <Headphones className="h-3.5 w-3.5 mr-1.5" />
+                              {user.username}
+                            </Button>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ) : null}
               </div>
 
               {confidenceChannels.length > 0 ? (
