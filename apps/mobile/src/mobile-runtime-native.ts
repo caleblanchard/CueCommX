@@ -101,6 +101,8 @@ export async function ensureAndroidRuntimeSupport(): Promise<boolean> {
 export async function showAndroidLiveAudioNotification(input: {
   serverName?: string;
   username: string;
+  activeChannelNames?: string[];
+  listenChannelNames?: string[];
 }): Promise<string | undefined> {
   if (Platform.OS !== "android") {
     return undefined;

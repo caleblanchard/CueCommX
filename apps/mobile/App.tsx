@@ -35,6 +35,7 @@ import type {
   OperatorState,
   ServerSignalingMessage,
   StatusResponse,
+  TallySourceState,
 } from "@cuecommx/protocol";
 
 import { resolveTalkGesture, type MobileTalkMode } from "./src/mobile-controls";
@@ -487,6 +488,7 @@ export default function App() {
   const [profileNotice, setProfileNotice] = useState<string>();
   const [allPageActive, setAllPageActive] = useState<{ userId: string; username: string } | undefined>();
   const [recordingActiveIds, setRecordingActiveIds] = useState<string[]>([]);
+  const [tallySources, setTallySources] = useState<TallySourceState[]>([]);
   const [incomingSignals, setIncomingSignals] = useState<Array<{ signalId: string; signalType: CallSignalType; fromUsername: string; targetChannelId?: string }>>([]);
   const [onlineUsers, setOnlineUsers] = useState<Array<{ id: string; username: string }>>([]);
   const [directCall, setDirectCall] = useState<{
@@ -708,6 +710,12 @@ export default function App() {
         const notificationId = await showAndroidLiveAudioNotification({
           serverName: state.status?.name,
           username: session.user.username,
+          activeChannelNames: activeChannels
+            .filter((ch) => state.operatorState?.talkChannelIds.includes(ch.id))
+            .map((ch) => ch.name),
+          listenChannelNames: activeChannels
+            .filter((ch) => state.operatorState?.listenChannelIds.includes(ch.id))
+            .map((ch) => ch.name),
         });
 
         if (cancelled) {
@@ -928,6 +936,10 @@ export default function App() {
 
         if (message.type === "recording:state") {
           setRecordingActiveIds(message.payload.activeChannelIds);
+        }
+
+        if (message.type === "tally:update") {
+          setTallySources(message.payload.sources);
         }
       },
       sessionToken: state.session.sessionToken,
@@ -1775,6 +1787,42 @@ export default function App() {
                   </View>
                 </View>
               </View>
+
+              {tallySources.some((s) => s.state !== "none") ? (
+                <View className="border-b border-border bg-card/60 px-5 py-2">
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <View className="flex-row items-center gap-2">
+                      <Text className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                        TALLY
+                      </Text>
+                      {tallySources
+                        .filter((s) => s.state === "program")
+                        .map((s) => (
+                          <View
+                            className="flex-row items-center gap-1 rounded-md bg-destructive px-2 py-0.5"
+                            key={s.sourceId}
+                          >
+                            <Text className="text-[10px] font-bold text-destructive-foreground">
+                              🔴 PGM: {s.sourceName}
+                            </Text>
+                          </View>
+                        ))}
+                      {tallySources
+                        .filter((s) => s.state === "preview")
+                        .map((s) => (
+                          <View
+                            className="flex-row items-center gap-1 rounded-md bg-success px-2 py-0.5"
+                            key={s.sourceId}
+                          >
+                            <Text className="text-[10px] font-bold text-success-foreground">
+                              🟢 PVW: {s.sourceName}
+                            </Text>
+                          </View>
+                        ))}
+                    </View>
+                  </ScrollView>
+                </View>
+              ) : null}
 
               <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
                 <View className="gap-4 px-5 pb-10 pt-4">

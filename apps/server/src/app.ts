@@ -1,10 +1,11 @@
 import { existsSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import type { Server as HttpServer } from "node:http";
 import type { Server as HttpsServer } from "node:https";
 import { fileURLToPath } from "node:url";
 
 import fastifyStatic from "@fastify/static";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyReply } from "fastify";
 
 import {
   AuthSuccessResponseSchema,
@@ -38,8 +39,11 @@ import {
 } from "./discovery/mdns.js";
 import { buildDiscoveryResponse, resolveMediaAnnouncedHost } from "./discovery/targets.js";
 import { CueCommXMediaService, type RealtimeMediaService } from "./media/service.js";
+import { buildOscConfig, OscService } from "./osc/service.js";
+import { buildGpioConfig, GpioService } from "./gpio/service.js";
 import { RecordingService } from "./recording/service.js";
 import { RealtimeService } from "./realtime/service.js";
+import { TallyService } from "./tally/service.js";
 
 const SERVER_VERSION = "0.1.0";
 
@@ -147,12 +151,54 @@ export function createApp(options: CreateAppOptions) {
 
   const recordingService = new RecordingService();
 
+  const oscConfig = buildOscConfig(process.env);
+  const oscService = new OscService(oscConfig);
+
+  const gpioConfig = buildGpioConfig(process.env);
+  const gpioService = new GpioService(gpioConfig);
+
+  const streamDeckApiKey =
+    process.env.CUECOMMX_STREAMDECK_API_KEY ?? randomBytes(16).toString("hex");
+
+  const sseClients = new Set<{ write: (data: string) => void }>();
+
+  const tallyEnabled =
+    process.env.CUECOMMX_TALLY_OBS_ENABLED === "true" ||
+    process.env.CUECOMMX_TALLY_TSL_ENABLED === "true";
+
+  const tallyService = tallyEnabled
+    ? new TallyService({
+        obsEnabled: process.env.CUECOMMX_TALLY_OBS_ENABLED === "true",
+        obsUrl: process.env.CUECOMMX_TALLY_OBS_URL ?? "ws://localhost:4455",
+        obsPassword: process.env.CUECOMMX_TALLY_OBS_PASSWORD ?? "",
+        tslEnabled: process.env.CUECOMMX_TALLY_TSL_ENABLED === "true",
+        tslListenPort: process.env.CUECOMMX_TALLY_TSL_PORT
+          ? Number(process.env.CUECOMMX_TALLY_TSL_PORT)
+          : 8900,
+      })
+    : undefined;
+
   realtimeService = new RealtimeService({
     database,
     maxUsers: options.config.maxUsers,
     mediaService,
+    oscService,
     recordingService,
     sessionStore,
+    tallyService,
+    onStateChange: () => {
+      const state = realtimeService.getPublicState();
+      const payload = `data: ${JSON.stringify(state)}\n\n`;
+      for (const client of sseClients) {
+        try { client.write(payload); } catch { sseClients.delete(client); }
+      }
+    },
+  });
+
+  oscService.setCallbacks({
+    onMuteUser: (userId) => {
+      void realtimeService.forceMuteUser(userId);
+    },
   });
 
   const configureApp = <Server extends HttpServer | HttpsServer>(
@@ -166,9 +212,26 @@ export function createApp(options: CreateAppOptions) {
 
     realtimeService.attach(configuredApp.server);
 
+    if (tallyService) {
+      void tallyService.start();
+    }
+
+    oscService.start();
+    void gpioService.start();
+
+    if (!process.env.CUECOMMX_STREAMDECK_API_KEY) {
+      console.log(`[StreamDeck] Auto-generated API key: ${streamDeckApiKey}`);
+      console.log(`[StreamDeck] Set CUECOMMX_STREAMDECK_API_KEY to use a persistent key.`);
+    }
+
     configuredApp.addHook("onClose", async () => {
       await mdnsAdvertiser.stop();
       await recordingService.closeAll();
+      if (tallyService) {
+        await tallyService.stop();
+      }
+      await oscService.stop();
+      await gpioService.stop();
       await realtimeService.close();
       database.close();
     });
@@ -199,6 +262,26 @@ export function createApp(options: CreateAppOptions) {
     );
 
     configuredApp.get("/api/channels", async () => database.listChannels());
+
+    configuredApp.get("/api/tally/status", async (request, reply) => {
+      const sessionContext = requireAdminSession(request, reply, database, sessionStore);
+
+      if (!sessionContext) {
+        return reply;
+      }
+
+      return {
+        sources: tallyService?.getSources() ?? [],
+        config: {
+          obsEnabled: process.env.CUECOMMX_TALLY_OBS_ENABLED === "true",
+          obsUrl: process.env.CUECOMMX_TALLY_OBS_URL ?? "ws://localhost:4455",
+          tslEnabled: process.env.CUECOMMX_TALLY_TSL_ENABLED === "true",
+          tslListenPort: process.env.CUECOMMX_TALLY_TSL_PORT
+            ? Number(process.env.CUECOMMX_TALLY_TSL_PORT)
+            : 8900,
+        },
+      };
+    });
 
     configuredApp.post("/api/auth/setup-admin", async (request, reply) => {
       const parsed = SetupAdminRequestSchema.safeParse(request.body);
@@ -800,6 +883,119 @@ export function createApp(options: CreateAppOptions) {
       const pruned = await recordingService.pruneOlderThan(olderThanDays);
 
       return { pruned };
+    });
+
+    // --- StreamDeck / Companion HTTP API ---
+
+    const requireStreamDeckKey = (request: FastifyRequest, reply: FastifyReply): boolean => {
+      const provided =
+        (request.headers["x-api-key"] as string | undefined) ??
+        (request.query as Record<string, string>)["apiKey"];
+      if (provided !== streamDeckApiKey) {
+        void reply.code(401).send({ error: "Invalid or missing API key" });
+        return false;
+      }
+      return true;
+    };
+
+    configuredApp.get("/api/stream-deck/state", async (request, reply) => {
+      if (!requireStreamDeckKey(request, reply)) return reply;
+      return realtimeService.getPublicState();
+    });
+
+    configuredApp.post("/api/stream-deck/action", async (request, reply) => {
+      if (!requireStreamDeckKey(request, reply)) return reply;
+      const body = (request.body ?? {}) as {
+        action?: string;
+        userId?: string;
+        channelId?: string;
+      };
+
+      if (!body.action) {
+        return reply.code(400).send({ error: "action is required" });
+      }
+
+      if (body.action === "mute") {
+        if (!body.userId) return reply.code(400).send({ error: "userId required for mute" });
+        const user = database.getUser(body.userId);
+        if (!user) return reply.code(404).send({ error: "User not found" });
+        await realtimeService.forceMuteUser(body.userId);
+        return { ok: true };
+      }
+
+      if (body.action === "disconnect") {
+        if (!body.userId) return reply.code(400).send({ error: "userId required for disconnect" });
+        const user = database.getUser(body.userId);
+        if (!user) return reply.code(404).send({ error: "User not found" });
+        realtimeService.disconnectUser(body.userId, "Disconnected via StreamDeck/Companion");
+        return { ok: true };
+      }
+
+      return reply.code(400).send({ error: `Unknown action: ${body.action}` });
+    });
+
+    configuredApp.get("/api/stream-deck/events", async (request, reply) => {
+      if (!requireStreamDeckKey(request, reply)) return reply;
+
+      reply.raw.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        "Access-Control-Allow-Origin": "*",
+      });
+
+      const client = {
+        write: (data: string) => reply.raw.write(data),
+      };
+
+      sseClients.add(client);
+
+      // Send current state immediately
+      const initial = `data: ${JSON.stringify(realtimeService.getPublicState())}\n\n`;
+      reply.raw.write(initial);
+
+      const keepAlive = setInterval(() => {
+        try { reply.raw.write(": keep-alive\n\n"); } catch { /* closed */ }
+      }, 20_000);
+
+      reply.raw.on("close", () => {
+        clearInterval(keepAlive);
+        sseClients.delete(client);
+      });
+
+      // Return a never-resolving promise to keep the handler alive
+      return new Promise<void>(() => undefined);
+    });
+
+    // --- OSC status endpoint ---
+
+    configuredApp.get("/api/osc/status", async (request, reply) => {
+      const sessionContext = requireAdminSession(request, reply, database, sessionStore);
+      if (!sessionContext) return reply;
+      return {
+        enabled: oscService.getConfig().enabled,
+        running: oscService.isRunning,
+        config: oscService.getConfig(),
+      };
+    });
+
+    // --- GPIO status endpoint ---
+
+    configuredApp.get("/api/gpio/status", async (request, reply) => {
+      const sessionContext = requireAdminSession(request, reply, database, sessionStore);
+      if (!sessionContext) return reply;
+      return {
+        enabled: gpioService.getConfig().enabled,
+        running: gpioService.isRunning,
+        config: gpioService.getConfig(),
+      };
+    });
+
+    configuredApp.get("/api/gpio/devices", async (request, reply) => {
+      const sessionContext = requireAdminSession(request, reply, database, sessionStore);
+      if (!sessionContext) return reply;
+      const devices = await GpioService.listHidDevices();
+      return { devices };
     });
 
     // --- Group endpoints ---

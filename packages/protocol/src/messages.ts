@@ -316,6 +316,23 @@ export const RecordingStateMessageSchema = z.object({
 });
 export type RecordingStateMessage = z.infer<typeof RecordingStateMessageSchema>;
 
+// --- Tally messages ---
+
+export const TallySourceStateSchema = z.object({
+  sourceId: z.string(),
+  sourceName: z.string(),
+  state: z.enum(["program", "preview", "none"]),
+});
+export type TallySourceState = z.infer<typeof TallySourceStateSchema>;
+
+export const TallyUpdateMessageSchema = z.object({
+  type: z.literal("tally:update"),
+  payload: z.object({
+    sources: z.array(TallySourceStateSchema),
+  }),
+});
+export type TallyUpdateMessage = z.infer<typeof TallyUpdateMessageSchema>;
+
 // --- Talk messages ---
 
 export const TalkStartMessageSchema = z.object({
@@ -422,6 +439,7 @@ export const ServerSignalingMessageSchema = z.discriminatedUnion("type", [
   IFBActiveMessageSchema,
   IFBInactiveMessageSchema,
   RecordingStateMessageSchema,
+  TallyUpdateMessageSchema,
   ChatMessageReceivedSchema,
   ChatHistoryMessageSchema,
   MediaCapabilitiesMessageSchema,
@@ -472,6 +490,7 @@ export const SignalingMessageSchema = z.discriminatedUnion("type", [
   IFBActiveMessageSchema,
   IFBInactiveMessageSchema,
   RecordingStateMessageSchema,
+  TallyUpdateMessageSchema,
   ChatSendMessageSchema,
   ChatMessageReceivedSchema,
   ChatHistoryMessageSchema,

@@ -252,6 +252,11 @@ export default function App() {
   const [savedRecordings, setSavedRecordings] = useState<{ filename: string; channelName: string; date: string; sizeBytes: number }[]>([]);
   const [recordingsLoading, setRecordingsLoading] = useState(false);
   const [pruneDays, setPruneDays] = useState(30);
+  const [tallyExpanded, setTallyExpanded] = useState(false);
+  const [tallyStatus, setTallyStatus] = useState<{
+    sources: Array<{ sourceId: string; sourceName: string; state: "program" | "preview" | "none" }>;
+    config: { obsEnabled: boolean; obsUrl: string; tslEnabled: boolean; tslListenPort: number };
+  } | null>(null);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -474,6 +479,36 @@ export default function App() {
       realtimeClient.disconnect();
     };
   }, [state.session?.sessionToken, state.session?.user.role]);
+
+  useEffect(() => {
+    if (!tallyExpanded || !state.session) {
+      return;
+    }
+
+    let active = true;
+
+    async function fetchTallyStatus(): Promise<void> {
+      try {
+        const response = await fetch("/api/tally/status", {
+          headers: { Authorization: `Bearer ${state.session!.sessionToken}` },
+        });
+
+        if (response.ok && active) {
+          setTallyStatus(await response.json());
+        }
+      } catch {
+        // ignore network errors
+      }
+    }
+
+    void fetchTallyStatus();
+    const intervalId = setInterval(() => void fetchTallyStatus(), 2_000);
+
+    return () => {
+      active = false;
+      clearInterval(intervalId);
+    };
+  }, [tallyExpanded, state.session]);
 
   function resetUserForm(): void {
     setEditingUserId(undefined);
@@ -2007,6 +2042,90 @@ export default function App() {
                       </div>
                     </div>
                   </CardContent>
+                </Card>
+              ) : null}
+
+              {state.session ? (
+                <Card>
+                  <CardHeader>
+                    <CardDescription>Video switcher tally</CardDescription>
+                    <div className="flex items-center justify-between">
+                      <CardTitle>Tally Integration</CardTitle>
+                      <Button
+                        onClick={() => setTallyExpanded((v) => !v)}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        {tallyExpanded ? "Collapse" : "Expand"}
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  {tallyExpanded ? (
+                    <CardContent className="space-y-4">
+                      {tallyStatus ? (
+                        <>
+                          <div className="space-y-2">
+                            <h4 className="text-sm font-semibold text-foreground">Configuration</h4>
+                            <div className="grid grid-cols-2 gap-2 text-sm">
+                              <span className="text-muted-foreground">OBS WebSocket</span>
+                              <span className={tallyStatus.config.obsEnabled ? "text-success font-medium" : "text-muted-foreground"}>
+                                {tallyStatus.config.obsEnabled ? `Enabled — ${tallyStatus.config.obsUrl}` : "Disabled"}
+                              </span>
+                              <span className="text-muted-foreground">TSL UMD v3.1</span>
+                              <span className={tallyStatus.config.tslEnabled ? "text-success font-medium" : "text-muted-foreground"}>
+                                {tallyStatus.config.tslEnabled ? `Enabled — UDP :${tallyStatus.config.tslListenPort}` : "Disabled"}
+                              </span>
+                            </div>
+                          </div>
+                          {tallyStatus.sources.length > 0 ? (
+                            <div className="space-y-2">
+                              <h4 className="text-sm font-semibold text-foreground">Live Tally Sources</h4>
+                              <div className="space-y-1.5">
+                                {tallyStatus.sources.map((source) => (
+                                  <div
+                                    className="flex items-center justify-between rounded-lg border border-border/40 bg-background/30 px-3 py-2 text-sm"
+                                    key={source.sourceId}
+                                  >
+                                    <span className="font-medium text-foreground">{source.sourceName}</span>
+                                    <span
+                                      className={`rounded-md px-2 py-0.5 text-xs font-bold ${
+                                        source.state === "program"
+                                          ? "bg-destructive text-destructive-foreground"
+                                          : source.state === "preview"
+                                            ? "bg-success text-success-foreground"
+                                            : "bg-muted text-muted-foreground"
+                                      }`}
+                                    >
+                                      {source.state === "program"
+                                        ? "PROGRAM"
+                                        : source.state === "preview"
+                                          ? "PREVIEW"
+                                          : "NONE"}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">
+                              No tally sources detected. Configure OBS WebSocket or TSL UMD via environment variables.
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Loading tally status…</p>
+                      )}
+                      <div className="rounded-lg border border-border/40 bg-background/20 p-3 text-xs text-muted-foreground space-y-1">
+                        <p className="font-semibold text-foreground">Environment variables</p>
+                        <p><code>CUECOMMX_TALLY_OBS_ENABLED=true</code></p>
+                        <p><code>CUECOMMX_TALLY_OBS_URL=ws://localhost:4455</code></p>
+                        <p><code>CUECOMMX_TALLY_OBS_PASSWORD=yourpassword</code></p>
+                        <p><code>CUECOMMX_TALLY_TSL_ENABLED=true</code></p>
+                        <p><code>CUECOMMX_TALLY_TSL_PORT=8900</code></p>
+                      </div>
+                    </CardContent>
+                  ) : null}
                 </Card>
               ) : null}
 

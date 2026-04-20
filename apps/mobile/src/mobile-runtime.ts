@@ -81,11 +81,27 @@ export function shouldShowAndroidRuntimeTools(input: {
 export function createAndroidLiveAudioNotificationContent(input: {
   serverName?: string;
   username: string;
+  activeChannelNames?: string[];
+  listenChannelNames?: string[];
 }): {
   body: string;
   title: string;
 } {
   const destination = input.serverName ?? "the CueCommX server";
+
+  if (input.activeChannelNames && input.activeChannelNames.length > 0) {
+    return {
+      title: `🎙 Talking — ${input.activeChannelNames.join(", ")}`,
+      body: `${input.username} on ${destination}`,
+    };
+  }
+
+  if (input.listenChannelNames && input.listenChannelNames.length > 0) {
+    return {
+      title: `🔉 Listening — ${input.listenChannelNames.join(", ")}`,
+      body: `${input.username} on ${destination}`,
+    };
+  }
 
   return {
     title: "CueCommX live audio ready",

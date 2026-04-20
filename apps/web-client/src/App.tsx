@@ -16,6 +16,7 @@ import {
   type OperatorState,
   type ServerSignalingMessage,
   type StatusResponse,
+  type TallySourceState,
 } from "@cuecommx/protocol";
 import {
   type CallSignalType,
@@ -352,6 +353,7 @@ export default function App() {
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [recordingActiveIds, setRecordingActiveIds] = useState<string[]>([]);
+  const [tallySources, setTallySources] = useState<TallySourceState[]>([]);
 
   const connectionBadge = getConnectionBadge(state.realtimeState);
   const assignedPermissions = useMemo(
@@ -768,6 +770,10 @@ export default function App() {
             setRecordingActiveIds(message.payload.activeChannelIds);
           }
 
+          if (message.type === "tally:update") {
+            setTallySources(message.payload.sources);
+          }
+
           return current;
         });
       },
@@ -1146,9 +1152,26 @@ export default function App() {
     }
 
     if ("mediaSession" in navigator) {
+      const talkChannelIds = state.operatorState.talkChannelIds;
+      const activeChannelNames = visibleChannels
+        .filter((ch) => talkChannelIds.includes(ch.id))
+        .map((ch) => ch.name);
+
+      const listenChannelNames = visibleChannels
+        .filter((ch) => state.operatorState!.listenChannelIds.includes(ch.id))
+        .map((ch) => ch.name);
+
+      const statusLine =
+        activeChannelNames.length > 0
+          ? `🎙 Talking: ${activeChannelNames.join(", ")}`
+          : listenChannelNames.length > 0
+            ? `🔉 Listening: ${listenChannelNames.join(", ")}`
+            : "Standby";
+
       navigator.mediaSession.metadata = new MediaMetadata({
         title: "CueCommX Intercom",
         artist: state.session?.user.username ?? "Operator",
+        album: statusLine,
       });
 
       const handleToggle = (): void => {
@@ -1593,6 +1616,31 @@ export default function App() {
                   {state.session?.channels.length ?? 0} assigned channel
                   {(state.session?.channels.length ?? 0) === 1 ? "" : "s"}
                 </Badge>
+              </div>
+            ) : null}
+            {isSignedIn && tallySources.some((s) => s.state !== "none") ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-background/40 px-3 py-2 text-sm">
+                <span className="font-semibold text-muted-foreground">TALLY</span>
+                {tallySources
+                  .filter((s) => s.state === "program")
+                  .map((s) => (
+                    <span
+                      className="flex items-center gap-1.5 rounded-md bg-destructive px-2 py-0.5 text-xs font-bold text-destructive-foreground"
+                      key={s.sourceId}
+                    >
+                      🔴 PROGRAM: {s.sourceName}
+                    </span>
+                  ))}
+                {tallySources
+                  .filter((s) => s.state === "preview")
+                  .map((s) => (
+                    <span
+                      className="flex items-center gap-1.5 rounded-md bg-success px-2 py-0.5 text-xs font-bold text-success-foreground"
+                      key={s.sourceId}
+                    >
+                      🟢 PREVIEW: {s.sourceName}
+                    </span>
+                  ))}
               </div>
             ) : null}
           </div>

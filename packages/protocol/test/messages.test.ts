@@ -23,6 +23,8 @@ import {
   SavePreferencesRequestSchema,
   SetupAdminRequestSchema,
   StatusResponseSchema,
+  TallySourceStateSchema,
+  TallyUpdateMessageSchema,
   UpdateChannelRequestSchema,
   UpdateUserRequestSchema,
   UserPreferencesSchema,
@@ -1131,5 +1133,103 @@ describe("user preferences schemas", () => {
       },
     });
     expect(parsedAll.type).toBe("chat:history");
+  });
+});
+
+describe("Tally schemas", () => {
+  describe("TallySourceStateSchema", () => {
+    it("parses a program source", () => {
+      const result = TallySourceStateSchema.parse({
+        sourceId: "Scene A",
+        sourceName: "Scene A",
+        state: "program",
+      });
+      expect(result.state).toBe("program");
+    });
+
+    it("parses a preview source", () => {
+      const result = TallySourceStateSchema.parse({
+        sourceId: "Scene B",
+        sourceName: "Scene B",
+        state: "preview",
+      });
+      expect(result.state).toBe("preview");
+    });
+
+    it("parses a none source", () => {
+      const result = TallySourceStateSchema.parse({
+        sourceId: "tsl-1",
+        sourceName: "Camera 1",
+        state: "none",
+      });
+      expect(result.state).toBe("none");
+    });
+
+    it("rejects invalid state value", () => {
+      expect(() =>
+        TallySourceStateSchema.parse({
+          sourceId: "id",
+          sourceName: "name",
+          state: "live",
+        }),
+      ).toThrow();
+    });
+
+    it("rejects missing sourceId", () => {
+      expect(() =>
+        TallySourceStateSchema.parse({ sourceName: "name", state: "none" }),
+      ).toThrow();
+    });
+  });
+
+  describe("TallyUpdateMessageSchema", () => {
+    it("parses a valid tally:update message", () => {
+      const result = TallyUpdateMessageSchema.parse({
+        type: "tally:update",
+        payload: {
+          sources: [
+            { sourceId: "Scene A", sourceName: "Scene A", state: "program" },
+            { sourceId: "Scene B", sourceName: "Scene B", state: "preview" },
+          ],
+        },
+      });
+      expect(result.type).toBe("tally:update");
+      expect(result.payload.sources).toHaveLength(2);
+    });
+
+    it("parses a tally:update with empty sources", () => {
+      const result = TallyUpdateMessageSchema.parse({
+        type: "tally:update",
+        payload: { sources: [] },
+      });
+      expect(result.payload.sources).toHaveLength(0);
+    });
+
+    it("is accepted by parseServerSignalingMessage", () => {
+      const parsed = parseServerSignalingMessage({
+        type: "tally:update",
+        payload: {
+          sources: [{ sourceId: "s1", sourceName: "Studio A", state: "program" }],
+        },
+      });
+      expect(parsed.type).toBe("tally:update");
+    });
+
+    it("is accepted by parseSignalingMessage", () => {
+      const parsed = parseSignalingMessage({
+        type: "tally:update",
+        payload: { sources: [] },
+      });
+      expect(parsed.type).toBe("tally:update");
+    });
+
+    it("rejects wrong type literal", () => {
+      expect(() =>
+        TallyUpdateMessageSchema.parse({
+          type: "tally:status",
+          payload: { sources: [] },
+        }),
+      ).toThrow();
+    });
   });
 });

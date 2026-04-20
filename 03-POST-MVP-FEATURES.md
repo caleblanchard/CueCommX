@@ -783,7 +783,7 @@ These features add professional-grade capabilities and hardware integrations but
 
 ---
 
-### 3.1 Tally Integration (Video Switcher)
+### 3.1 ~~Tally Integration (Video Switcher)~~ → IMPLEMENTED
 
 **Description:**
 Display video switcher tally information on intercom clients. When a camera is "on program" (live), the corresponding user's client shows a red tally indicator. When on "preview," it shows green.
@@ -791,20 +791,24 @@ Display video switcher tally information on intercom clients. When a camera is "
 **Rationale:**
 Camera operators need to know if they're live. In traditional setups, tally lights are on the camera. With CueCommX, the camera op's phone/tablet can show tally status. Unity Intercom sells a $660 "Tally License" for this feature. Supports iOS flashlight-as-tally.
 
-**Supported Protocols:**
+**Supported Protocols (Implemented):**
+- OBS WebSocket v5 (obs-websocket-js) — `CUECOMMX_TALLY_OBS_ENABLED=true`
+- TSL UMD v3.1 (UDP) — `CUECOMMX_TALLY_TSL_ENABLED=true`
+
+**Not yet implemented:**
 - Blackmagic ATEM (via ATEM network protocol)
 - Ross Carbonite (via RossTalk protocol)
-- OBS (via obs-websocket)
-- TSL UMD v3.1/v5 (universal tally protocol)
 - Generic GPIO input
+- iOS flashlight-as-tally
 
 **Implementation:**
-- Tally integration module on the server
-- Server connects to video switcher and receives tally state
-- Maps tally sources to CueCommX users (admin configuration)
-- Broadcasts tally state to relevant clients
-- Client shows: 🔴 PROGRAM / 🟢 PREVIEW indicator
-- Mobile: optionally flash device flashlight on program (Unity Intercom does this)
+- `TallyService` in `apps/server/src/tally/service.ts`
+- Protocol schemas in `packages/protocol/src/messages.ts` (`tally:update`)
+- Server broadcasts `tally:update` to all authenticated clients on state change
+- New client receives current tally state on connect
+- Admin UI: Tally section under settings (polls `/api/tally/status` every 2s when expanded)
+- Web client: tally status bar at top of operator shell (PROGRAM=red, PREVIEW=green)
+- Mobile: tally strip below header bar
 
 **Complexity:** High (per-protocol integration)  
 **Dependencies:** MVP server  

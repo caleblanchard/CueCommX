@@ -18,6 +18,7 @@ import {
   type ChannelPermission,
   type OperatorState,
   type ServerSignalingMessage,
+  type TallySourceState,
   type UserInfo,
 } from "@cuecommx/protocol";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
@@ -25,7 +26,9 @@ import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { SessionStore } from "../auth/session-store.js";
 import { DatabaseService } from "../db/database.js";
 import type { MediaRequestMessage, MediaSessionContext, RealtimeMediaService } from "../media/service.js";
+import type { OscService } from "../osc/service.js";
 import type { RecordingService } from "../recording/service.js";
+import type { TallyService } from "../tally/service.js";
 
 interface AuthenticatedConnection {
   channels: ChannelInfo[];
@@ -127,9 +130,34 @@ export interface RealtimeServiceOptions {
   heartbeatIntervalMs?: number;
   maxUsers?: number;
   mediaService?: RealtimeMediaService;
+  oscService?: OscService;
   path?: string;
   recordingService?: RecordingService;
   sessionStore: SessionStore;
+  tallyService?: TallyService;
+  onStateChange?: () => void;
+}
+
+export interface StreamDeckUserState {
+  id: string;
+  username: string;
+  online: boolean;
+  talking: boolean;
+  talkChannelIds: string[];
+}
+
+export interface StreamDeckChannelState {
+  id: string;
+  name: string;
+  active: boolean;
+  talkers: string[];
+}
+
+export interface StreamDeckPublicState {
+  users: StreamDeckUserState[];
+  channels: StreamDeckChannelState[];
+  allPage: { userId: string; username: string } | null;
+  timestamp: number;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
@@ -168,6 +196,12 @@ export class RealtimeService {
     this.server.on("connection", (socket: WebSocket, request: IncomingMessage) =>
       this.handleConnection(socket, request),
     );
+
+    if (options.tallyService) {
+      options.tallyService.on("update", (sources) => {
+        this.broadcastTallyUpdate(sources);
+      });
+    }
   }
 
   attach(server: HttpServer | HttpsServer): void {
@@ -373,6 +407,18 @@ export class RealtimeService {
     }
   }
 
+  broadcastTallyUpdate(sources: TallySourceState[]): void {
+    const message: ServerSignalingMessage = {
+      type: "tally:update",
+      payload: { sources },
+    };
+
+    for (const connection of this.connections.values()) {
+      if (!connection.authenticated) continue;
+      this.sendMessage(connection.socket, message);
+    }
+  }
+
   // --- All-Page ---
 
   private async handleAllPageStart(connection: AuthenticatedConnection): Promise<void> {
@@ -484,6 +530,14 @@ export class RealtimeService {
     }
 
     this.broadcastAdminDashboard();
+
+    try {
+      this.options.oscService?.notifyAllPageStart(connection.user.username);
+    } catch { /* never crash */ }
+
+    try {
+      this.options.onStateChange?.();
+    } catch { /* never crash */ }
   }
 
   private async handleAllPageStop(connection: AuthenticatedConnection): Promise<void> {
@@ -551,6 +605,14 @@ export class RealtimeService {
     }
 
     this.broadcastAdminDashboard();
+
+    try {
+      this.options.oscService?.notifyAllPageStop();
+    } catch { /* never crash */ }
+
+    try {
+      this.options.onStateChange?.();
+    } catch { /* never crash */ }
   }
 
   // --- Call Signaling ---
@@ -1115,6 +1177,48 @@ export class RealtimeService {
     return this.getConnectedUserIds().length;
   }
 
+  getPublicState(): StreamDeckPublicState {
+    const channels = this.options.database.listChannels();
+    const channelMap = new Map(channels.map((ch) => [ch.id, ch.name]));
+
+    const usersMap = new Map<string, StreamDeckUserState>();
+    for (const connection of this.connections.values()) {
+      if (!connection.authenticated) continue;
+      const { user, state } = connection.authenticated;
+      usersMap.set(user.id, {
+        id: user.id,
+        username: user.username,
+        online: true,
+        talking: state.talking,
+        talkChannelIds: [...state.talkChannelIds],
+      });
+    }
+
+    const channelStates: StreamDeckChannelState[] = channels.map((ch) => {
+      const talkers: string[] = [];
+      for (const conn of this.connections.values()) {
+        if (conn.authenticated?.state.talkChannelIds.includes(ch.id)) {
+          talkers.push(conn.authenticated.user.id);
+        }
+      }
+      return {
+        id: ch.id,
+        name: channelMap.get(ch.id) ?? ch.id,
+        active: talkers.length > 0,
+        talkers,
+      };
+    });
+
+    return {
+      users: [...usersMap.values()],
+      channels: channelStates,
+      allPage: this.allPageState
+        ? { userId: this.allPageState.userId, username: this.allPageState.username }
+        : null,
+      timestamp: Date.now(),
+    };
+  }
+
   private getAuthenticatedSessionCount(): number {
     let count = 0;
 
@@ -1242,6 +1346,24 @@ export class RealtimeService {
     try {
       this.options.recordingService?.logTalkEvent(mode, connection.user.id, connection.user.username, channelIds);
     } catch { /* never crash */ }
+
+    try {
+      const oscService = this.options.oscService;
+      if (oscService) {
+        if (mode === "start") {
+          for (const channelId of channelIds) {
+            oscService.notifyUserTalking(connection.user.id, channelId);
+          }
+        } else if (nextTalkChannelIds.length === 0) {
+          // User fully stopped talking
+          oscService.notifyUserStopped(connection.user.id, channelIds);
+        }
+      }
+    } catch { /* never crash */ }
+
+    try {
+      this.options.onStateChange?.();
+    } catch { /* never crash */ }
   }
 
   private async authenticateConnection(
@@ -1319,6 +1441,15 @@ export class RealtimeService {
 
     this.sendChatHistory(authenticated, connection.socket);
 
+    // Send current tally state to newly connected client
+    const tallySources = this.options.tallyService?.getSources() ?? [];
+    if (tallySources.length > 0) {
+      this.sendMessage(connection.socket, {
+        type: "tally:update",
+        payload: { sources: tallySources },
+      });
+    }
+
     // Send current recording state to newly connected client
     const recordingActiveIds = this.options.recordingService?.getActiveChannelIds() ?? [];
     if (recordingActiveIds.length > 0) {
@@ -1337,6 +1468,14 @@ export class RealtimeService {
     this.broadcastOnlineUsers();
 
     try { this.options.database.logEvent({ event_type: "user:connected", user_id: user.id, username: user.username }); } catch { /* never crash */ }
+
+    try {
+      this.options.oscService?.notifyUserOnline(user.id, user.username);
+    } catch { /* never crash */ }
+
+    try {
+      this.options.onStateChange?.();
+    } catch { /* never crash */ }
 
     return authenticated;
   }
@@ -1415,6 +1554,9 @@ export class RealtimeService {
 
     if (connection.authenticated) {
       try { this.options.database.logEvent({ event_type: "user:disconnected", user_id: connection.authenticated.user.id, username: connection.authenticated.user.username }); } catch { /* never crash */ }
+      try {
+        this.options.oscService?.notifyUserOffline(connection.authenticated.user.id, connection.authenticated.user.username);
+      } catch { /* never crash */ }
     }
 
     this.connections.delete(socket);
@@ -1425,6 +1567,10 @@ export class RealtimeService {
     );
     this.broadcastPresence();
     this.broadcastOnlineUsers();
+
+    try {
+      this.options.onStateChange?.();
+    } catch { /* never crash */ }
   }
 
   private async refreshAuthenticatedConnection(connection: ConnectionRecord): Promise<void> {
