@@ -44,6 +44,11 @@ export interface MobileRemoteTalkerSnapshot {
 }
 
 export interface MobileMediaControllerOptions {
+  audioConstraints?: {
+    noiseSuppression: boolean;
+    autoGainControl: boolean;
+    echoCancellation: boolean;
+  };
   onConnectionQualityChange?: (quality: ConnectionQuality | undefined) => void;
   onError?: (error: Error) => void;
   onLocalLevelChange?: (level: number) => void;
@@ -505,8 +510,17 @@ export class MobileMediaController {
       return this.getLocalTrack();
     }
 
+    const constraints = this.options.audioConstraints;
     const stream = await mediaDevices.getUserMedia({
-      audio: true,
+      // react-native-webrtc types don't include audio processing constraints,
+      // but the native WebRTC layer supports them
+      audio: constraints
+        ? ({
+            noiseSuppression: constraints.noiseSuppression,
+            autoGainControl: constraints.autoGainControl,
+            echoCancellation: constraints.echoCancellation,
+          } as Record<string, boolean>)
+        : true,
       video: false,
     });
     const [track] = stream.getAudioTracks();

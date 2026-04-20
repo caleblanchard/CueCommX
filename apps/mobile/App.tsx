@@ -10,6 +10,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Switch,
   Text,
   TextInput,
   View,
@@ -21,6 +22,7 @@ import { CueCommXRealtimeClient, type RealtimeConnectionState } from "@cuecommx/
 import type {
   AuthSuccessResponse,
   ChannelPermission,
+  ConnectionQuality,
   DiscoveryResponse,
   OperatorState,
   ServerSignalingMessage,
@@ -196,6 +198,7 @@ function ChannelPermissionCard({
   canListen,
   canTalk,
   color,
+  isGlobal,
   isListening,
   isTalking,
   name,
@@ -210,6 +213,7 @@ function ChannelPermissionCard({
   canListen: boolean;
   canTalk: boolean;
   color: string;
+  isGlobal: boolean;
   isListening: boolean;
   isTalking: boolean;
   name: string;
@@ -227,7 +231,14 @@ function ChannelPermissionCard({
     <View className="overflow-hidden rounded-xl border border-border bg-background/60">
       <View className="h-1.5 w-full" style={{ backgroundColor: color }} />
       <View className="gap-3 p-4">
-        <Text className="text-base font-semibold text-foreground">{name}</Text>
+        <View className="flex-row items-center gap-2">
+          <Text className="text-base font-semibold text-foreground">{name}</Text>
+          {isGlobal ? (
+            <Text className="text-sm" accessibilityLabel="Global channel">
+              {String.fromCodePoint(0x1f310)}
+            </Text>
+          ) : null}
+        </View>
         <View className="flex-row flex-wrap gap-2">
           <View
             className={`rounded-full px-3 py-1 ${
@@ -349,6 +360,12 @@ export default function App() {
   const [remoteTalkers, setRemoteTalkers] = useState<MobileRemoteTalkerSnapshot[]>([]);
   const [runtimeNotice, setRuntimeNotice] = useState<string>();
   const [talkMode, setTalkMode] = useState<MobileTalkMode>("momentary");
+  const [audioProcessing, setAudioProcessing] = useState({
+    noiseSuppression: true,
+    autoGainControl: true,
+    echoCancellation: true,
+  });
+  const [connectionQuality, setConnectionQuality] = useState<ConnectionQuality | null>(null);
   const androidNotificationIdRef = useRef<string | undefined>(undefined);
   const mediaControllerRef = useRef<ReturnType<typeof createMobileMediaController> | null>(null);
   const realtimeClientRef = useRef<CueCommXRealtimeClient | null>(null);
@@ -616,12 +633,28 @@ export default function App() {
             };
           }
 
+          if (message.type === "force-muted") {
+            const notice =
+              message.payload.reason === "user"
+                ? "An admin has force-muted your microphone"
+                : "An admin unlatched channel audio";
+            setRuntimeNotice(notice);
+          }
+
           return current;
         });
       },
       sessionToken: state.session.sessionToken,
     });
     const mediaController = createMobileMediaController({
+      audioConstraints: audioProcessing,
+      onConnectionQualityChange: (quality) => {
+        if (!active) {
+          return;
+        }
+
+        setConnectionQuality(quality ?? null);
+      },
       onError: (error) => {
         if (!active) {
           return;
@@ -677,6 +710,7 @@ export default function App() {
       setAudioError(undefined);
       setAudioReady(false);
       setChannelVolumes({});
+      setConnectionQuality(null);
       setHapticsAvailable(true);
       setInputLevel(0);
       setMasterVolume(100);
@@ -849,6 +883,7 @@ export default function App() {
     setAudioError(undefined);
     setAudioReady(false);
     setChannelVolumes({});
+    setConnectionQuality(null);
     setHapticsAvailable(true);
     setInputLevel(0);
     setMasterVolume(100);
@@ -1158,12 +1193,35 @@ export default function App() {
               <View className="border-b border-border bg-card/90 px-5 py-3">
                 <View className="flex-row items-center justify-between">
                   <View className="flex-1 gap-0.5">
-                    <Text className="text-lg font-semibold text-foreground">
-                      {state.session!.user.username}
-                    </Text>
-                    <Text className="text-xs text-muted-foreground">
-                      {state.status?.name ?? "CueCommX"}
-                    </Text>
+                    <View className="flex-row items-center gap-2">
+                      <Text className="text-lg font-semibold text-foreground">
+                        {state.session!.user.username}
+                      </Text>
+                      <View className="rounded-full border border-border bg-secondary/70 px-2 py-0.5">
+                        <Text className="text-[10px] font-semibold uppercase tracking-control text-muted-foreground">
+                          {state.session!.user.role === "admin"
+                            ? "Admin"
+                            : state.session!.user.role === "operator"
+                              ? "Operator"
+                              : "User"}
+                        </Text>
+                      </View>
+                    </View>
+                    <View className="flex-row items-center gap-2">
+                      <Text className="text-xs text-muted-foreground">
+                        {state.status?.name ?? "CueCommX"}
+                      </Text>
+                      {connectionQuality ? (
+                        <Text className="text-xs text-muted-foreground">
+                          {connectionQuality.grade === "good" || connectionQuality.grade === "excellent"
+                            ? String.fromCodePoint(0x1f7e2)
+                            : connectionQuality.grade === "fair"
+                              ? String.fromCodePoint(0x1f7e1)
+                              : String.fromCodePoint(0x1f534)}{" "}
+                          RTT: {Math.round(connectionQuality.roundTripTimeMs)}ms
+                        </Text>
+                      ) : null}
+                    </View>
                   </View>
                   <View className={`rounded-full px-3 py-1 ${connectionBadge.toneClassName}`}>
                     <Text className="text-[10px] font-semibold uppercase tracking-control">
@@ -1331,6 +1389,50 @@ export default function App() {
                     </Text>
                   </SectionCard>
 
+                  <SectionCard>
+                    <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                      Audio processing
+                    </Text>
+                    <View className="gap-3">
+                      <View className="flex-row items-center justify-between">
+                        <Text className="text-sm text-foreground">Noise suppression</Text>
+                        <Switch
+                          trackColor={{ false: "#334155", true: "#5eead4" }}
+                          thumbColor="#ffffff"
+                          value={audioProcessing.noiseSuppression}
+                          onValueChange={(value) =>
+                            setAudioProcessing((current) => ({ ...current, noiseSuppression: value }))
+                          }
+                        />
+                      </View>
+                      <View className="flex-row items-center justify-between">
+                        <Text className="text-sm text-foreground">Auto gain control</Text>
+                        <Switch
+                          trackColor={{ false: "#334155", true: "#5eead4" }}
+                          thumbColor="#ffffff"
+                          value={audioProcessing.autoGainControl}
+                          onValueChange={(value) =>
+                            setAudioProcessing((current) => ({ ...current, autoGainControl: value }))
+                          }
+                        />
+                      </View>
+                      <View className="flex-row items-center justify-between">
+                        <Text className="text-sm text-foreground">Echo cancellation</Text>
+                        <Switch
+                          trackColor={{ false: "#334155", true: "#5eead4" }}
+                          thumbColor="#ffffff"
+                          value={audioProcessing.echoCancellation}
+                          onValueChange={(value) =>
+                            setAudioProcessing((current) => ({ ...current, echoCancellation: value }))
+                          }
+                        />
+                      </View>
+                    </View>
+                    <Text className="text-sm leading-6 text-muted-foreground">
+                      Audio processing takes effect the next time audio is armed.
+                    </Text>
+                  </SectionCard>
+
                   <View className="gap-3">
                     {activeChannels.map((channel) => {
                       const permission = findPermission(assignedPermissions, channel.id);
@@ -1341,6 +1443,7 @@ export default function App() {
                           canListen={permission?.canListen ?? false}
                           canTalk={permission?.canTalk ?? false}
                           color={channel.color}
+                          isGlobal={channel.isGlobal ?? false}
                           isListening={
                             state.operatorState?.listenChannelIds.includes(channel.id) ?? false
                           }
