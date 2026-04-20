@@ -748,6 +748,9 @@ export default function App() {
               const channelMsgs = prev[msg.channelId] ?? [];
               return { ...prev, [msg.channelId]: [...channelMsgs, msg] };
             });
+            if (msg.userId !== current.session?.user.id) {
+              playNotificationSound("chatMessage");
+            }
             setChatOpen((openChannel) => {
               if (openChannel !== msg.channelId) {
                 setUnreadCounts((prev) => ({
@@ -3065,21 +3068,31 @@ export default function App() {
               {msgs.length === 0 ? (
                 <p className="text-center text-sm text-muted-foreground pt-8">No messages yet. Start the conversation!</p>
               ) : (
-                msgs.map((msg) => (
-                  <div key={msg.id} className={`flex flex-col gap-0.5 ${msg.messageType === "system" ? "items-center" : ""}`}>
-                    {msg.messageType === "system" ? (
-                      <span className="text-xs italic text-muted-foreground">{msg.text}</span>
-                    ) : (
-                      <>
-                        <div className="flex items-baseline gap-2">
-                          <span className="text-xs font-semibold text-foreground">{msg.username}</span>
-                          <span className="text-[10px] text-muted-foreground">{formatRelativeTime(msg.timestamp)}</span>
-                        </div>
-                        <p className="text-sm text-foreground">{msg.text}</p>
-                      </>
-                    )}
-                  </div>
-                ))
+                msgs.map((msg) => {
+                  const isOwn = msg.userId === state.session?.user.id;
+                  return (
+                    <div key={msg.id} className={`flex flex-col gap-0.5 ${msg.messageType === "system" ? "items-center" : isOwn ? "items-end" : "items-start"}`}>
+                      {msg.messageType === "system" ? (
+                        <span className="text-xs italic text-muted-foreground">{msg.text}</span>
+                      ) : (
+                        <>
+                          {!isOwn && (
+                            <div className="flex items-baseline gap-1.5">
+                              <span className="text-xs font-semibold text-foreground">{msg.username}</span>
+                              <span className="text-[10px] text-muted-foreground">{formatRelativeTime(msg.timestamp)}</span>
+                            </div>
+                          )}
+                          <div className={`max-w-[80%] break-words rounded-2xl px-3 py-2 ${isOwn ? "rounded-tr-sm bg-primary text-primary-foreground" : "rounded-tl-sm bg-secondary text-foreground"}`}>
+                            <p className="text-sm">{msg.text}</p>
+                          </div>
+                          {isOwn && (
+                            <span className="text-[10px] text-muted-foreground">{formatRelativeTime(msg.timestamp)}</span>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })
               )}
               <div ref={chatEndRef} />
             </div>

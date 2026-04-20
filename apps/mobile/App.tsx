@@ -74,6 +74,11 @@ import {
   triggerDirectCallHaptic,
   triggerConnectionLostHaptic,
   triggerMessageHaptic,
+  setIOSNowPlayingInfo,
+  clearIOSNowPlayingInfo,
+  setupIOSRemoteCommands,
+  teardownIOSRemoteCommands,
+  addIOSRemoteCommandListener,
 } from "./src/mobile-runtime-native";
 
 interface ViewState {
@@ -526,6 +531,10 @@ export default function App() {
   const mediaControllerRef = useRef<ReturnType<typeof createMobileMediaController> | null>(null);
   const realtimeClientRef = useRef<CueCommXRealtimeClient | null>(null);
   const qrScannedRef = useRef(false);
+  // Stores the listen-channel IDs that were active just before the operator
+  // tapped "pause" on the lock screen, so "play" can restore exactly those
+  // channels rather than enabling all permitted ones.
+  const iosPreMuteListenIdsRef = useRef<string[]>([]);
 
   const [qrScanOpen, setQrScanOpen] = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -750,6 +759,104 @@ export default function App() {
     };
   }, [appLifecycleState, audioArmed, state.session, state.status?.name]);
 
+  // iOS lock screen / Now Playing integration.
+  // When the operator has an active audio session, populate MPNowPlayingInfoCenter
+  // so iOS shows a live-session widget on the lock screen and in Control Center.
+  // Remote play/pause commands from the lock screen act as monitor mute/unmute:
+  //   pause → disable the channels that are currently being monitored (saves their IDs)
+  //   play  → restore exactly the channels that were active before the last pause
+  //   toggle → flip between muted and restored state
+  useEffect(() => {
+    if (Platform.OS !== "ios" || !audioArmed || !state.session) {
+      clearIOSNowPlayingInfo();
+      teardownIOSRemoteCommands();
+      return;
+    }
+
+    const session = state.session;
+    const serverName = state.status?.name ?? "CueCommX";
+    const operatorName = session.user.username;
+    const activeListenIds = state.operatorState?.listenChannelIds ?? [];
+    const isMonitoring = activeListenIds.length > 0;
+    const listenChannelNames = activeChannels
+      .filter((ch) => activeListenIds.includes(ch.id))
+      .map((ch) => ch.name);
+    const albumText = listenChannelNames.length > 0 ? listenChannelNames.join(", ") : "Intercom";
+
+    setIOSNowPlayingInfo({
+      title: serverName,
+      subtitle: operatorName,
+      album: albumText,
+      isPlaying: isMonitoring,
+    });
+    setupIOSRemoteCommands();
+
+    // All channels this operator is permitted to listen to.
+    const allPermittedListenIds = activeChannels
+      .filter((ch) => {
+        const perm = (session.user.channelPermissions ?? []).find((p) => p.channelId === ch.id);
+        return perm?.canListen;
+      })
+      .map((ch) => ch.id);
+
+    const subscription = addIOSRemoteCommandListener((event) => {
+      const realtimeClient = realtimeClientRef.current;
+      if (!realtimeClient) return;
+
+      if (event.command === "pause") {
+        // Save the currently monitored channels, then mute them.
+        // activeListenIds is captured from the closure (current at effect-run time).
+        if (activeListenIds.length > 0) {
+          iosPreMuteListenIdsRef.current = activeListenIds;
+          for (const id of activeListenIds) {
+            realtimeClient.toggleListen(id, false);
+          }
+        }
+      } else if (event.command === "play") {
+        // Restore the channels that were active before the last pause.
+        // Fall back to all permitted channels if there's nothing saved.
+        const idsToRestore =
+          iosPreMuteListenIdsRef.current.length > 0
+            ? iosPreMuteListenIdsRef.current
+            : allPermittedListenIds;
+        iosPreMuteListenIdsRef.current = [];
+        for (const id of idsToRestore) {
+          realtimeClient.toggleListen(id, true);
+        }
+      } else if (event.command === "togglePlayPause") {
+        if (activeListenIds.length > 0) {
+          // Currently monitoring → mute.
+          iosPreMuteListenIdsRef.current = activeListenIds;
+          for (const id of activeListenIds) {
+            realtimeClient.toggleListen(id, false);
+          }
+        } else {
+          // Currently muted → restore.
+          const idsToRestore =
+            iosPreMuteListenIdsRef.current.length > 0
+              ? iosPreMuteListenIdsRef.current
+              : allPermittedListenIds;
+          iosPreMuteListenIdsRef.current = [];
+          for (const id of idsToRestore) {
+            realtimeClient.toggleListen(id, true);
+          }
+        }
+      }
+    });
+
+    return () => {
+      subscription?.remove();
+      teardownIOSRemoteCommands();
+      clearIOSNowPlayingInfo();
+    };
+  }, [
+    audioArmed,
+    state.session,
+    state.status?.name,
+    state.operatorState?.listenChannelIds,
+    activeChannels,
+  ]);
+
   useEffect(() => {
     if (!state.session || !state.serverBaseUrl) {
       return;
@@ -923,16 +1030,18 @@ export default function App() {
             const channelMsgs = prev[msg.channelId] ?? [];
             return { ...prev, [msg.channelId]: [...channelMsgs, msg] };
           });
-          setChatOpen((openChannel) => {
-            if (openChannel !== msg.channelId) {
-              setUnreadCounts((prev) => ({
-                ...prev,
-                [msg.channelId]: (prev[msg.channelId] ?? 0) + 1,
-              }));
-              Vibration.vibrate(50);
-            }
-            return openChannel;
-          });
+          if (msg.userId !== state.session?.user.id) {
+            setChatOpen((openChannel) => {
+              if (openChannel !== msg.channelId) {
+                setUnreadCounts((prev) => ({
+                  ...prev,
+                  [msg.channelId]: (prev[msg.channelId] ?? 0) + 1,
+                }));
+                Vibration.vibrate(50);
+              }
+              return openChannel;
+            });
+          }
         }
 
         if (message.type === "chat:history") {
@@ -2726,21 +2835,31 @@ export default function App() {
                   </View>
                 }
                 onContentSizeChange={() => chatListRef.current?.scrollToEnd({ animated: true })}
-                renderItem={({ item }) => (
-                  <View className={`mb-3 ${item.messageType === "system" ? "items-center" : ""}`}>
-                    {item.messageType === "system" ? (
-                      <Text className="text-xs italic text-muted-foreground">{item.text}</Text>
-                    ) : (
-                      <View>
-                        <View className="flex-row items-baseline gap-2">
-                          <Text className="text-xs font-semibold text-foreground">{item.username}</Text>
-                          <Text className="text-[10px] text-muted-foreground">{formatRelativeTime(item.timestamp)}</Text>
+                renderItem={({ item }) => {
+                  const isOwn = item.userId === state.session?.user.id;
+                  return (
+                    <View className={`mb-3 ${item.messageType === "system" ? "items-center" : isOwn ? "items-end" : "items-start"}`}>
+                      {item.messageType === "system" ? (
+                        <Text className="text-xs italic text-muted-foreground">{item.text}</Text>
+                      ) : (
+                        <View style={{ maxWidth: "80%" }}>
+                          {!isOwn && (
+                            <View className="mb-0.5 flex-row items-baseline gap-1.5">
+                              <Text className="text-xs font-semibold text-foreground">{item.username}</Text>
+                              <Text className="text-[10px] text-muted-foreground">{formatRelativeTime(item.timestamp)}</Text>
+                            </View>
+                          )}
+                          <View className={`rounded-2xl px-3 py-2 ${isOwn ? "rounded-tr-sm bg-primary" : "rounded-tl-sm bg-secondary"}`}>
+                            <Text className={`text-sm ${isOwn ? "text-primary-foreground" : "text-foreground"}`}>{item.text}</Text>
+                          </View>
+                          {isOwn && (
+                            <Text className="mt-0.5 text-right text-[10px] text-muted-foreground">{formatRelativeTime(item.timestamp)}</Text>
+                          )}
                         </View>
-                        <Text className="text-sm text-foreground">{item.text}</Text>
-                      </View>
-                    )}
-                  </View>
-                )}
+                      )}
+                    </View>
+                  );
+                }}
               />
               <View className="flex-row items-center gap-2 border-t border-border px-4 py-3">
                 <TextInput
