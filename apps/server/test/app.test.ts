@@ -3335,6 +3335,49 @@ describe("createApp", () => {
     await app.close();
   });
 
+  it("creates and round-trips a confidence channel", async () => {
+    database.createUser({ username: "Admin", role: "admin", pinHash: hashPin("1234") });
+    const opId = database.createUser({ username: "Op1", role: "operator", pinHash: hashPin("1111") });
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church", host: "127.0.0.1", port: 0, rtcMinPort: 40000, rtcMaxPort: 41000,
+        announcedIp: undefined, dataDir: workingDirectory, dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"), maxUsers: 30, maxChannels: 16, logLevel: "info", httpsPort: 3443,
+      },
+      database,
+    });
+
+    const adminToken = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Admin", pin: "1234" } })).json().sessionToken as string;
+
+    const channelRes = await app.inject({
+      method: "POST",
+      url: "/api/channels",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { name: "IEM Confidence", color: "#8B5CF6", channelType: "confidence" },
+    });
+    expect(channelRes.statusCode).toBe(201);
+    const confChannel = channelRes.json();
+    expect(confChannel.channelType).toBe("confidence");
+
+    const listRes = await app.inject({ method: "GET", url: "/api/channels" });
+    expect(listRes.json()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: confChannel.id, name: "IEM Confidence", channelType: "confidence" }),
+      ]),
+    );
+
+    database.grantChannelPermissions(opId, [{ channelId: confChannel.id, canTalk: false, canListen: true }]);
+    const opLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Op1", pin: "1111" } });
+    expect(opLogin.json().channels).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: confChannel.id, channelType: "confidence" }),
+      ]),
+    );
+
+    await app.close();
+  });
+
   it("saves and loads user preferences", async () => {
     const userId = database.createUser({ username: "PrefUser", role: "operator", pinHash: hashPin("1111") });
     database.grantChannelPermissions(userId, [{ channelId: "ch-production", canTalk: true, canListen: true }]);

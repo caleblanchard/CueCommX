@@ -218,7 +218,7 @@ function ChannelPermissionCard({
   talkMode,
   volumePercent,
 }: {
-  channelType?: "intercom" | "program";
+  channelType?: "intercom" | "program" | "confidence";
   connected: boolean;
   canListen: boolean;
   canTalk: boolean;
@@ -503,25 +503,32 @@ export default function App() {
   );
   const visibleChannels: ChannelInfo[] = useMemo(() => {
     const allChannels = (state.session?.channels ?? []) as ChannelInfo[];
+    const nonConfidence = allChannels.filter((ch) => ch.channelType !== "confidence");
 
     if (groups.length === 0 || !activeGroupId) {
-      return allChannels;
+      return nonConfidence;
     }
 
     const activeGroup = groups.find((g) => g.id === activeGroupId);
 
     if (!activeGroup) {
-      return allChannels;
+      return nonConfidence;
     }
 
     const groupChannelSet = new Set(activeGroup.channelIds);
-    const globals = allChannels.filter((ch) => ch.isGlobal);
-    const groupChannels = allChannels.filter(
+    const globals = nonConfidence.filter((ch) => ch.isGlobal);
+    const groupChannels = nonConfidence.filter(
       (ch) => !ch.isGlobal && groupChannelSet.has(ch.id),
     );
 
     return [...globals, ...groupChannels];
   }, [state.session?.channels, groups, activeGroupId]);
+
+  const confidenceChannels: ChannelInfo[] = useMemo(() =>
+    ((state.session?.channels ?? []) as ChannelInfo[]).filter((ch) => ch.channelType === "confidence"),
+    [state.session?.channels],
+  );
+
   const listenChannelIds = state.operatorState?.listenChannelIds ?? [];
 
   function getRuntimeMessage(error: unknown, fallback: string): string {
@@ -971,6 +978,20 @@ export default function App() {
       masterVolume: toFraction(masterVolume),
     });
   }, [activeChannels, duckingEnabled, listenChannelIds, masterVolume, mixChannelVolumes, remoteTalkers]);
+
+  // Auto-listen on confidence channels
+  useEffect(() => {
+    if (!state.session || !state.operatorState || state.realtimeState !== "connected") {
+      return;
+    }
+    const currentListenIds = new Set(state.operatorState.listenChannelIds);
+    for (const ch of confidenceChannels) {
+      const perm = assignedPermissions.find((p) => p.channelId === ch.id);
+      if (perm?.canListen && !currentListenIds.has(ch.id)) {
+        realtimeClientRef.current?.toggleListen(ch.id, true);
+      }
+    }
+  }, [assignedPermissions, confidenceChannels, state.operatorState, state.realtimeState, state.session]);
 
   const mediaStartingRef = useRef(false);
 
@@ -2221,6 +2242,54 @@ export default function App() {
                       );
                     })}
                   </View>
+
+                  {confidenceChannels.length > 0 ? (
+                    <SectionCard>
+                      <Text className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+                        🎧 Confidence Feeds
+                      </Text>
+                      {confidenceChannels.map((channel) => {
+                        const listening = state.operatorState?.listenChannelIds.includes(channel.id) ?? false;
+                        const vol = channelVolumes[channel.id] ?? 100;
+                        return (
+                          <View key={channel.id} className="gap-2 pb-3">
+                            <View className="flex-row items-center justify-between">
+                              <View className="flex-row items-center gap-2">
+                                <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: channel.color }} />
+                                <Text className="text-sm font-semibold text-foreground">{channel.name}</Text>
+                              </View>
+                              <Text className={`text-xs font-medium ${listening ? "text-primary" : "text-muted-foreground"}`}>
+                                {listening ? "Listening" : "Idle"}
+                              </Text>
+                            </View>
+                            <Text className="text-xs text-muted-foreground">
+                              Always-on confidence monitor — exempt from ducking and IFB.
+                            </Text>
+                            <View className="flex-row items-center gap-2">
+                              <Text className="text-xs text-muted-foreground">Vol</Text>
+                              <Slider
+                                minimumValue={0}
+                                maximumValue={100}
+                                step={1}
+                                value={vol}
+                                onValueChange={(value) =>
+                                  setChannelVolumes((current) => {
+                                    const rounded = Math.round(value);
+                                    if ((current[channel.id] ?? 100) === rounded) return current;
+                                    return { ...current, [channel.id]: rounded };
+                                  })
+                                }
+                                style={{ flex: 1 }}
+                                minimumTrackTintColor="#6366f1"
+                                maximumTrackTintColor="#374151"
+                              />
+                              <Text className="w-8 text-right text-xs text-muted-foreground">{vol}%</Text>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </SectionCard>
+                  ) : null}
 
                   <View className="pt-4">
                     <ActionButton label="Sign out" onPress={handleSignOut} tone="secondary" />

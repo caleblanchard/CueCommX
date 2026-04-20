@@ -84,7 +84,7 @@ export class DatabaseService {
       name: row.name,
       color: row.color,
       isGlobal: row.isGlobal === 1,
-      channelType: (row.channelType === "program" ? "program" : "intercom") as ChannelType,
+      channelType: (["program", "confidence"].includes(row.channelType) ? row.channelType : "intercom") as ChannelType,
       ...(row.sourceUserId ? { sourceUserId: row.sourceUserId } : {}),
       priority: row.priority,
     }));
@@ -113,7 +113,7 @@ export class DatabaseService {
       name: row.name,
       color: row.color,
       isGlobal: row.isGlobal === 1,
-      channelType: (row.channelType === "program" ? "program" : "intercom") as ChannelType,
+      channelType: (["program", "confidence"].includes(row.channelType) ? row.channelType : "intercom") as ChannelType,
       ...(row.sourceUserId ? { sourceUserId: row.sourceUserId } : {}),
       priority: row.priority,
     };
@@ -142,7 +142,7 @@ export class DatabaseService {
       name: row.name,
       color: row.color,
       isGlobal: row.isGlobal === 1,
-      channelType: (row.channelType === "program" ? "program" : "intercom") as ChannelType,
+      channelType: (["program", "confidence"].includes(row.channelType) ? row.channelType : "intercom") as ChannelType,
       ...(row.sourceUserId ? { sourceUserId: row.sourceUserId } : {}),
       priority: row.priority,
     };
@@ -327,7 +327,7 @@ export class DatabaseService {
       name: row.name,
       color: row.color,
       isGlobal: row.isGlobal === 1,
-      channelType: (row.channelType === "program" ? "program" : "intercom") as ChannelType,
+      channelType: (["program", "confidence"].includes(row.channelType) ? row.channelType : "intercom") as ChannelType,
       ...(row.sourceUserId ? { sourceUserId: row.sourceUserId } : {}),
       priority: row.priority,
     }));

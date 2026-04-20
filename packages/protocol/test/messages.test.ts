@@ -815,6 +815,27 @@ describe("program channel schemas", () => {
   });
 });
 
+describe("confidence channel schemas", () => {
+  it("accepts ChannelInfo with confidence type", () => {
+    const channel = ChannelInfoSchema.parse({
+      id: "ch-conf-1",
+      name: "IEM Confidence",
+      color: "#8B5CF6",
+      channelType: "confidence",
+    });
+    expect(channel.channelType).toBe("confidence");
+  });
+
+  it("accepts a create-channel request with confidence type", () => {
+    const request = CreateChannelRequestSchema.parse({
+      name: "IEM Confidence",
+      color: "#8B5CF6",
+      channelType: "confidence",
+    });
+    expect(request.channelType).toBe("confidence");
+  });
+});
+
 describe("group schemas", () => {
   it("accepts a GroupInfo object", () => {
     const group = GroupInfoSchema.parse({

@@ -12,7 +12,7 @@ export const ChannelPermissionSchema = z.object({
 });
 export type ChannelPermission = z.infer<typeof ChannelPermissionSchema>;
 
-export const ChannelTypeSchema = z.enum(["intercom", "program"]);
+export const ChannelTypeSchema = z.enum(["intercom", "program", "confidence"]);
 export type ChannelType = z.infer<typeof ChannelTypeSchema>;
 
 export const ChannelInfoSchema = z.object({

@@ -241,7 +241,7 @@ export default function App() {
   const [channelName, setChannelName] = useState("");
   const [channelColor, setChannelColor] = useState("#22C55E");
   const [channelIsGlobal, setChannelIsGlobal] = useState(false);
-  const [channelType, setChannelType] = useState<"intercom" | "program">("intercom");
+  const [channelType, setChannelType] = useState<"intercom" | "program" | "confidence">("intercom");
   const [channelSourceUserId, setChannelSourceUserId] = useState<string>("");
   const [channelPriority, setChannelPriority] = useState(5);
   const [editingGroupId, setEditingGroupId] = useState<string | undefined>();
@@ -1987,8 +1987,23 @@ export default function App() {
                             />
                             📡 Program (one-way feed)
                           </label>
+                          <label className="inline-flex items-center gap-2 text-sm text-foreground">
+                            <input
+                              checked={channelType === "confidence"}
+                              name="channelType"
+                              onChange={() => setChannelType("confidence")}
+                              type="radio"
+                            />
+                            🎧 Confidence (always-on monitor)
+                          </label>
                         </div>
                       </div>
+
+                      {channelType === "confidence" ? (
+                        <p className="text-xs text-muted-foreground">
+                          Confidence channels are listen-only, always-on, and exempt from ducking.
+                        </p>
+                      ) : null}
 
                       {channelType === "program" ? (
                         <div className="space-y-2">
@@ -2093,6 +2108,9 @@ export default function App() {
                               ) : null}
                               {channel.channelType === "program" ? (
                                 <Badge variant="accent">📡 Program</Badge>
+                              ) : null}
+                              {channel.channelType === "confidence" ? (
+                                <Badge variant="accent">🎧 Confidence</Badge>
                               ) : null}
                               {state.session ? (
                                 <>
