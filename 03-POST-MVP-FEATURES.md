@@ -858,7 +858,7 @@ Many venues have existing wired intercom infrastructure. CueCommX can supplement
 
 ---
 
-### 3.4 GPIO Integration
+### 3.4 GPIO Integration — **IMPLEMENTED**
 
 **Description:**
 Hardware input/output triggers via GPIO interfaces. Inputs can trigger actions (e.g., a physical button triggers talk). Outputs can signal states (e.g., an LED lights when a user is online).
@@ -879,7 +879,7 @@ Physical buttons and indicators are important in permanent installations. A wall
 
 ---
 
-### 3.5 StreamDeck / X-Keys Integration
+### 3.5 StreamDeck / X-Keys Integration — **IMPLEMENTED**
 
 **Description:**
 Use Elgato StreamDeck or X-Keys panels as physical control surfaces for CueCommX. Buttons can be mapped to channels (talk/listen toggle), users (direct call), or system functions (all-page, mute).
@@ -900,7 +900,7 @@ Technical directors and production managers often use StreamDecks for show contr
 
 ---
 
-### 3.6 OSC (Open Sound Control) Protocol
+### 3.6 OSC (Open Sound Control) Protocol — **IMPLEMENTED**
 
 **Description:**
 Expose CueCommX state and accept commands via OSC protocol. This enables integration with show control systems (QLab, ETC Eos, Bitfocus Companion, etc.).
@@ -1016,7 +1016,7 @@ Custom vibration patterns on mobile devices for different events.
 
 ---
 
-### 3.13 Mobile: Lock Screen Widget / Controls
+### 3.13 Mobile: Lock Screen Widget / Controls — **IMPLEMENTED**
 
 **Description:**
 Control intercom from the lock screen or notification shade:

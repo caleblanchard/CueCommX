@@ -2129,6 +2129,110 @@ export default function App() {
                 </Card>
               ) : null}
 
+              {/* --- OSC Protocol --- */}
+              {state.session ? (
+                <Card>
+                  <CardHeader>
+                    <CardDescription>Open Sound Control</CardDescription>
+                    <CardTitle>OSC Integration</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <p className="text-sm text-muted-foreground">
+                      CueCommX can send and receive OSC messages to integrate with lighting consoles,
+                      video switchers, and other OSC-capable equipment.
+                    </p>
+                    <div className="rounded border border-border bg-muted/30 p-3 text-xs font-mono space-y-1">
+                      <p className="text-foreground font-semibold mb-2">Environment variables:</p>
+                      <p><code>CUECOMMX_OSC_ENABLED=true</code> — enable OSC (default: false)</p>
+                      <p><code>CUECOMMX_OSC_LISTEN_PORT=8765</code> — UDP port for incoming OSC</p>
+                      <p><code>CUECOMMX_OSC_SEND_HOST=127.0.0.1</code> — host to send OSC to</p>
+                      <p><code>CUECOMMX_OSC_SEND_PORT=9000</code> — UDP port to send OSC to</p>
+                    </div>
+                    <div className="space-y-1 text-sm">
+                      <p className="font-semibold">Outgoing OSC addresses:</p>
+                      <ul className="text-muted-foreground space-y-0.5 text-xs font-mono ml-2">
+                        <li>/cuecommx/user/&#123;id&#125;/online — 1 when user connects, 0 on disconnect</li>
+                        <li>/cuecommx/user/&#123;id&#125;/talking — 1 when talking, 0 when stopped</li>
+                        <li>/cuecommx/channel/&#123;id&#125;/active — 1 when any talker is active</li>
+                        <li>/cuecommx/allpage/active — 1 on all-page start, 0 on stop</li>
+                      </ul>
+                    </div>
+                    <div className="space-y-1 text-sm">
+                      <p className="font-semibold">Incoming OSC commands:</p>
+                      <ul className="text-muted-foreground space-y-0.5 text-xs font-mono ml-2">
+                        <li>/cuecommx/user/&#123;id&#125;/mute 1 — force-mute a user</li>
+                        <li>/cuecommx/allpage/start — trigger all-page broadcast</li>
+                        <li>/cuecommx/allpage/stop — stop all-page broadcast</li>
+                      </ul>
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : null}
+
+              {/* --- StreamDeck / Bitfocus Companion --- */}
+              {state.session ? (
+                <Card>
+                  <CardHeader>
+                    <CardDescription>HTTP API for hardware controllers</CardDescription>
+                    <CardTitle>StreamDeck / Companion Integration</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <p className="text-sm text-muted-foreground">
+                      Use the CueCommX HTTP API with Bitfocus Companion or any HTTP-capable controller
+                      to read intercom state and trigger actions from physical buttons.
+                    </p>
+                    <div className="rounded border border-border bg-muted/30 p-3 text-xs font-mono space-y-1">
+                      <p className="text-foreground font-semibold mb-2">API endpoints (require X-Api-Key header):</p>
+                      <p><code>GET /api/stream-deck/state</code> — current users, channels, and all-page state</p>
+                      <p><code>POST /api/stream-deck/action</code> — trigger mute or disconnect actions</p>
+                      <p><code>GET /api/stream-deck/events</code> — SSE stream of state changes</p>
+                    </div>
+                    <div className="rounded border border-border bg-muted/30 p-3 text-xs font-mono space-y-1">
+                      <p className="text-foreground font-semibold mb-2">API key configuration:</p>
+                      <p><code>CUECOMMX_STREAMDECK_API_KEY=your-key</code> — set a persistent key</p>
+                      <p className="text-muted-foreground">If not set, a random key is generated on each startup and logged to the server console.</p>
+                    </div>
+                    <div className="space-y-1 text-sm">
+                      <p className="font-semibold">Example Companion HTTP action:</p>
+                      <pre className="text-xs bg-muted/50 rounded p-2 overflow-x-auto">{`POST /api/stream-deck/action
+X-Api-Key: your-key
+Content-Type: application/json
+
+{ "action": "mute", "userId": "<user-id>" }`}</pre>
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : null}
+
+              {/* --- GPIO Integration --- */}
+              {state.session ? (
+                <Card>
+                  <CardHeader>
+                    <CardDescription>Hardware button and indicator control</CardDescription>
+                    <CardTitle>GPIO Integration</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <p className="text-sm text-muted-foreground">
+                      GPIO support allows USB HID devices (relay boards, button panels) to trigger
+                      intercom actions and reflect intercom state via output pins.
+                    </p>
+                    <div className="rounded border border-border bg-muted/30 p-3 text-xs font-mono space-y-1">
+                      <p className="text-foreground font-semibold mb-2">Environment variables:</p>
+                      <p><code>CUECOMMX_GPIO_ENABLED=true</code> — enable GPIO (default: false)</p>
+                      <p><code>CUECOMMX_GPIO_PROVIDER=hid</code> — hardware provider (default: none)</p>
+                      <p><code>CUECOMMX_GPIO_CONFIG=[...]</code> — JSON array of pin mappings</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      HID provider requires <code>node-hid</code> to be installed on the server.
+                      Install via: <code>npm install node-hid --workspace=apps/server</code>
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Use <code>GET /api/gpio/devices</code> (admin auth) to enumerate connected HID devices.
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : null}
+
               <Card>
                 <CardHeader>
                   <CardDescription>User roster</CardDescription>
