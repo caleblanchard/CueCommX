@@ -503,8 +503,8 @@ describe("createApp", () => {
         ],
       },
       channels: [
-        { id: "ch-production", name: "Production", color: "#EF4444", isGlobal: false },
-        { id: "ch-video", name: "Video/Camera", color: "#10B981", isGlobal: false },
+        { id: "ch-production", name: "Production", color: "#EF4444", isGlobal: false, channelType: "intercom" },
+        { id: "ch-video", name: "Video/Camera", color: "#10B981", isGlobal: false, channelType: "intercom" },
       ],
     });
 
@@ -2654,6 +2654,617 @@ describe("createApp", () => {
     socket.close();
     await once(socket, "close");
     messages.stop();
+    await app.close();
+  });
+
+  // ── 1.3 Direct Communication ──────────────────────────────────────────
+
+  it("handles direct call request → accept → end lifecycle", async () => {
+    const op1Id = database.createUser({ username: "Op1", role: "operator", pinHash: hashPin("1111") });
+    database.grantChannelPermissions(op1Id, [{ channelId: "ch-production", canTalk: true, canListen: true }]);
+    const op2Id = database.createUser({ username: "Op2", role: "operator", pinHash: hashPin("2222") });
+    database.grantChannelPermissions(op2Id, [{ channelId: "ch-production", canTalk: true, canListen: true }]);
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church", host: "127.0.0.1", port: 0, rtcMinPort: 40000, rtcMaxPort: 41000,
+        announcedIp: undefined, dataDir: workingDirectory, dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"), maxUsers: 30, maxChannels: 16, logLevel: "info", httpsPort: 3443,
+      },
+      database,
+    });
+
+    const op1Token = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Op1", pin: "1111" } })).json().sessionToken as string;
+    const op2Token = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Op2", pin: "2222" } })).json().sessionToken as string;
+
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+
+    const op1Socket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const op1Messages = createJsonMessageCollector(op1Socket);
+    await once(op1Socket, "open");
+    op1Socket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: op1Token } }));
+    await withTimeout(op1Messages.next("session:ready"), "op1 session ready");
+
+    const op2Socket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const op2Messages = createJsonMessageCollector(op2Socket);
+    await once(op2Socket, "open");
+    op2Socket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: op2Token } }));
+    await withTimeout(op2Messages.next("session:ready"), "op2 session ready");
+
+    // Op1 requests a direct call to Op2
+    op1Socket.send(JSON.stringify({ type: "direct:request", payload: { targetUserId: op2Id } }));
+
+    // Op2 receives direct:incoming
+    const incoming = await withTimeout(
+      op2Messages.next<{ payload: { callId: string; fromUserId: string; fromUsername: string }; type: string }>("direct:incoming"),
+      "op2 incoming call",
+    );
+    expect(incoming.payload.fromUserId).toBe(op1Id);
+    expect(incoming.payload.fromUsername).toBe("Op1");
+    const callId = incoming.payload.callId;
+    expect(callId).toBeTruthy();
+
+    // Op2 accepts
+    op2Socket.send(JSON.stringify({ type: "direct:accept", payload: { callId } }));
+
+    // Both receive direct:active
+    const op1Active = await withTimeout(
+      op1Messages.next<{ payload: { callId: string; peerUserId: string; peerUsername: string }; type: string }>("direct:active"),
+      "op1 direct active",
+    );
+    expect(op1Active.payload).toMatchObject({ callId, peerUserId: op2Id, peerUsername: "Op2" });
+
+    const op2Active = await withTimeout(
+      op2Messages.next<{ payload: { callId: string; peerUserId: string; peerUsername: string }; type: string }>("direct:active"),
+      "op2 direct active",
+    );
+    expect(op2Active.payload).toMatchObject({ callId, peerUserId: op1Id, peerUsername: "Op1" });
+
+    // Op1 ends the call
+    op1Socket.send(JSON.stringify({ type: "direct:end", payload: { callId } }));
+
+    // Both receive direct:ended with reason "ended"
+    const op1Ended = await withTimeout(
+      op1Messages.next<{ payload: { callId: string; reason: string }; type: string }>("direct:ended"),
+      "op1 direct ended",
+    );
+    expect(op1Ended.payload).toMatchObject({ callId, reason: "ended" });
+
+    const op2Ended = await withTimeout(
+      op2Messages.next<{ payload: { callId: string; reason: string }; type: string }>("direct:ended"),
+      "op2 direct ended",
+    );
+    expect(op2Ended.payload).toMatchObject({ callId, reason: "ended" });
+
+    op1Socket.close();
+    op2Socket.close();
+    await Promise.all([once(op1Socket, "close"), once(op2Socket, "close")]);
+    op1Messages.stop();
+    op2Messages.stop();
+    await app.close();
+  });
+
+  it("handles direct call rejection", async () => {
+    const op1Id = database.createUser({ username: "Op1", role: "operator", pinHash: hashPin("1111") });
+    database.grantChannelPermissions(op1Id, [{ channelId: "ch-production", canTalk: true, canListen: true }]);
+    const op2Id = database.createUser({ username: "Op2", role: "operator", pinHash: hashPin("2222") });
+    database.grantChannelPermissions(op2Id, [{ channelId: "ch-production", canTalk: true, canListen: true }]);
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church", host: "127.0.0.1", port: 0, rtcMinPort: 40000, rtcMaxPort: 41000,
+        announcedIp: undefined, dataDir: workingDirectory, dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"), maxUsers: 30, maxChannels: 16, logLevel: "info", httpsPort: 3443,
+      },
+      database,
+    });
+
+    const op1Token = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Op1", pin: "1111" } })).json().sessionToken as string;
+    const op2Token = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Op2", pin: "2222" } })).json().sessionToken as string;
+
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+
+    const op1Socket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const op1Messages = createJsonMessageCollector(op1Socket);
+    await once(op1Socket, "open");
+    op1Socket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: op1Token } }));
+    await withTimeout(op1Messages.next("session:ready"), "op1 session ready");
+
+    const op2Socket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const op2Messages = createJsonMessageCollector(op2Socket);
+    await once(op2Socket, "open");
+    op2Socket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: op2Token } }));
+    await withTimeout(op2Messages.next("session:ready"), "op2 session ready");
+
+    // Op1 requests a direct call to Op2
+    op1Socket.send(JSON.stringify({ type: "direct:request", payload: { targetUserId: op2Id } }));
+
+    const incoming = await withTimeout(
+      op2Messages.next<{ payload: { callId: string }; type: string }>("direct:incoming"),
+      "op2 incoming call",
+    );
+    const callId = incoming.payload.callId;
+
+    // Op2 rejects
+    op2Socket.send(JSON.stringify({ type: "direct:reject", payload: { callId } }));
+
+    // Op1 receives direct:ended with reason "rejected"
+    const op1Ended = await withTimeout(
+      op1Messages.next<{ payload: { callId: string; reason: string }; type: string }>("direct:ended"),
+      "op1 direct ended after rejection",
+    );
+    expect(op1Ended.payload).toMatchObject({ callId, reason: "rejected" });
+
+    op1Socket.close();
+    op2Socket.close();
+    await Promise.all([once(op1Socket, "close"), once(op2Socket, "close")]);
+    op1Messages.stop();
+    op2Messages.stop();
+    await app.close();
+  });
+
+  it("rejects direct call when target is busy", async () => {
+    const op1Id = database.createUser({ username: "Op1", role: "operator", pinHash: hashPin("1111") });
+    database.grantChannelPermissions(op1Id, [{ channelId: "ch-production", canTalk: true, canListen: true }]);
+    const op2Id = database.createUser({ username: "Op2", role: "operator", pinHash: hashPin("2222") });
+    database.grantChannelPermissions(op2Id, [{ channelId: "ch-production", canTalk: true, canListen: true }]);
+    const op3Id = database.createUser({ username: "Op3", role: "operator", pinHash: hashPin("3333") });
+    database.grantChannelPermissions(op3Id, [{ channelId: "ch-production", canTalk: true, canListen: true }]);
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church", host: "127.0.0.1", port: 0, rtcMinPort: 40000, rtcMaxPort: 41000,
+        announcedIp: undefined, dataDir: workingDirectory, dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"), maxUsers: 30, maxChannels: 16, logLevel: "info", httpsPort: 3443,
+      },
+      database,
+    });
+
+    const op1Token = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Op1", pin: "1111" } })).json().sessionToken as string;
+    const op2Token = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Op2", pin: "2222" } })).json().sessionToken as string;
+    const op3Token = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Op3", pin: "3333" } })).json().sessionToken as string;
+
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+
+    const op1Socket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const op1Messages = createJsonMessageCollector(op1Socket);
+    await once(op1Socket, "open");
+    op1Socket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: op1Token } }));
+    await withTimeout(op1Messages.next("session:ready"), "op1 session ready");
+
+    const op2Socket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const op2Messages = createJsonMessageCollector(op2Socket);
+    await once(op2Socket, "open");
+    op2Socket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: op2Token } }));
+    await withTimeout(op2Messages.next("session:ready"), "op2 session ready");
+
+    const op3Socket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const op3Messages = createJsonMessageCollector(op3Socket);
+    await once(op3Socket, "open");
+    op3Socket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: op3Token } }));
+    await withTimeout(op3Messages.next("session:ready"), "op3 session ready");
+
+    // Op1 calls Op2 → Op2 accepts
+    op1Socket.send(JSON.stringify({ type: "direct:request", payload: { targetUserId: op2Id } }));
+    const incoming = await withTimeout(
+      op2Messages.next<{ payload: { callId: string }; type: string }>("direct:incoming"),
+      "op2 incoming call",
+    );
+    op2Socket.send(JSON.stringify({ type: "direct:accept", payload: { callId: incoming.payload.callId } }));
+    await withTimeout(op1Messages.next("direct:active"), "op1 direct active");
+    await withTimeout(op2Messages.next("direct:active"), "op2 direct active");
+
+    // Op3 tries to call Op2 → should get busy
+    op3Socket.send(JSON.stringify({ type: "direct:request", payload: { targetUserId: op2Id } }));
+    const busyEnded = await withTimeout(
+      op3Messages.next<{ payload: { reason: string }; type: string }>("direct:ended"),
+      "op3 direct ended busy",
+    );
+    expect(busyEnded.payload.reason).toBe("busy");
+
+    op1Socket.close();
+    op2Socket.close();
+    op3Socket.close();
+    await Promise.all([once(op1Socket, "close"), once(op2Socket, "close"), once(op3Socket, "close")]);
+    op1Messages.stop();
+    op2Messages.stop();
+    op3Messages.stop();
+    await app.close();
+  });
+
+  // ── 1.4 Groups CRUD ──────────────────────────────────────────────────
+
+  it("creates, lists, updates, and deletes channel groups", async () => {
+    database.createUser({ username: "Admin", role: "admin", pinHash: hashPin("1234") });
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church", host: "127.0.0.1", port: 0, rtcMinPort: 40000, rtcMaxPort: 41000,
+        announcedIp: undefined, dataDir: workingDirectory, dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"), maxUsers: 30, maxChannels: 16, logLevel: "info", httpsPort: 3443,
+      },
+      database,
+    });
+
+    const adminToken = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Admin", pin: "1234" } })).json().sessionToken as string;
+    const authHeaders = { authorization: `Bearer ${adminToken}` };
+
+    // POST /api/groups → 201
+    const createRes = await app.inject({
+      method: "POST",
+      url: "/api/groups",
+      headers: authHeaders,
+      payload: { name: "Camera Team", channelIds: [] },
+    });
+    expect(createRes.statusCode).toBe(201);
+    const created = createRes.json();
+    expect(created).toMatchObject({ name: "Camera Team" });
+    const groupId = created.id as string;
+
+    // GET /api/groups → includes "Camera Team"
+    const listRes = await app.inject({ method: "GET", url: "/api/groups", headers: authHeaders });
+    expect(listRes.statusCode).toBe(200);
+    expect(listRes.json()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: groupId, name: "Camera Team" })]),
+    );
+
+    // PUT /api/groups/:id → 200
+    const updateRes = await app.inject({
+      method: "PUT",
+      url: `/api/groups/${groupId}`,
+      headers: authHeaders,
+      payload: { name: "Camera Crew", channelIds: [] },
+    });
+    expect(updateRes.statusCode).toBe(200);
+    expect(updateRes.json()).toMatchObject({ id: groupId, name: "Camera Crew" });
+
+    // DELETE /api/groups/:id → 204
+    const deleteRes = await app.inject({
+      method: "DELETE",
+      url: `/api/groups/${groupId}`,
+      headers: authHeaders,
+    });
+    expect(deleteRes.statusCode).toBe(204);
+
+    // GET /api/groups → empty
+    const finalListRes = await app.inject({ method: "GET", url: "/api/groups", headers: authHeaders });
+    expect(finalListRes.json()).toEqual([]);
+
+    await app.close();
+  });
+
+  it("includes groups in session:ready message", async () => {
+    const adminId = database.createUser({ username: "Admin", role: "admin", pinHash: hashPin("1234") });
+    database.grantChannelPermissions(adminId, [{ channelId: "ch-production", canTalk: true, canListen: true }]);
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church", host: "127.0.0.1", port: 0, rtcMinPort: 40000, rtcMaxPort: 41000,
+        announcedIp: undefined, dataDir: workingDirectory, dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"), maxUsers: 30, maxChannels: 16, logLevel: "info", httpsPort: 3443,
+      },
+      database,
+    });
+
+    const adminToken = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Admin", pin: "1234" } })).json().sessionToken as string;
+
+    // Create a group via API
+    const createRes = await app.inject({
+      method: "POST",
+      url: "/api/groups",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { name: "Stage Crew", channelIds: ["ch-production"] },
+    });
+    expect(createRes.statusCode).toBe(201);
+    const groupId = createRes.json().id as string;
+
+    // Assign admin to the group
+    database.replaceUserGroups(adminId, [groupId]);
+
+    // Connect via WebSocket and verify session:ready includes groups
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+    const socket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const messages = createJsonMessageCollector(socket);
+    await once(socket, "open");
+    socket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: adminToken } }));
+
+    const ready = await withTimeout(
+      messages.next<{ payload: { groups: Array<{ id: string; name: string }> }; type: string }>("session:ready"),
+      "session ready with groups",
+    );
+    expect(ready.payload.groups).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: groupId, name: "Stage Crew" })]),
+    );
+
+    socket.close();
+    await once(socket, "close");
+    messages.stop();
+    await app.close();
+  });
+
+  // ── 1.12 IFB Lifecycle ────────────────────────────────────────────────
+
+  it("handles IFB start → target receives active → stop → target receives inactive", async () => {
+    const adminId = database.createUser({ username: "Admin", role: "admin", pinHash: hashPin("1234") });
+    database.grantChannelPermissions(adminId, [{ channelId: "ch-production", canTalk: true, canListen: true }]);
+    const opId = database.createUser({ username: "Op1", role: "operator", pinHash: hashPin("5678") });
+    database.grantChannelPermissions(opId, [{ channelId: "ch-production", canTalk: true, canListen: true }]);
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church", host: "127.0.0.1", port: 0, rtcMinPort: 40000, rtcMaxPort: 41000,
+        announcedIp: undefined, dataDir: workingDirectory, dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"), maxUsers: 30, maxChannels: 16, logLevel: "info", httpsPort: 3443,
+      },
+      database,
+    });
+
+    const adminToken = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Admin", pin: "1234" } })).json().sessionToken as string;
+    const opToken = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Op1", pin: "5678" } })).json().sessionToken as string;
+
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+
+    const adminSocket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const adminMessages = createJsonMessageCollector(adminSocket);
+    await once(adminSocket, "open");
+    adminSocket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: adminToken } }));
+    await withTimeout(adminMessages.next("session:ready"), "admin session ready");
+
+    const opSocket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const opMessages = createJsonMessageCollector(opSocket);
+    await once(opSocket, "open");
+    opSocket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: opToken } }));
+    await withTimeout(opMessages.next("session:ready"), "op session ready");
+
+    // Admin starts IFB targeting Op1
+    adminSocket.send(JSON.stringify({ type: "ifb:start", payload: { targetUserId: opId } }));
+
+    // Op1 receives ifb:active
+    const ifbActive = await withTimeout(
+      opMessages.next<{ payload: { fromUserId: string; fromUsername: string; duckLevel: number }; type: string }>("ifb:active"),
+      "op ifb active",
+    );
+    expect(ifbActive.payload).toMatchObject({
+      fromUserId: adminId,
+      fromUsername: "Admin",
+      duckLevel: 0.1,
+    });
+
+    // Admin stops IFB
+    adminSocket.send(JSON.stringify({ type: "ifb:stop", payload: {} }));
+
+    // Op1 receives ifb:inactive
+    const ifbInactive = await withTimeout(
+      opMessages.next<{ type: string }>("ifb:inactive"),
+      "op ifb inactive",
+    );
+    expect(ifbInactive.type).toBe("ifb:inactive");
+
+    adminSocket.close();
+    opSocket.close();
+    await Promise.all([once(adminSocket, "close"), once(opSocket, "close")]);
+    adminMessages.stop();
+    opMessages.stop();
+    await app.close();
+  });
+
+  it("rejects IFB from non-admin/operator users", async () => {
+    database.createUser({ username: "Admin", role: "admin", pinHash: hashPin("1234") });
+    const userId = database.createUser({ username: "RegularUser", role: "user", pinHash: hashPin("5678") });
+    database.grantChannelPermissions(userId, [{ channelId: "ch-production", canTalk: false, canListen: true }]);
+    const targetId = database.createUser({ username: "Target", role: "operator", pinHash: hashPin("9999") });
+    database.grantChannelPermissions(targetId, [{ channelId: "ch-production", canTalk: true, canListen: true }]);
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church", host: "127.0.0.1", port: 0, rtcMinPort: 40000, rtcMaxPort: 41000,
+        announcedIp: undefined, dataDir: workingDirectory, dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"), maxUsers: 30, maxChannels: 16, logLevel: "info", httpsPort: 3443,
+      },
+      database,
+    });
+
+    const userToken = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "RegularUser", pin: "5678" } })).json().sessionToken as string;
+
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+
+    const socket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const messages = createJsonMessageCollector(socket);
+    await once(socket, "open");
+    socket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: userToken } }));
+    await withTimeout(messages.next("session:ready"), "user session ready");
+
+    // Regular user tries to start IFB
+    socket.send(JSON.stringify({ type: "ifb:start", payload: { targetUserId: targetId } }));
+
+    const error = await withTimeout(
+      messages.next<{ payload: { code: string; message: string }; type: string }>("signal:error"),
+      "ifb forbidden for regular user",
+    );
+    expect(error.payload.code).toBe("forbidden");
+
+    socket.close();
+    await once(socket, "close");
+    messages.stop();
+    await app.close();
+  });
+
+  it("cleans up IFB when director disconnects", async () => {
+    const adminId = database.createUser({ username: "Admin", role: "admin", pinHash: hashPin("1234") });
+    database.grantChannelPermissions(adminId, [{ channelId: "ch-production", canTalk: true, canListen: true }]);
+    const opId = database.createUser({ username: "Op1", role: "operator", pinHash: hashPin("5678") });
+    database.grantChannelPermissions(opId, [{ channelId: "ch-production", canTalk: true, canListen: true }]);
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church", host: "127.0.0.1", port: 0, rtcMinPort: 40000, rtcMaxPort: 41000,
+        announcedIp: undefined, dataDir: workingDirectory, dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"), maxUsers: 30, maxChannels: 16, logLevel: "info", httpsPort: 3443,
+      },
+      database,
+    });
+
+    const adminToken = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Admin", pin: "1234" } })).json().sessionToken as string;
+    const opToken = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Op1", pin: "5678" } })).json().sessionToken as string;
+
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+
+    const adminSocket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const adminMessages = createJsonMessageCollector(adminSocket);
+    await once(adminSocket, "open");
+    adminSocket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: adminToken } }));
+    await withTimeout(adminMessages.next("session:ready"), "admin session ready");
+
+    const opSocket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const opMessages = createJsonMessageCollector(opSocket);
+    await once(opSocket, "open");
+    opSocket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: opToken } }));
+    await withTimeout(opMessages.next("session:ready"), "op session ready");
+
+    // Admin starts IFB targeting Op1
+    adminSocket.send(JSON.stringify({ type: "ifb:start", payload: { targetUserId: opId } }));
+
+    await withTimeout(opMessages.next("ifb:active"), "op ifb active");
+
+    // Admin disconnects abruptly
+    adminSocket.close();
+    await once(adminSocket, "close");
+    adminMessages.stop();
+
+    // Op1 should receive ifb:inactive due to cleanup
+    const ifbInactive = await withTimeout(
+      opMessages.next<{ type: string }>("ifb:inactive"),
+      "op ifb inactive after disconnect",
+    );
+    expect(ifbInactive.type).toBe("ifb:inactive");
+
+    opSocket.close();
+    await once(opSocket, "close");
+    opMessages.stop();
+    await app.close();
+  });
+
+  // ── 1.10 Program Audio Feeds ──────────────────────────────────────────
+
+  it("prevents non-source users from talking on program channels", async () => {
+    const adminId = database.createUser({ username: "Admin", role: "admin", pinHash: hashPin("1234") });
+    const op1Id = database.createUser({ username: "Op1", role: "operator", pinHash: hashPin("1111") });
+    const op2Id = database.createUser({ username: "Op2", role: "operator", pinHash: hashPin("2222") });
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church", host: "127.0.0.1", port: 0, rtcMinPort: 40000, rtcMaxPort: 41000,
+        announcedIp: undefined, dataDir: workingDirectory, dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"), maxUsers: 30, maxChannels: 16, logLevel: "info", httpsPort: 3443,
+      },
+      database,
+    });
+
+    const adminToken = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Admin", pin: "1234" } })).json().sessionToken as string;
+
+    // Create a program channel with Op1 as source
+    const channelRes = await app.inject({
+      method: "POST",
+      url: "/api/channels",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { name: "Program Feed", color: "#FF0000", channelType: "program", sourceUserId: op1Id },
+    });
+    expect(channelRes.statusCode).toBe(201);
+    const programChannelId = channelRes.json().id as string;
+
+    // Grant both operators permissions on the program channel
+    database.grantChannelPermissions(op1Id, [{ channelId: programChannelId, canTalk: true, canListen: true }]);
+    database.grantChannelPermissions(op2Id, [{ channelId: programChannelId, canTalk: true, canListen: true }]);
+
+    const op1Token = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Op1", pin: "1111" } })).json().sessionToken as string;
+    const op2Token = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Op2", pin: "2222" } })).json().sessionToken as string;
+
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+
+    const op2Socket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const op2Messages = createJsonMessageCollector(op2Socket);
+    await once(op2Socket, "open");
+    op2Socket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: op2Token } }));
+    await withTimeout(op2Messages.next("session:ready"), "op2 session ready");
+
+    // Op2 (non-source) tries talk:start on program channel → forbidden
+    op2Socket.send(JSON.stringify({ type: "talk:start", payload: { channelIds: [programChannelId] } }));
+    const talkError = await withTimeout(
+      op2Messages.next<{ payload: { code: string }; type: string }>("signal:error"),
+      "op2 program talk forbidden",
+    );
+    expect(talkError.payload.code).toBe("forbidden");
+
+    // Op1 (source) talks on program channel → succeeds
+    const op1Socket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const op1Messages = createJsonMessageCollector(op1Socket);
+    await once(op1Socket, "open");
+    op1Socket.send(JSON.stringify({ type: "session:authenticate", payload: { sessionToken: op1Token } }));
+    await withTimeout(op1Messages.next("session:ready"), "op1 session ready");
+
+    op1Socket.send(JSON.stringify({ type: "talk:start", payload: { channelIds: [programChannelId] } }));
+    const op1State = await withTimeout(
+      op1Messages.next<{ payload: { talkChannelIds: string[]; talking: boolean }; type: string }>("operator-state"),
+      "op1 program talk state",
+    );
+    expect(op1State.payload.talkChannelIds).toContain(programChannelId);
+    expect(op1State.payload.talking).toBe(true);
+
+    op1Socket.close();
+    op2Socket.close();
+    await Promise.all([once(op1Socket, "close"), once(op2Socket, "close")]);
+    op1Messages.stop();
+    op2Messages.stop();
+    await app.close();
+  });
+
+  it("returns channelType in channel list and session data", async () => {
+    const adminId = database.createUser({ username: "Admin", role: "admin", pinHash: hashPin("1234") });
+    const op1Id = database.createUser({ username: "Op1", role: "operator", pinHash: hashPin("1111") });
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church", host: "127.0.0.1", port: 0, rtcMinPort: 40000, rtcMaxPort: 41000,
+        announcedIp: undefined, dataDir: workingDirectory, dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"), maxUsers: 30, maxChannels: 16, logLevel: "info", httpsPort: 3443,
+      },
+      database,
+    });
+
+    const adminToken = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Admin", pin: "1234" } })).json().sessionToken as string;
+
+    // Create a program channel
+    const channelRes = await app.inject({
+      method: "POST",
+      url: "/api/channels",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { name: "Program Feed", color: "#00FF00", channelType: "program", sourceUserId: op1Id },
+    });
+    expect(channelRes.statusCode).toBe(201);
+    const programChannel = channelRes.json();
+
+    // GET /api/channels → includes channelType: "program"
+    const listRes = await app.inject({ method: "GET", url: "/api/channels" });
+    expect(listRes.statusCode).toBe(200);
+    expect(listRes.json()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: programChannel.id, name: "Program Feed", channelType: "program" }),
+      ]),
+    );
+
+    // Grant Op1 permission on the program channel and login
+    database.grantChannelPermissions(op1Id, [{ channelId: programChannel.id, canTalk: true, canListen: true }]);
+    const op1Login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "Op1", pin: "1111" } });
+    expect(op1Login.statusCode).toBe(200);
+    const loginData = op1Login.json();
+
+    // Login response channels should include channelType
+    expect(loginData.channels).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: programChannel.id, channelType: "program" }),
+      ]),
+    );
+
     await app.close();
   });
 });

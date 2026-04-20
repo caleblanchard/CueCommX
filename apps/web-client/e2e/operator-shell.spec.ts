@@ -3,8 +3,8 @@ import { expect, test } from "@playwright/test";
 const readyPayload = {
   payload: {
     channels: [
-      { id: "ch-production", name: "Production", color: "#EF4444" },
-      { id: "ch-video", name: "Video/Camera", color: "#10B981" },
+      { id: "ch-production", name: "Production", color: "#EF4444", channelType: "intercom" },
+      { id: "ch-video", name: "Video/Camera", color: "#10B981", channelType: "intercom" },
     ],
     connectedUsers: 2,
     operatorState: {

@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   AdminDashboardSnapshotSchema,
+  ChannelInfoSchema,
   ChannelMutationResponseSchema,
   ChannelsListResponseSchema,
   CreateChannelRequestSchema,
+  CreateGroupRequestSchema,
   CreateUserRequestSchema,
   DiscoveryResponseSchema,
+  GroupInfoSchema,
   LoginResponseSchema,
   MediaCapabilitiesMessageSchema,
   MediaCapabilitiesRequestMessageSchema,
@@ -595,5 +598,186 @@ describe("admin monitoring schemas", () => {
       expect(message.payload.users[0]?.connectionQuality?.grade).toBe("excellent");
       expect(message.payload.users[0]?.preflightStatus).toBe("passed");
     }
+  });
+});
+
+describe("direct communication schemas", () => {
+  it("accepts a direct:request message", () => {
+    const msg = parseClientSignalingMessage({
+      type: "direct:request",
+      payload: { targetUserId: "usr-1" },
+    });
+    expect(msg.type).toBe("direct:request");
+  });
+
+  it("accepts a direct:accept message", () => {
+    const msg = parseClientSignalingMessage({
+      type: "direct:accept",
+      payload: { callId: "call-1" },
+    });
+    expect(msg.type).toBe("direct:accept");
+  });
+
+  it("accepts a direct:reject message", () => {
+    const msg = parseClientSignalingMessage({
+      type: "direct:reject",
+      payload: { callId: "call-1" },
+    });
+    expect(msg.type).toBe("direct:reject");
+  });
+
+  it("accepts a direct:end message", () => {
+    const msg = parseClientSignalingMessage({
+      type: "direct:end",
+      payload: { callId: "call-1" },
+    });
+    expect(msg.type).toBe("direct:end");
+  });
+
+  it("accepts a direct:incoming server message", () => {
+    const msg = parseServerSignalingMessage({
+      type: "direct:incoming",
+      payload: { callId: "call-1", fromUserId: "usr-1", fromUsername: "Admin" },
+    });
+    expect(msg.type).toBe("direct:incoming");
+  });
+
+  it("accepts a direct:active server message", () => {
+    const msg = parseServerSignalingMessage({
+      type: "direct:active",
+      payload: { callId: "call-1", peerUserId: "usr-2", peerUsername: "Op1" },
+    });
+    expect(msg.type).toBe("direct:active");
+  });
+
+  it("accepts a direct:ended server message", () => {
+    const msg = parseServerSignalingMessage({
+      type: "direct:ended",
+      payload: { callId: "call-1", reason: "ended" },
+    });
+    expect(msg.type).toBe("direct:ended");
+    if (msg.type === "direct:ended") {
+      expect(msg.payload.reason).toBe("ended");
+    }
+  });
+
+  it("rejects direct:request without targetUserId", () => {
+    expect(() =>
+      parseClientSignalingMessage({ type: "direct:request", payload: {} }),
+    ).toThrowError();
+  });
+});
+
+describe("IFB message schemas", () => {
+  it("accepts an ifb:start message", () => {
+    const msg = parseClientSignalingMessage({
+      type: "ifb:start",
+      payload: { targetUserId: "usr-1" },
+    });
+    expect(msg.type).toBe("ifb:start");
+  });
+
+  it("accepts an ifb:stop message", () => {
+    const msg = parseClientSignalingMessage({
+      type: "ifb:stop",
+      payload: {},
+    });
+    expect(msg.type).toBe("ifb:stop");
+  });
+
+  it("accepts an ifb:active server message", () => {
+    const msg = parseServerSignalingMessage({
+      type: "ifb:active",
+      payload: { fromUserId: "usr-1", fromUsername: "Director", duckLevel: 0.1 },
+    });
+    expect(msg.type).toBe("ifb:active");
+    if (msg.type === "ifb:active") {
+      expect(msg.payload.duckLevel).toBe(0.1);
+    }
+  });
+
+  it("accepts an ifb:inactive server message", () => {
+    const msg = parseServerSignalingMessage({
+      type: "ifb:inactive",
+      payload: {},
+    });
+    expect(msg.type).toBe("ifb:inactive");
+  });
+
+  it("rejects ifb:start without targetUserId", () => {
+    expect(() =>
+      parseClientSignalingMessage({ type: "ifb:start", payload: {} }),
+    ).toThrowError();
+  });
+});
+
+describe("program channel schemas", () => {
+  it("accepts a create-channel request with program type", () => {
+    const request = CreateChannelRequestSchema.parse({
+      name: "Program Feed",
+      color: "#FF6600",
+      channelType: "program",
+      sourceUserId: "usr-source-1",
+    });
+    expect(request.channelType).toBe("program");
+    expect(request.sourceUserId).toBe("usr-source-1");
+  });
+
+  it("defaults channelType to intercom", () => {
+    const request = CreateChannelRequestSchema.parse({
+      name: "Normal Channel",
+      color: "#22C55E",
+    });
+    expect(request.channelType).toBe("intercom");
+  });
+
+  it("accepts ChannelInfo with program type", () => {
+    const channel = ChannelInfoSchema.parse({
+      id: "ch-prog-1",
+      name: "Program Feed",
+      color: "#FF6600",
+      channelType: "program",
+      sourceUserId: "usr-source-1",
+    });
+    expect(channel.channelType).toBe("program");
+  });
+
+  it("rejects invalid channelType", () => {
+    expect(() =>
+      CreateChannelRequestSchema.parse({
+        name: "Bad",
+        color: "#22C55E",
+        channelType: "invalid",
+      }),
+    ).toThrowError();
+  });
+});
+
+describe("group schemas", () => {
+  it("accepts a GroupInfo object", () => {
+    const group = GroupInfoSchema.parse({
+      id: "grp-1",
+      name: "Camera Team",
+      channelIds: ["ch-production", "ch-video"],
+    });
+    expect(group.name).toBe("Camera Team");
+  });
+
+  it("accepts a create group request", () => {
+    const req = CreateGroupRequestSchema.parse({
+      name: "Audio Team",
+      channelIds: ["ch-audio"],
+    });
+    expect(req.name).toBe("Audio Team");
+  });
+});
+
+describe("online users schema", () => {
+  it("accepts an online:users server message", () => {
+    const msg = parseServerSignalingMessage({
+      type: "online:users",
+      payload: { users: [{ id: "usr-1", username: "Admin" }] },
+    });
+    expect(msg.type).toBe("online:users");
   });
 });

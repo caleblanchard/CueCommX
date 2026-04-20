@@ -60,8 +60,8 @@ class MockWebSocket {
 }
 
 const channels = [
-  { id: "ch-production", name: "Production", color: "#EF4444" },
-  { id: "ch-audio", name: "Audio", color: "#3B82F6" },
+  { id: "ch-production", name: "Production", color: "#EF4444", channelType: "intercom" as const },
+  { id: "ch-audio", name: "Audio", color: "#3B82F6", channelType: "intercom" as const },
 ];
 const discovery = {
   announcedHost: "10.0.0.25",
@@ -620,6 +620,7 @@ describe("Admin App", () => {
             id: "ch-front-of-house",
             name: payload.name,
             color: payload.color,
+            channelType: "intercom" as const,
           };
           channelList = [...channelList, channel];
 
@@ -642,6 +643,7 @@ describe("Admin App", () => {
               id: "ch-front-of-house",
               name: payload.name,
               color: payload.color,
+              channelType: "intercom",
             }),
             { status: 200 },
           );
