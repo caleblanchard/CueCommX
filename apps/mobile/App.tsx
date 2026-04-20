@@ -2422,7 +2422,6 @@ export default function App() {
                       </Text>
                       <View className="flex-row gap-3">
                         <ActionButton
-                          disabled={talkMode === "momentary"}
                           label="Momentary"
                           onPress={() => {
                             setTalkMode("momentary");
@@ -2431,7 +2430,6 @@ export default function App() {
                           tone={talkMode === "momentary" ? "primary" : "secondary"}
                         />
                         <ActionButton
-                          disabled={talkMode === "latched"}
                           label="Latched"
                           onPress={() => {
                             setTalkMode("latched");
