@@ -516,6 +516,7 @@ export default function App() {
   const [voxThreshold, setVoxThreshold] = useState(15);
   const [preflightStep, setPreflightStep] = useState<"idle" | "recording" | "done">("idle");
   const [preflightPassed, setPreflightPassed] = useState<boolean | undefined>();
+  const [activeTab, setActiveTab] = useState<"channels" | "settings">("channels");
   const [chatMessages, setChatMessages] = useState<Record<string, ChatMessagePayload[]>>({});
   const [chatOpen, setChatOpen] = useState<string | null>(null);
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
@@ -1904,11 +1905,12 @@ export default function App() {
             </ScrollView>
           ) : (
             <View className="flex-1">
-              <View className="border-b border-border bg-card/90 px-5 py-3">
-                <View className="flex-row items-center justify-between">
+              {/* ── Compact header ── */}
+              <View className="border-b border-border bg-card/90 px-4 py-3">
+                <View className="flex-row items-center gap-3">
                   <View className="flex-1 gap-0.5">
                     <View className="flex-row items-center gap-2">
-                      <Text className="text-lg font-semibold text-foreground">
+                      <Text className="text-base font-semibold text-foreground">
                         {state.session!.user.username}
                       </Text>
                       <View className="rounded-full border border-border bg-secondary/70 px-2 py-0.5">
@@ -1921,22 +1923,46 @@ export default function App() {
                         </Text>
                       </View>
                     </View>
-                    <View className="flex-row items-center gap-2">
-                      <Text className="text-xs text-muted-foreground">
-                        {state.status?.name ?? "CueCommX"}
-                      </Text>
-                      {connectionQuality ? (
-                        <Text className="text-xs text-muted-foreground">
-                          {connectionQuality.grade === "good" || connectionQuality.grade === "excellent"
-                            ? String.fromCodePoint(0x1f7e2)
-                            : connectionQuality.grade === "fair"
-                              ? String.fromCodePoint(0x1f7e1)
-                              : String.fromCodePoint(0x1f534)}{" "}
-                          RTT: {Math.round(connectionQuality.roundTripTimeMs)}ms
-                        </Text>
-                      ) : null}
-                    </View>
+                    <Text className="text-xs text-muted-foreground">
+                      {state.status?.name ?? "CueCommX"}
+                      {connectionQuality
+                        ? `  ${connectionQuality.grade === "good" || connectionQuality.grade === "excellent" ? "🟢" : connectionQuality.grade === "fair" ? "🟡" : "🔴"} ${Math.round(connectionQuality.roundTripTimeMs)}ms`
+                        : ""}
+                    </Text>
                   </View>
+
+                  {/* Inline arm / mic level */}
+                  {audioReady ? (
+                    <View className="items-end gap-1">
+                      <Text className="text-[10px] font-semibold text-primary">
+                        🎙 {inputLevel}%
+                      </Text>
+                      <View className="h-1.5 w-16 overflow-hidden rounded-full bg-secondary/80">
+                        <View
+                          className="h-full rounded-full bg-primary"
+                          style={{ width: `${Math.max(2, inputLevel)}%` }}
+                        />
+                      </View>
+                    </View>
+                  ) : (
+                    <Pressable
+                      accessibilityLabel="Arm audio"
+                      accessibilityRole="button"
+                      className={`rounded-lg px-3 py-1.5 ${
+                        audioBusy ||
+                        !canArmMobileAudio({ hasSession: !!state.session, realtimeState: state.realtimeState })
+                          ? "bg-secondary/50 opacity-50"
+                          : "bg-primary"
+                      }`}
+                      disabled={audioBusy || !canArmMobileAudio({ hasSession: !!state.session, realtimeState: state.realtimeState })}
+                      onPress={() => void handleArmAudio()}
+                    >
+                      <Text className="text-xs font-semibold text-primary-foreground">
+                        {audioBusy ? "Arming…" : "Arm Audio"}
+                      </Text>
+                    </Pressable>
+                  )}
+
                   <View className={`rounded-full px-3 py-1 ${connectionBadge.toneClassName}`}>
                     <Text className="text-[10px] font-semibold uppercase tracking-control">
                       {connectionBadge.label}
@@ -1945,6 +1971,7 @@ export default function App() {
                 </View>
               </View>
 
+              {/* ── Tally bar ── */}
               {tallySources.some((s) => s.state !== "none") ? (
                 <View className="border-b border-border bg-card/60 px-5 py-2">
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -1981,661 +2008,688 @@ export default function App() {
                 </View>
               ) : null}
 
-              <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
-                <View className="gap-4 px-5 pb-10 pt-4">
-                  {state.realtimeError ? (
-                    <View className="rounded-xl border border-warning/30 bg-warning/10 p-4">
-                      <Text className="text-sm leading-6 text-warning">{state.realtimeError}</Text>
-                    </View>
-                  ) : null}
+              {/* ── Tab content ── */}
+              {activeTab === "channels" ? (
+                /* ── CHANNELS TAB ── */
+                <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
+                  <View className="gap-3 px-4 pb-6 pt-4">
 
-                  <SectionCard>
-                    <View className="flex-row items-center justify-between">
-                      <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                        Audio
-                      </Text>
-                      <Text className="text-xs font-semibold text-foreground">{audioStatusLabel}</Text>
-                    </View>
-
-                    <ActionButton
-                      disabled={
-                        audioBusy ||
-                        audioReady ||
-                        !canArmMobileAudio({
-                          hasSession: !!state.session,
-                          realtimeState: state.realtimeState,
-                        })
-                      }
-                      label={
-                        audioReady
-                          ? "Audio live"
-                          : audioBusy
-                            ? "Arming..."
-                            : audioArmed
-                              ? "Retry audio"
-                              : "Arm audio"
-                      }
-                      onPress={() => void handleArmAudio()}
-                      tone={audioReady ? "secondary" : "primary"}
-                    />
-
-                    <View className="gap-2">
-                      <View className="flex-row items-center justify-between">
-                        <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                          Mic level
-                        </Text>
-                        <Text className="text-xs font-semibold text-foreground">{inputLevel}%</Text>
+                    {/* Error banners */}
+                    {state.realtimeError ? (
+                      <View className="rounded-xl border border-warning/30 bg-warning/10 p-4">
+                        <Text className="text-sm leading-6 text-warning">{state.realtimeError}</Text>
                       </View>
-                      <View className="h-3 overflow-hidden rounded-full bg-secondary/80">
-                        <View
-                          className="h-full rounded-full bg-primary"
-                          style={{ width: `${audioReady ? Math.max(4, inputLevel) : 0}%` }}
-                        />
-                      </View>
-                    </View>
-
-                    <View className="gap-2">
-                      <View className="flex-row items-center justify-between">
-                        <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                          Master volume
-                        </Text>
-                        <Text className="text-xs font-semibold text-foreground">{masterVolume}%</Text>
-                      </View>
-                      <Slider
-                        maximumTrackTintColor="#334155"
-                        maximumValue={100}
-                        minimumTrackTintColor="#5eead4"
-                        minimumValue={0}
-                        onValueChange={setMasterVolume}
-                        step={5}
-                        thumbTintColor="#5eead4"
-                        value={masterVolume}
-                      />
-                    </View>
-
-                    {showAndroidRuntimeSupport ? (
-                      <DetailRow
-                        label="Background alert"
-                        value={androidBackgroundAlertActive ? "Active" : "Standby"}
-                      />
                     ) : null}
-
                     {audioError ? (
                       <View className="rounded-xl border border-warning/30 bg-warning/10 p-4">
                         <Text className="text-sm leading-6 text-warning">{audioError}</Text>
                       </View>
                     ) : null}
-
                     {runtimeNotice ? (
                       <View className="rounded-xl border border-warning/30 bg-warning/10 p-4">
                         <Text className="text-sm leading-6 text-warning">{runtimeNotice}</Text>
                       </View>
                     ) : null}
 
-                    {remoteTalkers.length ? (
-                      <View className="gap-2">
-                        <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                          Remote talkers
+                    {/* All-Page active banner */}
+                    {allPageActive ? (
+                      <View className="rounded-xl border border-amber-500/50 bg-amber-500/10 px-4 py-3">
+                        <Text className="text-sm font-medium text-amber-400">
+                          {String.fromCodePoint(0x1f4e2)} All-Page by {allPageActive.username}
                         </Text>
-                        {remoteTalkers.map((talker) => (
-                          <Text className="text-sm leading-6 text-foreground" key={talker.consumerId}>
-                            {talker.producerUsername}:{" "}
-                            {talker.activeChannelIds
-                              .map(
-                                (channelId) =>
-                                  activeChannels.find((channel) => channel.id === channelId)?.name ?? channelId,
-                              )
-                              .join(", ")}
+                      </View>
+                    ) : null}
+
+                    {/* Incoming call signals */}
+                    {incomingSignals.map((signal) => {
+                      const colorClass =
+                        signal.signalType === "call"
+                          ? "border-red-500/50 bg-red-500/10"
+                          : signal.signalType === "go"
+                            ? "border-green-500/50 bg-green-500/10"
+                            : "border-amber-500/50 bg-amber-500/10";
+                      const textColor =
+                        signal.signalType === "call"
+                          ? "text-red-400"
+                          : signal.signalType === "go"
+                            ? "text-green-400"
+                            : "text-amber-400";
+                      const icon =
+                        signal.signalType === "call"
+                          ? String.fromCodePoint(0x1f4de)
+                          : signal.signalType === "go"
+                            ? String.fromCodePoint(0x1f7e2)
+                            : String.fromCodePoint(0x23f3);
+                      return (
+                        <View
+                          className={`flex-row items-center gap-3 rounded-xl border px-4 py-3 ${colorClass}`}
+                          key={signal.signalId}
+                        >
+                          <Text className={`flex-1 text-sm font-medium ${textColor}`}>
+                            {icon} {signal.signalType.toUpperCase()} from {signal.fromUsername}
                           </Text>
-                        ))}
-                      </View>
-                    ) : null}
-                  </SectionCard>
-
-                  {showAndroidRuntimeSupport ? (
-                    <SectionCard>
-                      <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                        Android runtime
-                      </Text>
-                      <Text className="text-sm leading-6 text-muted-foreground">
-                        Allow CueCommX notifications and exempt the app from battery optimization
-                        for reliable background audio.
-                      </Text>
-                      <ActionButton
-                        label="Open battery settings"
-                        onPress={() => void handleOpenBatterySettings()}
-                        tone="secondary"
-                      />
-                    </SectionCard>
-                  ) : null}
-
-                  <SectionCard>
-                    <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                      Talk mode
-                    </Text>
-                    <View className="flex-row gap-3">
-                      <ActionButton
-                        disabled={talkMode === "momentary"}
-                        label="Momentary"
-                        onPress={() => {
-                          setTalkMode("momentary");
-                          queueHapticFeedback(() => triggerTalkHaptic("mode"));
-                        }}
-                        tone={talkMode === "momentary" ? "primary" : "secondary"}
-                      />
-                      <ActionButton
-                        disabled={talkMode === "latched"}
-                        label="Latched"
-                        onPress={() => {
-                          setTalkMode("latched");
-                          queueHapticFeedback(() => triggerTalkHaptic("mode"));
-                        }}
-                        tone={talkMode === "latched" ? "primary" : "secondary"}
-                      />
-                    </View>
-                    <Text className="text-sm leading-6 text-muted-foreground">
-                      Momentary uses hold-to-talk. Latched turns the Talk button into a toggle for
-                      one-handed operation.
-                    </Text>
-                    <View className="flex-row items-center justify-between">
-                      <Text className="text-sm text-foreground">VOX (auto-talk)</Text>
-                      <Switch
-                        trackColor={{ false: "#334155", true: "#5eead4" }}
-                        thumbColor="#ffffff"
-                        value={voxEnabled}
-                        onValueChange={setVoxEnabled}
-                      />
-                    </View>
-                    {voxEnabled ? (
-                      <View className="gap-2">
-                        <View className="flex-row items-center justify-between">
-                          <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                            VOX threshold
-                          </Text>
-                          <Text className="text-xs font-semibold text-foreground">{voxThreshold}%</Text>
+                          <Pressable
+                            accessibilityRole="button"
+                            className="rounded-lg border border-border bg-secondary px-3 py-1.5"
+                            onPress={() => realtimeClientRef.current?.acknowledgeSignal(signal.signalId)}
+                          >
+                            <Text className="text-xs font-semibold text-foreground">Ack</Text>
+                          </Pressable>
                         </View>
-                        <Slider
-                          maximumTrackTintColor="#334155"
-                          maximumValue={50}
-                          minimumTrackTintColor="#5eead4"
-                          minimumValue={5}
-                          onValueChange={(value) => setVoxThreshold(Math.round(value))}
-                          step={1}
-                          thumbTintColor="#5eead4"
-                          value={voxThreshold}
-                        />
-                        <Text className="text-sm leading-6 text-muted-foreground">
-                          VOX activates talk on all assigned channels when mic level exceeds threshold.
-                        </Text>
-                      </View>
-                    ) : null}
-                  </SectionCard>
+                      );
+                    })}
 
-                  <SectionCard>
-                    <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                      Preflight mic test
-                    </Text>
-                    <ActionButton
-                      disabled={preflightStep === "recording" || !audioReady}
-                      label={
-                        preflightStep === "recording"
-                          ? "Testing mic..."
-                          : "Test Mic"
-                      }
-                      onPress={handleTestMic}
-                      tone="secondary"
-                    />
-                    {preflightStep === "recording" ? (
-                      <View className="rounded-xl border border-primary/30 bg-primary/10 p-3">
-                        <Text className="text-sm text-primary">
-                          {String.fromCodePoint(0x1f399)} Recording — speak into your mic...
-                        </Text>
-                        <View className="mt-2 h-3 overflow-hidden rounded-full bg-secondary/80">
-                          <View
-                            className="h-full rounded-full bg-primary"
-                            style={{ width: `${Math.max(4, inputLevel)}%` }}
-                          />
-                        </View>
-                      </View>
-                    ) : null}
-                    {preflightStep === "done" && preflightPassed === true ? (
-                      <View className="rounded-xl border border-success/30 bg-success/10 p-3">
-                        <Text className="text-sm text-success">
-                          {String.fromCodePoint(0x2713)} Mic test passed
-                        </Text>
-                      </View>
-                    ) : null}
-                    {preflightStep === "done" && preflightPassed === false ? (
-                      <View className="rounded-xl border border-destructive/30 bg-destructive/10 p-3">
-                        <Text className="text-sm text-destructive">
-                          {String.fromCodePoint(0x2717)} Mic test failed — no audio detected
-                        </Text>
-                      </View>
-                    ) : null}
-                  </SectionCard>
-
-                  <SectionCard>
-                    <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                      Audio processing
-                    </Text>
-                    <View className="gap-3">
-                      <View className="flex-row items-center justify-between">
-                        <Text className="text-sm text-foreground">Noise suppression</Text>
-                        <Switch
-                          trackColor={{ false: "#334155", true: "#5eead4" }}
-                          thumbColor="#ffffff"
-                          value={audioProcessing.noiseSuppression}
-                          onValueChange={(value) =>
-                            setAudioProcessing((current) => ({ ...current, noiseSuppression: value }))
-                          }
-                        />
-                      </View>
-                      <View className="flex-row items-center justify-between">
-                        <Text className="text-sm text-foreground">Auto gain control</Text>
-                        <Switch
-                          trackColor={{ false: "#334155", true: "#5eead4" }}
-                          thumbColor="#ffffff"
-                          value={audioProcessing.autoGainControl}
-                          onValueChange={(value) =>
-                            setAudioProcessing((current) => ({ ...current, autoGainControl: value }))
-                          }
-                        />
-                      </View>
-                      <View className="flex-row items-center justify-between">
-                        <Text className="text-sm text-foreground">Echo cancellation</Text>
-                        <Switch
-                          trackColor={{ false: "#334155", true: "#5eead4" }}
-                          thumbColor="#ffffff"
-                          value={audioProcessing.echoCancellation}
-                          onValueChange={(value) =>
-                            setAudioProcessing((current) => ({ ...current, echoCancellation: value }))
-                          }
-                        />
-                      </View>
-                    </View>
-                    <Text className="text-sm leading-6 text-muted-foreground">
-                      Audio processing takes effect the next time audio is armed.
-                    </Text>
-                  </SectionCard>
-
-                  <SectionCard>
-                    <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                      Audio ducking
-                    </Text>
-                    <View className="flex-row items-center justify-between">
-                      <Text className="text-sm text-foreground">Auto-ducking</Text>
-                      <Switch
-                        trackColor={{ false: "#334155", true: "#5eead4" }}
-                        thumbColor="#ffffff"
-                        value={duckingEnabled}
-                        onValueChange={setDuckingEnabled}
-                      />
-                    </View>
-                    <Text className="text-sm leading-6 text-muted-foreground">
-                      Automatically reduce lower-priority channel volume when a higher-priority channel is active.
-                    </Text>
-                  </SectionCard>
-
-                  <SectionCard>
-                    <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                      Web-only features
-                    </Text>
-                    <Text className="text-sm leading-6 text-muted-foreground">
-                      Sidetone (mic monitor), split-ear stereo panning, and headset button PTT are available on the web client only. Native headset button support is planned for a future release.
-                    </Text>
-                  </SectionCard>
-
-                  <SectionCard>
-                    <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                      User profile
-                    </Text>
-                    <ActionButton
-                      disabled={profileSaving || !state.session}
-                      label={profileSaving ? "Saving…" : "Save profile to server"}
-                      onPress={() => void handleSaveProfile()}
-                      tone="secondary"
-                    />
-                    {profileNotice ? (
-                      <Text className="text-center text-xs text-muted-foreground">{profileNotice}</Text>
-                    ) : null}
-                    <Text className="text-sm leading-6 text-muted-foreground">
-                      Save your current volume, processing, and group settings to the server. Settings load automatically on next login.
-                    </Text>
-                  </SectionCard>
-
-                  {isAdminOrOperator ? (
-                    <SectionCard>
-                      <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                        All-Page
-                      </Text>
-                      <ActionButton
-                        disabled={isAllPageByOther}
-                        label={
-                          allPageActive && allPageActive.userId === state.session?.user.id
-                            ? "Stop All-Page"
-                            : allPageActive
-                              ? "All-Page in use"
-                              : "Start All-Page"
-                        }
-                        onPress={handleToggleAllPage}
-                        tone={allPageActive && allPageActive.userId === state.session?.user.id ? "secondary" : "primary"}
-                      />
-                    </SectionCard>
-                  ) : null}
-
-                  {allPageActive ? (
-                    <View className="rounded-xl border border-amber-500/50 bg-amber-500/10 px-4 py-3">
-                      <Text className="text-sm font-medium text-amber-400">
-                        {String.fromCodePoint(0x1f4e2)} All-Page by {allPageActive.username}
-                      </Text>
-                    </View>
-                  ) : null}
-
-                  {incomingSignals.map((signal) => {
-                    const colorClass =
-                      signal.signalType === "call"
-                        ? "border-red-500/50 bg-red-500/10"
-                        : signal.signalType === "go"
-                          ? "border-green-500/50 bg-green-500/10"
-                          : "border-amber-500/50 bg-amber-500/10";
-                    const textColor =
-                      signal.signalType === "call"
-                        ? "text-red-400"
-                        : signal.signalType === "go"
-                          ? "text-green-400"
-                          : "text-amber-400";
-                    const icon =
-                      signal.signalType === "call"
-                        ? String.fromCodePoint(0x1f4de)
-                        : signal.signalType === "go"
-                          ? String.fromCodePoint(0x1f7e2)
-                          : String.fromCodePoint(0x23f3);
-
-                    return (
-                      <View className={`flex-row items-center gap-3 rounded-xl border px-4 py-3 ${colorClass}`} key={signal.signalId}>
-                        <Text className={`flex-1 text-sm font-medium ${textColor}`}>
-                          {icon} {signal.signalType.toUpperCase()} from {signal.fromUsername}
+                    {/* Incoming call banner */}
+                    {incomingCall ? (
+                      <View className="flex-row items-center gap-3 rounded-xl border border-blue-500/50 bg-blue-500/10 px-4 py-3">
+                        <Text className="flex-1 text-sm font-medium text-blue-400">
+                          {String.fromCodePoint(0x1f4de)} Incoming call from {incomingCall.fromUsername}
                         </Text>
                         <Pressable
                           accessibilityRole="button"
-                          className="rounded-lg border border-border bg-secondary px-3 py-1.5"
-                          onPress={() => realtimeClientRef.current?.acknowledgeSignal(signal.signalId)}
+                          className="rounded-lg border border-success/40 bg-success/15 px-3 py-1.5"
+                          onPress={acceptIncomingCallHandler}
                         >
-                          <Text className="text-xs font-semibold text-foreground">Ack</Text>
+                          <Text className="text-xs font-semibold text-success">Accept</Text>
+                        </Pressable>
+                        <Pressable
+                          accessibilityRole="button"
+                          className="rounded-lg border border-destructive/40 bg-destructive/15 px-3 py-1.5"
+                          onPress={rejectIncomingCallHandler}
+                        >
+                          <Text className="text-xs font-semibold text-destructive">Reject</Text>
                         </Pressable>
                       </View>
-                    );
-                  })}
+                    ) : null}
 
-                  {groups.length > 0 ? (
-                    <View className="gap-2">
-                      <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                        Group
-                      </Text>
+                    {/* Direct call active banner */}
+                    {directCall ? (
+                      <View
+                        className={`flex-row items-center gap-3 rounded-xl border px-4 py-3 ${
+                          directCall.state === "active"
+                            ? "border-green-500/50 bg-green-500/10"
+                            : "border-blue-500/50 bg-blue-500/10"
+                        }`}
+                      >
+                        <Text
+                          className={`flex-1 text-sm font-medium ${
+                            directCall.state === "active" ? "text-green-400" : "text-blue-400"
+                          }`}
+                        >
+                          {directCall.state === "active"
+                            ? `${String.fromCodePoint(0x1f517)} Direct call with ${directCall.peerUsername}`
+                            : `${String.fromCodePoint(0x1f4de)} Calling ${directCall.peerUsername}...`}
+                        </Text>
+                        <Pressable
+                          accessibilityRole="button"
+                          className="rounded-lg border border-destructive/40 bg-destructive/15 px-3 py-1.5"
+                          onPress={endCurrentDirectCall}
+                        >
+                          <Text className="text-xs font-semibold text-destructive">End Call</Text>
+                        </Pressable>
+                      </View>
+                    ) : null}
+
+                    {/* IFB receive status */}
+                    {ifbState ? (
+                      <View className="rounded-xl border border-amber-500/50 bg-amber-500/10 px-4 py-3">
+                        <Text className="text-sm font-medium text-amber-400">
+                          {String.fromCodePoint(0x1f3a7)} {ifbState.fromUsername} is speaking to you — program audio ducked
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    {/* Group filter */}
+                    {groups.length > 0 ? (
                       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                        <View className="flex-row gap-2">
+                        <View className="flex-row gap-2 pb-1">
                           <Pressable
-                            className={`rounded-lg px-3 py-1.5 ${
-                              !activeGroupId
-                                ? "bg-primary"
-                                : "bg-secondary/50"
-                            }`}
+                            className={`rounded-lg px-3 py-1.5 ${!activeGroupId ? "bg-primary" : "bg-secondary/50"}`}
                             onPress={() => setActiveGroupId(undefined)}
                           >
-                            <Text className={`text-sm font-medium ${
-                              !activeGroupId ? "text-primary-foreground" : "text-foreground"
-                            }`}>
+                            <Text className={`text-sm font-medium ${!activeGroupId ? "text-primary-foreground" : "text-foreground"}`}>
                               All
                             </Text>
                           </Pressable>
                           {groups.map((group) => (
                             <Pressable
-                              className={`rounded-lg px-3 py-1.5 ${
-                                activeGroupId === group.id
-                                  ? "bg-primary"
-                                  : "bg-secondary/50"
-                              }`}
+                              className={`rounded-lg px-3 py-1.5 ${activeGroupId === group.id ? "bg-primary" : "bg-secondary/50"}`}
                               key={group.id}
                               onPress={() => setActiveGroupId(group.id)}
                             >
-                              <Text className={`text-sm font-medium ${
-                                activeGroupId === group.id ? "text-primary-foreground" : "text-foreground"
-                              }`}>
+                              <Text className={`text-sm font-medium ${activeGroupId === group.id ? "text-primary-foreground" : "text-foreground"}`}>
                                 {group.name}
                               </Text>
                             </Pressable>
                           ))}
                         </View>
                       </ScrollView>
-                    </View>
-                  ) : null}
+                    ) : null}
 
-                  {incomingCall ? (
-                    <View className="flex-row items-center gap-3 rounded-xl border border-blue-500/50 bg-blue-500/10 px-4 py-3">
-                      <Text className="flex-1 text-sm font-medium text-blue-400">
-                        {String.fromCodePoint(0x1f4de)} Incoming call from {incomingCall.fromUsername}
-                      </Text>
-                      <Pressable
-                        accessibilityRole="button"
-                        className="rounded-lg border border-success/40 bg-success/15 px-3 py-1.5"
-                        onPress={acceptIncomingCallHandler}
-                      >
-                        <Text className="text-xs font-semibold text-success">Accept</Text>
-                      </Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        className="rounded-lg border border-destructive/40 bg-destructive/15 px-3 py-1.5"
-                        onPress={rejectIncomingCallHandler}
-                      >
-                        <Text className="text-xs font-semibold text-destructive">Reject</Text>
-                      </Pressable>
-                    </View>
-                  ) : null}
-
-                  {directCall ? (
-                    <View className={`flex-row items-center gap-3 rounded-xl border px-4 py-3 ${
-                      directCall.state === "active"
-                        ? "border-green-500/50 bg-green-500/10"
-                        : "border-blue-500/50 bg-blue-500/10"
-                    }`}>
-                      <Text className={`flex-1 text-sm font-medium ${
-                        directCall.state === "active" ? "text-green-400" : "text-blue-400"
-                      }`}>
-                        {directCall.state === "active"
-                          ? `${String.fromCodePoint(0x1f517)} Direct call with ${directCall.peerUsername}`
-                          : `${String.fromCodePoint(0x1f4de)} Calling ${directCall.peerUsername}...`}
-                      </Text>
-                      <Pressable
-                        accessibilityRole="button"
-                        className="rounded-lg border border-destructive/40 bg-destructive/15 px-3 py-1.5"
-                        onPress={endCurrentDirectCall}
-                      >
-                        <Text className="text-xs font-semibold text-destructive">End Call</Text>
-                      </Pressable>
-                    </View>
-                  ) : null}
-
-                  {!directCall && !incomingCall && onlineUsers.length > 0 ? (
-                    <SectionCard>
-                      <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                        Direct call
-                      </Text>
-                      <View className="flex-row flex-wrap gap-2">
-                        {onlineUsers
-                          .filter((u) => u.id !== state.session?.user.id)
-                          .map((user) => (
-                            <Pressable
-                              accessibilityRole="button"
-                              className="rounded-lg border border-border bg-secondary px-3 py-2"
-                              key={user.id}
-                              onPress={() => requestDirectCallHandler(user.id)}
-                            >
-                              <Text className="text-sm font-medium text-foreground">
-                                {String.fromCodePoint(0x1f4de)} {user.username}
-                              </Text>
-                            </Pressable>
-                          ))}
-                      </View>
-                    </SectionCard>
-                  ) : null}
-
-                  {ifbState ? (
-                    <View className="rounded-xl border border-amber-500/50 bg-amber-500/10 px-4 py-3">
-                      <Text className="text-sm font-medium text-amber-400">
-                        {String.fromCodePoint(0x1f3a7)} {ifbState.fromUsername} is speaking to you — program audio ducked
-                      </Text>
-                    </View>
-                  ) : null}
-
-                  {isAdminOrOperator && onlineUsers.length > 0 ? (
-                    <SectionCard>
-                      <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                        IFB controls
-                      </Text>
-                      <View className="flex-row flex-wrap gap-2">
-                        {onlineUsers
-                          .filter((u) => u.id !== state.session?.user.id)
-                          .map((user) => (
-                            <Pressable
-                              accessibilityRole="button"
-                              className="rounded-lg border border-border bg-secondary px-3 py-2"
-                              key={user.id}
-                              onPress={() => handleStartIFB(user.id)}
-                            >
-                              <Text className="text-sm font-medium text-foreground">
-                                {String.fromCodePoint(0x1f3a7)} IFB → {user.username}
-                              </Text>
-                            </Pressable>
-                          ))}
-                        <Pressable
-                          accessibilityRole="button"
-                          className="rounded-lg border border-destructive/40 bg-destructive/15 px-3 py-2"
-                          onPress={handleStopIFB}
-                        >
-                          <Text className="text-sm font-medium text-destructive">Stop IFB</Text>
-                        </Pressable>
-                      </View>
-                    </SectionCard>
-                  ) : null}
-
-                  <View className="gap-3" style={isLandscape || isTablet ? { flexDirection: "row", flexWrap: "wrap" } : undefined}>
-                    {visibleChannels.map((channel) => {
-                      const permission = findPermission(assignedPermissions, channel.id);
-                      const chInfo = channel as ChannelInfo;
-
-                      return (
-                        <View
-                          key={channel.id}
-                          style={
-                            isTablet
-                              ? { width: "31%", marginRight: "2%" }
-                              : isLandscape
-                                ? { width: "48%", marginRight: "2%" }
-                                : undefined
-                          }
-                        >
-                        <ChannelPermissionCard
-                          channelType={chInfo.channelType}
-                          connected={state.realtimeState === "connected"}
-                          canListen={permission?.canListen ?? false}
-                          canTalk={permission?.canTalk ?? false}
-                          color={channel.color}
-                          isAllPageBlocked={isAllPageByOther}
-                          isGlobal={channel.isGlobal ?? false}
-                          isListening={
-                            state.operatorState?.listenChannelIds.includes(channel.id) ?? false
-                          }
-                          isRecording={recordingActiveIds.includes(channel.id)}
-                          isSource={chInfo.sourceUserId === state.session?.user.id}
-                          isTalking={state.operatorState?.talkChannelIds.includes(channel.id) ?? false}
-                          isVoxMode={voxEnabled}
-                          name={channel.name}
-                          onChat={() => openChat(channel.id)}
-                          onSignal={
-                            isAdminOrOperator
-                              ? (signalType) => realtimeClientRef.current?.sendCallSignal(signalType, { channelId: channel.id })
-                              : undefined
-                          }
-                          onToggleListen={() =>
-                            handleToggleListen(
-                              channel.id,
-                              !(state.operatorState?.listenChannelIds.includes(channel.id) ?? false),
-                            )
-                          }
-                          onTalkPress={(phase) => handleTalkGesture(channel.id, phase)}
-                          onVolumeChange={(value) =>
-                            setChannelVolumes((current) => {
-                              const rounded = Math.round(value);
-                              if ((current[channel.id] ?? 100) === rounded) {
-                                return current;
-                              }
-                              return { ...current, [channel.id]: rounded };
-                            })
-                          }
-                          role={state.session?.user.role}
-                          talkReady={audioReady}
-                          talkMode={talkMode}
-                          unreadCount={unreadCounts[channel.id] ?? 0}
-                          volumePercent={channelVolumes[channel.id] ?? 100}
-                        />
-                        </View>
-                      );
-                    })}
-                  </View>
-
-                  {confidenceChannels.length > 0 ? (
-                    <SectionCard>
-                      <Text className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
-                        🎧 Confidence Feeds
-                      </Text>
-                      {confidenceChannels.map((channel) => {
-                        const listening = state.operatorState?.listenChannelIds.includes(channel.id) ?? false;
-                        const vol = channelVolumes[channel.id] ?? 100;
+                    {/* Channel cards — primary intercom controls */}
+                    <View
+                      className="gap-3"
+                      style={isLandscape || isTablet ? { flexDirection: "row", flexWrap: "wrap" } : undefined}
+                    >
+                      {visibleChannels.map((channel) => {
+                        const permission = findPermission(assignedPermissions, channel.id);
+                        const chInfo = channel as ChannelInfo;
                         return (
-                          <View key={channel.id} className="gap-2 pb-3">
-                            <View className="flex-row items-center justify-between">
-                              <View className="flex-row items-center gap-2">
-                                <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: channel.color }} />
-                                <Text className="text-sm font-semibold text-foreground">{channel.name}</Text>
-                              </View>
-                              <Text className={`text-xs font-medium ${listening ? "text-primary" : "text-muted-foreground"}`}>
-                                {listening ? "Listening" : "Idle"}
-                              </Text>
-                            </View>
-                            <Text className="text-xs text-muted-foreground">
-                              Always-on confidence monitor — exempt from ducking and IFB.
-                            </Text>
-                            <View className="flex-row items-center gap-2">
-                              <Text className="text-xs text-muted-foreground">Vol</Text>
-                              <Slider
-                                minimumValue={0}
-                                maximumValue={100}
-                                step={1}
-                                value={vol}
-                                onValueChange={(value) =>
-                                  setChannelVolumes((current) => {
-                                    const rounded = Math.round(value);
-                                    if ((current[channel.id] ?? 100) === rounded) return current;
-                                    return { ...current, [channel.id]: rounded };
-                                  })
-                                }
-                                style={{ flex: 1 }}
-                                minimumTrackTintColor="#6366f1"
-                                maximumTrackTintColor="#374151"
-                              />
-                              <Text className="w-8 text-right text-xs text-muted-foreground">{vol}%</Text>
-                            </View>
+                          <View
+                            key={channel.id}
+                            style={
+                              isTablet
+                                ? { width: "31%", marginRight: "2%" }
+                                : isLandscape
+                                  ? { width: "48%", marginRight: "2%" }
+                                  : undefined
+                            }
+                          >
+                            <ChannelPermissionCard
+                              channelType={chInfo.channelType}
+                              connected={state.realtimeState === "connected"}
+                              canListen={permission?.canListen ?? false}
+                              canTalk={permission?.canTalk ?? false}
+                              color={channel.color}
+                              isAllPageBlocked={isAllPageByOther}
+                              isGlobal={channel.isGlobal ?? false}
+                              isListening={state.operatorState?.listenChannelIds.includes(channel.id) ?? false}
+                              isRecording={recordingActiveIds.includes(channel.id)}
+                              isSource={chInfo.sourceUserId === state.session?.user.id}
+                              isTalking={state.operatorState?.talkChannelIds.includes(channel.id) ?? false}
+                              isVoxMode={voxEnabled}
+                              name={channel.name}
+                              onChat={() => openChat(channel.id)}
+                              onSignal={
+                                isAdminOrOperator
+                                  ? (signalType) => realtimeClientRef.current?.sendCallSignal(signalType, { channelId: channel.id })
+                                  : undefined
+                              }
+                              onToggleListen={() =>
+                                handleToggleListen(
+                                  channel.id,
+                                  !(state.operatorState?.listenChannelIds.includes(channel.id) ?? false),
+                                )
+                              }
+                              onTalkPress={(phase) => handleTalkGesture(channel.id, phase)}
+                              onVolumeChange={(value) =>
+                                setChannelVolumes((current) => {
+                                  const rounded = Math.round(value);
+                                  if ((current[channel.id] ?? 100) === rounded) return current;
+                                  return { ...current, [channel.id]: rounded };
+                                })
+                              }
+                              role={state.session?.user.role}
+                              talkReady={audioReady}
+                              talkMode={talkMode}
+                              unreadCount={unreadCounts[channel.id] ?? 0}
+                              volumePercent={channelVolumes[channel.id] ?? 100}
+                            />
                           </View>
                         );
                       })}
-                    </SectionCard>
-                  ) : null}
+                    </View>
 
-                  <View className="pt-4">
-                    <ActionButton label="Sign out" onPress={handleSignOut} tone="secondary" />
+                    {/* Confidence feeds */}
+                    {confidenceChannels.length > 0 ? (
+                      <SectionCard>
+                        <Text className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+                          🎧 Confidence Feeds
+                        </Text>
+                        {confidenceChannels.map((channel) => {
+                          const listening = state.operatorState?.listenChannelIds.includes(channel.id) ?? false;
+                          const vol = channelVolumes[channel.id] ?? 100;
+                          return (
+                            <View key={channel.id} className="gap-2 pb-3">
+                              <View className="flex-row items-center justify-between">
+                                <View className="flex-row items-center gap-2">
+                                  <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: channel.color }} />
+                                  <Text className="text-sm font-semibold text-foreground">{channel.name}</Text>
+                                </View>
+                                <Text className={`text-xs font-medium ${listening ? "text-primary" : "text-muted-foreground"}`}>
+                                  {listening ? "Listening" : "Idle"}
+                                </Text>
+                              </View>
+                              <View className="flex-row items-center gap-2">
+                                <Text className="text-xs text-muted-foreground">Vol</Text>
+                                <Slider
+                                  minimumValue={0}
+                                  maximumValue={100}
+                                  step={1}
+                                  value={vol}
+                                  onValueChange={(value) =>
+                                    setChannelVolumes((current) => {
+                                      const rounded = Math.round(value);
+                                      if ((current[channel.id] ?? 100) === rounded) return current;
+                                      return { ...current, [channel.id]: rounded };
+                                    })
+                                  }
+                                  style={{ flex: 1 }}
+                                  minimumTrackTintColor="#6366f1"
+                                  maximumTrackTintColor="#374151"
+                                />
+                                <Text className="w-8 text-right text-xs text-muted-foreground">{vol}%</Text>
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </SectionCard>
+                    ) : null}
+
+                    {/* Remote talkers indicator */}
+                    {remoteTalkers.length > 0 ? (
+                      <View className="flex-row flex-wrap gap-2">
+                        {remoteTalkers.map((talker) => (
+                          <View
+                            className="rounded-lg border border-primary/30 bg-primary/10 px-2 py-1"
+                            key={talker.consumerId}
+                          >
+                            <Text className="text-xs font-medium text-primary">
+                              🎙 {talker.producerUsername}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    ) : null}
                   </View>
-                </View>
-              </ScrollView>
+                </ScrollView>
+              ) : (
+                /* ── SETTINGS TAB ── */
+                <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
+                  <View className="gap-4 px-4 pb-6 pt-4">
+
+                    {/* Audio */}
+                    <SectionCard>
+                      <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                        Audio
+                      </Text>
+                      {!audioReady ? (
+                        <ActionButton
+                          disabled={audioBusy || !canArmMobileAudio({ hasSession: !!state.session, realtimeState: state.realtimeState })}
+                          label={audioBusy ? "Arming..." : audioArmed ? "Retry audio" : "Arm audio"}
+                          onPress={() => void handleArmAudio()}
+                          tone="primary"
+                        />
+                      ) : (
+                        <DetailRow label="Audio status" value={audioStatusLabel} />
+                      )}
+                      <View className="gap-2">
+                        <View className="flex-row items-center justify-between">
+                          <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                            Mic level
+                          </Text>
+                          <Text className="text-xs font-semibold text-foreground">{inputLevel}%</Text>
+                        </View>
+                        <View className="h-3 overflow-hidden rounded-full bg-secondary/80">
+                          <View
+                            className="h-full rounded-full bg-primary"
+                            style={{ width: `${audioReady ? Math.max(4, inputLevel) : 0}%` }}
+                          />
+                        </View>
+                      </View>
+                      <View className="gap-2">
+                        <View className="flex-row items-center justify-between">
+                          <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                            Master volume
+                          </Text>
+                          <Text className="text-xs font-semibold text-foreground">{masterVolume}%</Text>
+                        </View>
+                        <Slider
+                          maximumTrackTintColor="#334155"
+                          maximumValue={100}
+                          minimumTrackTintColor="#5eead4"
+                          minimumValue={0}
+                          onValueChange={setMasterVolume}
+                          step={5}
+                          thumbTintColor="#5eead4"
+                          value={masterVolume}
+                        />
+                      </View>
+                      {showAndroidRuntimeSupport ? (
+                        <DetailRow label="Background alert" value={androidBackgroundAlertActive ? "Active" : "Standby"} />
+                      ) : null}
+                      {audioError ? (
+                        <View className="rounded-xl border border-warning/30 bg-warning/10 p-4">
+                          <Text className="text-sm leading-6 text-warning">{audioError}</Text>
+                        </View>
+                      ) : null}
+                      {runtimeNotice ? (
+                        <View className="rounded-xl border border-warning/30 bg-warning/10 p-4">
+                          <Text className="text-sm leading-6 text-warning">{runtimeNotice}</Text>
+                        </View>
+                      ) : null}
+                      {remoteTalkers.length > 0 ? (
+                        <View className="gap-2">
+                          <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                            Remote talkers
+                          </Text>
+                          {remoteTalkers.map((talker) => (
+                            <Text className="text-sm leading-6 text-foreground" key={talker.consumerId}>
+                              {talker.producerUsername}:{" "}
+                              {talker.activeChannelIds
+                                .map((channelId) => activeChannels.find((ch) => ch.id === channelId)?.name ?? channelId)
+                                .join(", ")}
+                            </Text>
+                          ))}
+                        </View>
+                      ) : null}
+                    </SectionCard>
+
+                    {/* Preflight */}
+                    <SectionCard>
+                      <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                        Preflight mic test
+                      </Text>
+                      <ActionButton
+                        disabled={preflightStep === "recording" || !audioReady}
+                        label={preflightStep === "recording" ? "Testing mic..." : "Test Mic"}
+                        onPress={handleTestMic}
+                        tone="secondary"
+                      />
+                      {preflightStep === "recording" ? (
+                        <View className="rounded-xl border border-primary/30 bg-primary/10 p-3">
+                          <Text className="text-sm text-primary">
+                            {String.fromCodePoint(0x1f399)} Recording — speak into your mic...
+                          </Text>
+                          <View className="mt-2 h-3 overflow-hidden rounded-full bg-secondary/80">
+                            <View
+                              className="h-full rounded-full bg-primary"
+                              style={{ width: `${Math.max(4, inputLevel)}%` }}
+                            />
+                          </View>
+                        </View>
+                      ) : null}
+                      {preflightStep === "done" && preflightPassed === true ? (
+                        <View className="rounded-xl border border-success/30 bg-success/10 p-3">
+                          <Text className="text-sm text-success">
+                            {String.fromCodePoint(0x2713)} Mic test passed
+                          </Text>
+                        </View>
+                      ) : null}
+                      {preflightStep === "done" && preflightPassed === false ? (
+                        <View className="rounded-xl border border-destructive/30 bg-destructive/10 p-3">
+                          <Text className="text-sm text-destructive">
+                            {String.fromCodePoint(0x2717)} Mic test failed — no audio detected
+                          </Text>
+                        </View>
+                      ) : null}
+                    </SectionCard>
+
+                    {/* Talk mode */}
+                    <SectionCard>
+                      <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                        Talk mode
+                      </Text>
+                      <View className="flex-row gap-3">
+                        <ActionButton
+                          disabled={talkMode === "momentary"}
+                          label="Momentary"
+                          onPress={() => {
+                            setTalkMode("momentary");
+                            queueHapticFeedback(() => triggerTalkHaptic("mode"));
+                          }}
+                          tone={talkMode === "momentary" ? "primary" : "secondary"}
+                        />
+                        <ActionButton
+                          disabled={talkMode === "latched"}
+                          label="Latched"
+                          onPress={() => {
+                            setTalkMode("latched");
+                            queueHapticFeedback(() => triggerTalkHaptic("mode"));
+                          }}
+                          tone={talkMode === "latched" ? "primary" : "secondary"}
+                        />
+                      </View>
+                      <Text className="text-sm leading-6 text-muted-foreground">
+                        Momentary uses hold-to-talk. Latched turns Talk into a toggle.
+                      </Text>
+                      <View className="flex-row items-center justify-between">
+                        <Text className="text-sm text-foreground">VOX (auto-talk)</Text>
+                        <Switch
+                          trackColor={{ false: "#334155", true: "#5eead4" }}
+                          thumbColor="#ffffff"
+                          value={voxEnabled}
+                          onValueChange={setVoxEnabled}
+                        />
+                      </View>
+                      {voxEnabled ? (
+                        <View className="gap-2">
+                          <View className="flex-row items-center justify-between">
+                            <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                              VOX threshold
+                            </Text>
+                            <Text className="text-xs font-semibold text-foreground">{voxThreshold}%</Text>
+                          </View>
+                          <Slider
+                            maximumTrackTintColor="#334155"
+                            maximumValue={50}
+                            minimumTrackTintColor="#5eead4"
+                            minimumValue={5}
+                            onValueChange={(value) => setVoxThreshold(Math.round(value))}
+                            step={1}
+                            thumbTintColor="#5eead4"
+                            value={voxThreshold}
+                          />
+                          <Text className="text-sm leading-6 text-muted-foreground">
+                            VOX activates talk when mic level exceeds threshold.
+                          </Text>
+                        </View>
+                      ) : null}
+                    </SectionCard>
+
+                    {/* Audio processing + ducking */}
+                    <SectionCard>
+                      <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                        Audio processing
+                      </Text>
+                      <View className="gap-3">
+                        <View className="flex-row items-center justify-between">
+                          <Text className="text-sm text-foreground">Noise suppression</Text>
+                          <Switch
+                            trackColor={{ false: "#334155", true: "#5eead4" }}
+                            thumbColor="#ffffff"
+                            value={audioProcessing.noiseSuppression}
+                            onValueChange={(value) => setAudioProcessing((cur) => ({ ...cur, noiseSuppression: value }))}
+                          />
+                        </View>
+                        <View className="flex-row items-center justify-between">
+                          <Text className="text-sm text-foreground">Auto gain control</Text>
+                          <Switch
+                            trackColor={{ false: "#334155", true: "#5eead4" }}
+                            thumbColor="#ffffff"
+                            value={audioProcessing.autoGainControl}
+                            onValueChange={(value) => setAudioProcessing((cur) => ({ ...cur, autoGainControl: value }))}
+                          />
+                        </View>
+                        <View className="flex-row items-center justify-between">
+                          <Text className="text-sm text-foreground">Echo cancellation</Text>
+                          <Switch
+                            trackColor={{ false: "#334155", true: "#5eead4" }}
+                            thumbColor="#ffffff"
+                            value={audioProcessing.echoCancellation}
+                            onValueChange={(value) => setAudioProcessing((cur) => ({ ...cur, echoCancellation: value }))}
+                          />
+                        </View>
+                        <View className="flex-row items-center justify-between">
+                          <Text className="text-sm text-foreground">Auto-ducking</Text>
+                          <Switch
+                            trackColor={{ false: "#334155", true: "#5eead4" }}
+                            thumbColor="#ffffff"
+                            value={duckingEnabled}
+                            onValueChange={setDuckingEnabled}
+                          />
+                        </View>
+                      </View>
+                      <Text className="text-sm leading-6 text-muted-foreground">
+                        Processing takes effect the next time audio is armed.
+                      </Text>
+                    </SectionCard>
+
+                    {/* All-Page (admin/operator) */}
+                    {isAdminOrOperator ? (
+                      <SectionCard>
+                        <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                          All-Page
+                        </Text>
+                        <ActionButton
+                          disabled={isAllPageByOther}
+                          label={
+                            allPageActive && allPageActive.userId === state.session?.user.id
+                              ? "Stop All-Page"
+                              : allPageActive
+                                ? "All-Page in use"
+                                : "Start All-Page"
+                          }
+                          onPress={handleToggleAllPage}
+                          tone={allPageActive && allPageActive.userId === state.session?.user.id ? "secondary" : "primary"}
+                        />
+                      </SectionCard>
+                    ) : null}
+
+                    {/* Direct call */}
+                    {!directCall && !incomingCall && onlineUsers.length > 0 ? (
+                      <SectionCard>
+                        <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                        Direct call
+                        </Text>
+                        <View className="flex-row flex-wrap gap-2">
+                          {onlineUsers
+                            .filter((u) => u.id !== state.session?.user.id)
+                            .map((user) => (
+                              <Pressable
+                                accessibilityRole="button"
+                                className="rounded-lg border border-border bg-secondary px-3 py-2"
+                                key={user.id}
+                                onPress={() => requestDirectCallHandler(user.id)}
+                              >
+                                <Text className="text-sm font-medium text-foreground">
+                                  {String.fromCodePoint(0x1f4de)} {user.username}
+                                </Text>
+                              </Pressable>
+                            ))}
+                        </View>
+                      </SectionCard>
+                    ) : null}
+
+                    {/* IFB controls (admin/operator) */}
+                    {isAdminOrOperator && onlineUsers.length > 0 ? (
+                      <SectionCard>
+                        <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                          IFB controls
+                        </Text>
+                        <View className="flex-row flex-wrap gap-2">
+                          {onlineUsers
+                            .filter((u) => u.id !== state.session?.user.id)
+                            .map((user) => (
+                              <Pressable
+                                accessibilityRole="button"
+                                className="rounded-lg border border-border bg-secondary px-3 py-2"
+                                key={user.id}
+                                onPress={() => handleStartIFB(user.id)}
+                              >
+                                <Text className="text-sm font-medium text-foreground">
+                                  {String.fromCodePoint(0x1f3a7)} IFB → {user.username}
+                                </Text>
+                              </Pressable>
+                            ))}
+                          <Pressable
+                            accessibilityRole="button"
+                            className="rounded-lg border border-destructive/40 bg-destructive/15 px-3 py-2"
+                            onPress={handleStopIFB}
+                          >
+                            <Text className="text-sm font-medium text-destructive">Stop IFB</Text>
+                          </Pressable>
+                        </View>
+                      </SectionCard>
+                    ) : null}
+
+                    {/* Android runtime */}
+                    {showAndroidRuntimeSupport ? (
+                      <SectionCard>
+                        <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                          Android runtime
+                        </Text>
+                        <Text className="text-sm leading-6 text-muted-foreground">
+                          Allow CueCommX notifications and exempt the app from battery optimization for reliable background audio.
+                        </Text>
+                        <ActionButton
+                          label="Open battery settings"
+                          onPress={() => void handleOpenBatterySettings()}
+                          tone="secondary"
+                        />
+                      </SectionCard>
+                    ) : null}
+
+                    {/* User profile */}
+                    <SectionCard>
+                      <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                        User profile
+                      </Text>
+                      <ActionButton
+                        disabled={profileSaving || !state.session}
+                        label={profileSaving ? "Saving…" : "Save profile to server"}
+                        onPress={() => void handleSaveProfile()}
+                        tone="secondary"
+                      />
+                      {profileNotice ? (
+                        <Text className="text-center text-xs text-muted-foreground">{profileNotice}</Text>
+                      ) : null}
+                      <Text className="text-sm leading-6 text-muted-foreground">
+                        Save your current volume, processing, and group settings to the server. Settings load automatically on next login.
+                      </Text>
+                    </SectionCard>
+
+                    {/* Sign out */}
+                    <View>
+                      <ActionButton label="Sign out" onPress={handleSignOut} tone="secondary" />
+                    </View>
+                  </View>
+                </ScrollView>
+              )}
+
+              {/* ── Bottom tab bar ── */}
+              <View className="flex-row border-t border-border bg-card/95">
+                <Pressable
+                  accessibilityLabel="Channels"
+                  accessibilityRole="tab"
+                  className="flex-1 items-center gap-0.5 py-2.5"
+                  onPress={() => setActiveTab("channels")}
+                >
+                  <Text className="text-xl">{String.fromCodePoint(0x1f399)}</Text>
+                  <Text
+                    className={`text-[10px] font-semibold uppercase tracking-control ${
+                      activeTab === "channels" ? "text-primary" : "text-muted-foreground"
+                    }`}
+                  >
+                    Channels
+                  </Text>
+                  {activeTab === "channels" ? (
+                    <View className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-primary" />
+                  ) : null}
+                </Pressable>
+                <Pressable
+                  accessibilityLabel="Settings"
+                  accessibilityRole="tab"
+                  className="flex-1 items-center gap-0.5 py-2.5"
+                  onPress={() => setActiveTab("settings")}
+                >
+                  <Text className="text-xl">{String.fromCodePoint(0x2699, 0xfe0f)}</Text>
+                  <Text
+                    className={`text-[10px] font-semibold uppercase tracking-control ${
+                      activeTab === "settings" ? "text-primary" : "text-muted-foreground"
+                    }`}
+                  >
+                    Settings
+                  </Text>
+                  {activeTab === "settings" ? (
+                    <View className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-primary" />
+                  ) : null}
+                  {/* Dot when audio not armed */}
+                  {!audioReady ? (
+                    <View className="absolute right-6 top-2 h-2 w-2 rounded-full bg-destructive" />
+                  ) : null}
+                </Pressable>
+              </View>
             </View>
           )}
         </KeyboardAvoidingView>
