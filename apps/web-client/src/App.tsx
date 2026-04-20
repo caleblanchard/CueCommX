@@ -2174,9 +2174,10 @@ export default function App() {
                                 onClick={() => openChat(channel.id)}
                                 size="sm"
                                 type="button"
-                                variant="ghost"
+                                variant="outline"
                               >
                                 <MessageCircle className="h-4 w-4" />
+                                <span>Chat</span>
                                 {(unreadCounts[channel.id] ?? 0) > 0 ? (
                                   <span className="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground">
                                     {unreadCounts[channel.id]}
