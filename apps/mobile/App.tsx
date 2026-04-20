@@ -1,5 +1,5 @@
 import { StatusBar } from "expo-status-bar";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Slider from "@react-native-community/slider";
 import {
   ActivityIndicator,
@@ -21,9 +21,12 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { CueCommXRealtimeClient, type RealtimeConnectionState } from "@cuecommx/core";
 import type {
   AuthSuccessResponse,
+  CallSignalType,
+  ChannelInfo,
   ChannelPermission,
   ConnectionQuality,
   DiscoveryResponse,
+  GroupInfo,
   OperatorState,
   ServerSignalingMessage,
   StatusResponse,
@@ -194,38 +197,67 @@ function ActionButton({
 }
 
 function ChannelPermissionCard({
+  channelType,
   connected,
   canListen,
   canTalk,
   color,
+  isAllPageBlocked,
   isGlobal,
   isListening,
+  isSource,
   isTalking,
+  isVoxMode,
   name,
+  onSignal,
   onToggleListen,
   onTalkPress,
   onVolumeChange,
+  role,
   talkReady,
   talkMode,
   volumePercent,
 }: {
+  channelType?: "intercom" | "program";
   connected: boolean;
   canListen: boolean;
   canTalk: boolean;
   color: string;
+  isAllPageBlocked: boolean;
   isGlobal: boolean;
   isListening: boolean;
+  isSource: boolean;
   isTalking: boolean;
+  isVoxMode: boolean;
   name: string;
+  onSignal?: (signalType: CallSignalType) => void;
   onToggleListen: () => void;
   onTalkPress: (phase: "press-in" | "press-out" | "tap") => void;
   onVolumeChange: (value: number) => void;
+  role?: string;
   talkReady: boolean;
   talkMode: MobileTalkMode;
   volumePercent: number;
 }) {
+  const [signalMenuOpen, setSignalMenuOpen] = useState(false);
+  const isProgram = channelType === "program";
+  const hideTalk = isProgram && !isSource;
+  const talkBlocked = isAllPageBlocked;
   const listenEnabled = connected && canListen;
-  const talkEnabled = connected && canTalk && talkReady;
+  const talkEnabled = connected && canTalk && talkReady && !hideTalk && !talkBlocked;
+  const canSignal = (role === "admin" || role === "operator") && onSignal;
+
+  const talkLabel = talkBlocked
+    ? "All-Page active"
+    : isVoxMode
+      ? "VOX auto"
+      : isTalking
+        ? "Talking"
+        : !talkReady && canTalk
+          ? "Arm audio"
+          : talkMode === "momentary"
+            ? "Hold to talk"
+            : "Toggle talk";
 
   return (
     <View className="overflow-hidden rounded-xl border border-border bg-background/60">
@@ -237,6 +269,18 @@ function ChannelPermissionCard({
             <Text className="text-sm" accessibilityLabel="Global channel">
               {String.fromCodePoint(0x1f310)}
             </Text>
+          ) : null}
+          {isProgram ? (
+            <View className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5">
+              <Text className="text-[10px] font-semibold uppercase tracking-control text-amber-400">
+                {String.fromCodePoint(0x1f4e1)} Program
+              </Text>
+            </View>
+          ) : null}
+          {isVoxMode && canTalk ? (
+            <View className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5">
+              <Text className="text-[10px] font-semibold uppercase tracking-control text-primary">VOX</Text>
+            </View>
           ) : null}
         </View>
         <View className="flex-row flex-wrap gap-2">
@@ -253,28 +297,32 @@ function ChannelPermissionCard({
               {canListen ? (isListening ? "Listening live" : "Listen armed") : "No listen"}
             </Text>
           </View>
-          <View
-            className={`rounded-full px-3 py-1 ${
-              canTalk
-                ? isTalking
-                  ? "border border-primary bg-primary/20"
-                  : "border border-primary/30 bg-primary/10"
-                : "border border-border bg-secondary/70"
-            }`}
-          >
-            <Text
-              className={`text-[11px] font-semibold uppercase tracking-control ${
-                canTalk ? "text-primary" : "text-muted-foreground"
+          {!hideTalk ? (
+            <View
+              className={`rounded-full px-3 py-1 ${
+                canTalk
+                  ? isTalking
+                    ? "border border-primary bg-primary/20"
+                    : "border border-primary/30 bg-primary/10"
+                  : "border border-border bg-secondary/70"
               }`}
             >
-              {canTalk ? (isTalking ? "Talking live" : "Talk assigned") : "No talk"}
-            </Text>
-          </View>
-          <View className="rounded-full border border-border bg-secondary/70 px-3 py-1">
-            <Text className="text-[11px] font-semibold uppercase tracking-control text-muted-foreground">
-              {talkMode === "momentary" ? "Momentary PTT" : "Latched Talk"}
-            </Text>
-          </View>
+              <Text
+                className={`text-[11px] font-semibold uppercase tracking-control ${
+                  canTalk ? "text-primary" : "text-muted-foreground"
+                }`}
+              >
+                {canTalk ? (isTalking ? "Talking live" : "Talk assigned") : "No talk"}
+              </Text>
+            </View>
+          ) : null}
+          {!hideTalk ? (
+            <View className="rounded-full border border-border bg-secondary/70 px-3 py-1">
+              <Text className="text-[11px] font-semibold uppercase tracking-control text-muted-foreground">
+                {talkMode === "momentary" ? "Momentary PTT" : "Latched Talk"}
+              </Text>
+            </View>
+          ) : null}
         </View>
 
         <View className="flex-row gap-3">
@@ -296,27 +344,57 @@ function ChannelPermissionCard({
               {isListening ? "Stop listen" : "Listen"}
             </Text>
           </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            className={`min-h-touch flex-1 items-center justify-center rounded-xl px-4 py-3 shadow-command ${
-              isTalking ? "bg-primary/80" : "bg-primary"
-            } ${talkEnabled ? "" : "opacity-50"}`}
-            disabled={!talkEnabled}
-            onPress={talkMode === "latched" ? () => onTalkPress("tap") : undefined}
-            onPressIn={talkMode === "momentary" ? () => onTalkPress("press-in") : undefined}
-            onPressOut={talkMode === "momentary" ? () => onTalkPress("press-out") : undefined}
-          >
-            <Text className="text-sm font-semibold uppercase tracking-control text-primary-foreground">
-              {isTalking
-                ? "Talking"
-                : !talkReady && canTalk
-                  ? "Arm audio"
-                  : talkMode === "momentary"
-                    ? "Hold to talk"
-                    : "Toggle talk"}
-            </Text>
-          </Pressable>
+          {!hideTalk ? (
+            <Pressable
+              accessibilityRole="button"
+              className={`min-h-touch flex-1 items-center justify-center rounded-xl px-4 py-3 shadow-command ${
+                isTalking ? "bg-primary/80" : "bg-primary"
+              } ${talkEnabled ? "" : "opacity-50"}`}
+              disabled={!talkEnabled}
+              onPress={talkMode === "latched" ? () => onTalkPress("tap") : undefined}
+              onPressIn={talkMode === "momentary" ? () => onTalkPress("press-in") : undefined}
+              onPressOut={talkMode === "momentary" ? () => onTalkPress("press-out") : undefined}
+            >
+              <Text className="text-sm font-semibold uppercase tracking-control text-primary-foreground">
+                {talkLabel}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
+
+        {canSignal ? (
+          <View>
+            <Pressable
+              accessibilityRole="button"
+              className="items-center rounded-xl border border-border bg-secondary px-4 py-2"
+              onPress={() => setSignalMenuOpen(!signalMenuOpen)}
+            >
+              <Text className="text-xs font-semibold uppercase tracking-control text-foreground">Signal</Text>
+            </Pressable>
+            {signalMenuOpen ? (
+              <View className="mt-2 gap-1 rounded-xl border border-border bg-card p-2">
+                <Pressable
+                  className="rounded-lg px-3 py-2"
+                  onPress={() => { onSignal("call"); setSignalMenuOpen(false); }}
+                >
+                  <Text className="text-sm font-medium text-red-400">{String.fromCodePoint(0x1f4de)} Call</Text>
+                </Pressable>
+                <Pressable
+                  className="rounded-lg px-3 py-2"
+                  onPress={() => { onSignal("standby"); setSignalMenuOpen(false); }}
+                >
+                  <Text className="text-sm font-medium text-amber-400">{String.fromCodePoint(0x23f3)} Standby</Text>
+                </Pressable>
+                <Pressable
+                  className="rounded-lg px-3 py-2"
+                  onPress={() => { onSignal("go"); setSignalMenuOpen(false); }}
+                >
+                  <Text className="text-sm font-medium text-green-400">{String.fromCodePoint(0x1f7e2)} Go</Text>
+                </Pressable>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
 
         <View className="gap-2">
           <View className="flex-row items-center justify-between">
@@ -366,6 +444,31 @@ export default function App() {
     echoCancellation: true,
   });
   const [connectionQuality, setConnectionQuality] = useState<ConnectionQuality | null>(null);
+  const [allPageActive, setAllPageActive] = useState<{ userId: string; username: string } | undefined>();
+  const [incomingSignals, setIncomingSignals] = useState<Array<{ signalId: string; signalType: CallSignalType; fromUsername: string; targetChannelId?: string }>>([]);
+  const [onlineUsers, setOnlineUsers] = useState<Array<{ id: string; username: string }>>([]);
+  const [directCall, setDirectCall] = useState<{
+    callId: string;
+    peerUserId: string;
+    peerUsername: string;
+    state: "requesting" | "ringing" | "active";
+  } | null>(null);
+  const [incomingCall, setIncomingCall] = useState<{
+    callId: string;
+    fromUserId: string;
+    fromUsername: string;
+  } | null>(null);
+  const [groups, setGroups] = useState<GroupInfo[]>([]);
+  const [activeGroupId, setActiveGroupId] = useState<string | undefined>();
+  const [ifbState, setIFBState] = useState<{
+    fromUserId: string;
+    fromUsername: string;
+    duckLevel: number;
+  } | null>(null);
+  const [voxEnabled, setVoxEnabled] = useState(false);
+  const [voxThreshold, setVoxThreshold] = useState(15);
+  const [preflightStep, setPreflightStep] = useState<"idle" | "recording" | "done">("idle");
+  const [preflightPassed, setPreflightPassed] = useState<boolean | undefined>();
   const androidNotificationIdRef = useRef<string | undefined>(undefined);
   const mediaControllerRef = useRef<ReturnType<typeof createMobileMediaController> | null>(null);
   const realtimeClientRef = useRef<CueCommXRealtimeClient | null>(null);
@@ -385,10 +488,37 @@ export default function App() {
   const mixChannelVolumes = useMemo(
     () =>
       Object.fromEntries(
-        activeChannels.map((channel) => [channel.id, toFraction(channelVolumes[channel.id] ?? 100)]),
+        activeChannels.map((channel) => {
+          const baseVolume = toFraction(channelVolumes[channel.id] ?? 100);
+          const duckedVolume = ifbState && (channel as ChannelInfo).channelType === "program"
+            ? baseVolume * ifbState.duckLevel
+            : baseVolume;
+          return [channel.id, duckedVolume];
+        }),
       ),
-    [activeChannels, channelVolumes],
+    [activeChannels, channelVolumes, ifbState],
   );
+  const visibleChannels: ChannelInfo[] = useMemo(() => {
+    const allChannels = (state.session?.channels ?? []) as ChannelInfo[];
+
+    if (groups.length === 0 || !activeGroupId) {
+      return allChannels;
+    }
+
+    const activeGroup = groups.find((g) => g.id === activeGroupId);
+
+    if (!activeGroup) {
+      return allChannels;
+    }
+
+    const groupChannelSet = new Set(activeGroup.channelIds);
+    const globals = allChannels.filter((ch) => ch.isGlobal);
+    const groupChannels = allChannels.filter(
+      (ch) => !ch.isGlobal && groupChannelSet.has(ch.id),
+    );
+
+    return [...globals, ...groupChannels];
+  }, [state.session?.channels, groups, activeGroupId]);
   const listenChannelIds = state.operatorState?.listenChannelIds ?? [];
 
   function getRuntimeMessage(error: unknown, fallback: string): string {
@@ -586,6 +716,10 @@ export default function App() {
 
         setState((current) => {
           if (message.type === "session:ready") {
+            if (message.payload.groups) {
+              setGroups(message.payload.groups);
+            }
+
             return {
               ...current,
               operatorState: message.payload.operatorState,
@@ -643,6 +777,69 @@ export default function App() {
 
           return current;
         });
+
+        if (message.type === "allpage:active") {
+          setAllPageActive(message.payload);
+        }
+
+        if (message.type === "allpage:inactive") {
+          setAllPageActive(undefined);
+        }
+
+        if (message.type === "signal:incoming") {
+          setIncomingSignals((prev) => [
+            ...prev,
+            {
+              signalId: message.payload.signalId,
+              signalType: message.payload.signalType,
+              fromUsername: message.payload.fromUsername,
+              targetChannelId: message.payload.targetChannelId,
+            },
+          ]);
+        }
+
+        if (message.type === "signal:cleared") {
+          setIncomingSignals((prev) => prev.filter((s) => s.signalId !== message.payload.signalId));
+        }
+
+        if (message.type === "online:users") {
+          setOnlineUsers(message.payload.users);
+        }
+
+        if (message.type === "direct:incoming") {
+          setIncomingCall({
+            callId: message.payload.callId,
+            fromUserId: message.payload.fromUserId,
+            fromUsername: message.payload.fromUsername,
+          });
+        }
+
+        if (message.type === "direct:active") {
+          setIncomingCall(null);
+          setDirectCall({
+            callId: message.payload.callId,
+            peerUserId: message.payload.peerUserId,
+            peerUsername: message.payload.peerUsername,
+            state: "active",
+          });
+        }
+
+        if (message.type === "direct:ended") {
+          setDirectCall(null);
+          setIncomingCall(null);
+        }
+
+        if (message.type === "ifb:active") {
+          setIFBState({
+            fromUserId: message.payload.fromUserId,
+            fromUsername: message.payload.fromUsername,
+            duckLevel: message.payload.duckLevel,
+          });
+        }
+
+        if (message.type === "ifb:inactive") {
+          setIFBState(null);
+        }
       },
       sessionToken: state.session.sessionToken,
     });
@@ -716,6 +913,17 @@ export default function App() {
       setMasterVolume(100);
       setRemoteTalkers([]);
       setRuntimeNotice(undefined);
+      setAllPageActive(undefined);
+      setIncomingSignals([]);
+      setOnlineUsers([]);
+      setDirectCall(null);
+      setIncomingCall(null);
+      setGroups([]);
+      setActiveGroupId(undefined);
+      setIFBState(null);
+      setVoxEnabled(false);
+      setPreflightStep("idle");
+      setPreflightPassed(undefined);
     };
   }, [state.serverBaseUrl, state.session?.sessionToken]);
 
@@ -889,6 +1097,17 @@ export default function App() {
     setMasterVolume(100);
     setRemoteTalkers([]);
     setRuntimeNotice(undefined);
+    setAllPageActive(undefined);
+    setIncomingSignals([]);
+    setOnlineUsers([]);
+    setDirectCall(null);
+    setIncomingCall(null);
+    setGroups([]);
+    setActiveGroupId(undefined);
+    setIFBState(null);
+    setVoxEnabled(false);
+    setPreflightStep("idle");
+    setPreflightPassed(undefined);
   }
 
   function handleDisconnect(): void {
@@ -1029,6 +1248,137 @@ export default function App() {
       );
     }
   }
+
+  function handleToggleAllPage(): void {
+    const client = requireRealtimeConnection();
+    if (!client) return;
+
+    if (allPageActive && allPageActive.userId === state.session?.user.id) {
+      client.stopAllPage();
+    } else if (!allPageActive) {
+      client.startAllPage();
+    }
+  }
+
+  function requestDirectCallHandler(targetUserId: string): void {
+    if (directCall || incomingCall) return;
+
+    realtimeClientRef.current?.requestDirectCall(targetUserId);
+    const targetUser = onlineUsers.find((u) => u.id === targetUserId);
+
+    setDirectCall({
+      callId: "",
+      peerUserId: targetUserId,
+      peerUsername: targetUser?.username ?? "Unknown",
+      state: "requesting",
+    });
+  }
+
+  function acceptIncomingCallHandler(): void {
+    if (!incomingCall) return;
+    realtimeClientRef.current?.acceptDirectCall(incomingCall.callId);
+  }
+
+  function rejectIncomingCallHandler(): void {
+    if (!incomingCall) return;
+    realtimeClientRef.current?.rejectDirectCall(incomingCall.callId);
+    setIncomingCall(null);
+  }
+
+  function endCurrentDirectCall(): void {
+    if (!directCall) return;
+    realtimeClientRef.current?.endDirectCall(directCall.callId);
+    setDirectCall(null);
+  }
+
+  function handleStartIFB(targetUserId: string): void {
+    realtimeClientRef.current?.startIFB(targetUserId);
+  }
+
+  function handleStopIFB(): void {
+    realtimeClientRef.current?.stopIFB();
+  }
+
+  function handleTestMic(): void {
+    setPreflightStep("recording");
+    setPreflightPassed(undefined);
+    let maxLevel = 0;
+    const startTime = Date.now();
+
+    const interval = setInterval(() => {
+      const current = inputLevel;
+      if (current > maxLevel) maxLevel = current;
+
+      if (Date.now() - startTime >= 3000) {
+        clearInterval(interval);
+        const passed = maxLevel > 10;
+        setPreflightPassed(passed);
+        setPreflightStep("done");
+        realtimeClientRef.current?.reportPreflightResult(passed ? "passed" : "failed");
+      }
+    }, 100);
+  }
+
+  const isAllPageByOther = allPageActive !== undefined && allPageActive.userId !== state.session?.user.id;
+  const isAdminOrOperator = state.session?.user.role === "admin" || state.session?.user.role === "operator";
+
+  const voxHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const voxTalkingRef = useRef(false);
+
+  const startTalkAll = useCallback(() => {
+    const client = realtimeClientRef.current;
+    if (!client || !audioReady) return;
+
+    const talkableChannelIds = assignedPermissions
+      .filter((p) => p.canTalk)
+      .map((p) => p.channelId);
+    if (talkableChannelIds.length > 0) {
+      client.startTalk(talkableChannelIds);
+    }
+  }, [audioReady, assignedPermissions]);
+
+  const stopTalkAll = useCallback(() => {
+    const client = realtimeClientRef.current;
+    if (!client) return;
+
+    const talkableChannelIds = assignedPermissions
+      .filter((p) => p.canTalk)
+      .map((p) => p.channelId);
+    if (talkableChannelIds.length > 0) {
+      client.stopTalk(talkableChannelIds);
+    }
+  }, [assignedPermissions]);
+
+  useEffect(() => {
+    if (!voxEnabled || !audioReady) {
+      if (voxTalkingRef.current) {
+        stopTalkAll();
+        voxTalkingRef.current = false;
+      }
+      if (voxHoldTimerRef.current) {
+        clearTimeout(voxHoldTimerRef.current);
+        voxHoldTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (inputLevel >= voxThreshold) {
+      if (voxHoldTimerRef.current) {
+        clearTimeout(voxHoldTimerRef.current);
+        voxHoldTimerRef.current = null;
+      }
+      if (!voxTalkingRef.current) {
+        voxTalkingRef.current = true;
+        startTalkAll();
+      }
+    } else if (voxTalkingRef.current && !voxHoldTimerRef.current) {
+      voxHoldTimerRef.current = setTimeout(() => {
+        voxTalkingRef.current = false;
+        voxHoldTimerRef.current = null;
+        stopTalkAll();
+      }, 500);
+    }
+  }, [inputLevel, voxEnabled, voxThreshold, audioReady, startTalkAll, stopTalkAll]);
 
 
   const screen = state.session ? "intercom" : state.status ? "login" : "connect";
@@ -1387,6 +1737,81 @@ export default function App() {
                       Momentary uses hold-to-talk. Latched turns the Talk button into a toggle for
                       one-handed operation.
                     </Text>
+                    <View className="flex-row items-center justify-between">
+                      <Text className="text-sm text-foreground">VOX (auto-talk)</Text>
+                      <Switch
+                        trackColor={{ false: "#334155", true: "#5eead4" }}
+                        thumbColor="#ffffff"
+                        value={voxEnabled}
+                        onValueChange={setVoxEnabled}
+                      />
+                    </View>
+                    {voxEnabled ? (
+                      <View className="gap-2">
+                        <View className="flex-row items-center justify-between">
+                          <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                            VOX threshold
+                          </Text>
+                          <Text className="text-xs font-semibold text-foreground">{voxThreshold}%</Text>
+                        </View>
+                        <Slider
+                          maximumTrackTintColor="#334155"
+                          maximumValue={50}
+                          minimumTrackTintColor="#5eead4"
+                          minimumValue={5}
+                          onValueChange={(value) => setVoxThreshold(Math.round(value))}
+                          step={1}
+                          thumbTintColor="#5eead4"
+                          value={voxThreshold}
+                        />
+                        <Text className="text-sm leading-6 text-muted-foreground">
+                          VOX activates talk on all assigned channels when mic level exceeds threshold.
+                        </Text>
+                      </View>
+                    ) : null}
+                  </SectionCard>
+
+                  <SectionCard>
+                    <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                      Preflight mic test
+                    </Text>
+                    <ActionButton
+                      disabled={preflightStep === "recording" || !audioReady}
+                      label={
+                        preflightStep === "recording"
+                          ? "Testing mic..."
+                          : "Test Mic"
+                      }
+                      onPress={handleTestMic}
+                      tone="secondary"
+                    />
+                    {preflightStep === "recording" ? (
+                      <View className="rounded-xl border border-primary/30 bg-primary/10 p-3">
+                        <Text className="text-sm text-primary">
+                          {String.fromCodePoint(0x1f399)} Recording — speak into your mic...
+                        </Text>
+                        <View className="mt-2 h-3 overflow-hidden rounded-full bg-secondary/80">
+                          <View
+                            className="h-full rounded-full bg-primary"
+                            style={{ width: `${Math.max(4, inputLevel)}%` }}
+                          />
+                        </View>
+                      </View>
+                    ) : null}
+                    {preflightStep === "done" && preflightPassed === true ? (
+                      <View className="rounded-xl border border-success/30 bg-success/10 p-3">
+                        <Text className="text-sm text-success">
+                          {String.fromCodePoint(0x2713)} Mic test passed
+                        </Text>
+                      </View>
+                    ) : null}
+                    {preflightStep === "done" && preflightPassed === false ? (
+                      <View className="rounded-xl border border-destructive/30 bg-destructive/10 p-3">
+                        <Text className="text-sm text-destructive">
+                          {String.fromCodePoint(0x2717)} Mic test failed — no audio detected
+                        </Text>
+                      </View>
+                    ) : null}
                   </SectionCard>
 
                   <SectionCard>
@@ -1433,23 +1858,248 @@ export default function App() {
                     </Text>
                   </SectionCard>
 
+                  {isAdminOrOperator ? (
+                    <SectionCard>
+                      <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                        All-Page
+                      </Text>
+                      <ActionButton
+                        disabled={isAllPageByOther}
+                        label={
+                          allPageActive && allPageActive.userId === state.session?.user.id
+                            ? "Stop All-Page"
+                            : allPageActive
+                              ? "All-Page in use"
+                              : "Start All-Page"
+                        }
+                        onPress={handleToggleAllPage}
+                        tone={allPageActive && allPageActive.userId === state.session?.user.id ? "secondary" : "primary"}
+                      />
+                    </SectionCard>
+                  ) : null}
+
+                  {allPageActive ? (
+                    <View className="rounded-xl border border-amber-500/50 bg-amber-500/10 px-4 py-3">
+                      <Text className="text-sm font-medium text-amber-400">
+                        {String.fromCodePoint(0x1f4e2)} All-Page by {allPageActive.username}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {incomingSignals.map((signal) => {
+                    const colorClass =
+                      signal.signalType === "call"
+                        ? "border-red-500/50 bg-red-500/10"
+                        : signal.signalType === "go"
+                          ? "border-green-500/50 bg-green-500/10"
+                          : "border-amber-500/50 bg-amber-500/10";
+                    const textColor =
+                      signal.signalType === "call"
+                        ? "text-red-400"
+                        : signal.signalType === "go"
+                          ? "text-green-400"
+                          : "text-amber-400";
+                    const icon =
+                      signal.signalType === "call"
+                        ? String.fromCodePoint(0x1f4de)
+                        : signal.signalType === "go"
+                          ? String.fromCodePoint(0x1f7e2)
+                          : String.fromCodePoint(0x23f3);
+
+                    return (
+                      <View className={`flex-row items-center gap-3 rounded-xl border px-4 py-3 ${colorClass}`} key={signal.signalId}>
+                        <Text className={`flex-1 text-sm font-medium ${textColor}`}>
+                          {icon} {signal.signalType.toUpperCase()} from {signal.fromUsername}
+                        </Text>
+                        <Pressable
+                          accessibilityRole="button"
+                          className="rounded-lg border border-border bg-secondary px-3 py-1.5"
+                          onPress={() => realtimeClientRef.current?.acknowledgeSignal(signal.signalId)}
+                        >
+                          <Text className="text-xs font-semibold text-foreground">Ack</Text>
+                        </Pressable>
+                      </View>
+                    );
+                  })}
+
+                  {groups.length > 0 ? (
+                    <View className="gap-2">
+                      <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                        Group
+                      </Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                        <View className="flex-row gap-2">
+                          <Pressable
+                            className={`rounded-lg px-3 py-1.5 ${
+                              !activeGroupId
+                                ? "bg-primary"
+                                : "bg-secondary/50"
+                            }`}
+                            onPress={() => setActiveGroupId(undefined)}
+                          >
+                            <Text className={`text-sm font-medium ${
+                              !activeGroupId ? "text-primary-foreground" : "text-foreground"
+                            }`}>
+                              All
+                            </Text>
+                          </Pressable>
+                          {groups.map((group) => (
+                            <Pressable
+                              className={`rounded-lg px-3 py-1.5 ${
+                                activeGroupId === group.id
+                                  ? "bg-primary"
+                                  : "bg-secondary/50"
+                              }`}
+                              key={group.id}
+                              onPress={() => setActiveGroupId(group.id)}
+                            >
+                              <Text className={`text-sm font-medium ${
+                                activeGroupId === group.id ? "text-primary-foreground" : "text-foreground"
+                              }`}>
+                                {group.name}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      </ScrollView>
+                    </View>
+                  ) : null}
+
+                  {incomingCall ? (
+                    <View className="flex-row items-center gap-3 rounded-xl border border-blue-500/50 bg-blue-500/10 px-4 py-3">
+                      <Text className="flex-1 text-sm font-medium text-blue-400">
+                        {String.fromCodePoint(0x1f4de)} Incoming call from {incomingCall.fromUsername}
+                      </Text>
+                      <Pressable
+                        accessibilityRole="button"
+                        className="rounded-lg border border-success/40 bg-success/15 px-3 py-1.5"
+                        onPress={acceptIncomingCallHandler}
+                      >
+                        <Text className="text-xs font-semibold text-success">Accept</Text>
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        className="rounded-lg border border-destructive/40 bg-destructive/15 px-3 py-1.5"
+                        onPress={rejectIncomingCallHandler}
+                      >
+                        <Text className="text-xs font-semibold text-destructive">Reject</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+
+                  {directCall ? (
+                    <View className={`flex-row items-center gap-3 rounded-xl border px-4 py-3 ${
+                      directCall.state === "active"
+                        ? "border-green-500/50 bg-green-500/10"
+                        : "border-blue-500/50 bg-blue-500/10"
+                    }`}>
+                      <Text className={`flex-1 text-sm font-medium ${
+                        directCall.state === "active" ? "text-green-400" : "text-blue-400"
+                      }`}>
+                        {directCall.state === "active"
+                          ? `${String.fromCodePoint(0x1f517)} Direct call with ${directCall.peerUsername}`
+                          : `${String.fromCodePoint(0x1f4de)} Calling ${directCall.peerUsername}...`}
+                      </Text>
+                      <Pressable
+                        accessibilityRole="button"
+                        className="rounded-lg border border-destructive/40 bg-destructive/15 px-3 py-1.5"
+                        onPress={endCurrentDirectCall}
+                      >
+                        <Text className="text-xs font-semibold text-destructive">End Call</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+
+                  {!directCall && !incomingCall && onlineUsers.length > 0 ? (
+                    <SectionCard>
+                      <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                        Direct call
+                      </Text>
+                      <View className="flex-row flex-wrap gap-2">
+                        {onlineUsers
+                          .filter((u) => u.id !== state.session?.user.id)
+                          .map((user) => (
+                            <Pressable
+                              accessibilityRole="button"
+                              className="rounded-lg border border-border bg-secondary px-3 py-2"
+                              key={user.id}
+                              onPress={() => requestDirectCallHandler(user.id)}
+                            >
+                              <Text className="text-sm font-medium text-foreground">
+                                {String.fromCodePoint(0x1f4de)} {user.username}
+                              </Text>
+                            </Pressable>
+                          ))}
+                      </View>
+                    </SectionCard>
+                  ) : null}
+
+                  {ifbState ? (
+                    <View className="rounded-xl border border-amber-500/50 bg-amber-500/10 px-4 py-3">
+                      <Text className="text-sm font-medium text-amber-400">
+                        {String.fromCodePoint(0x1f3a7)} {ifbState.fromUsername} is speaking to you — program audio ducked
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {isAdminOrOperator && onlineUsers.length > 0 ? (
+                    <SectionCard>
+                      <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                        IFB controls
+                      </Text>
+                      <View className="flex-row flex-wrap gap-2">
+                        {onlineUsers
+                          .filter((u) => u.id !== state.session?.user.id)
+                          .map((user) => (
+                            <Pressable
+                              accessibilityRole="button"
+                              className="rounded-lg border border-border bg-secondary px-3 py-2"
+                              key={user.id}
+                              onPress={() => handleStartIFB(user.id)}
+                            >
+                              <Text className="text-sm font-medium text-foreground">
+                                {String.fromCodePoint(0x1f3a7)} IFB → {user.username}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        <Pressable
+                          accessibilityRole="button"
+                          className="rounded-lg border border-destructive/40 bg-destructive/15 px-3 py-2"
+                          onPress={handleStopIFB}
+                        >
+                          <Text className="text-sm font-medium text-destructive">Stop IFB</Text>
+                        </Pressable>
+                      </View>
+                    </SectionCard>
+                  ) : null}
+
                   <View className="gap-3">
-                    {activeChannels.map((channel) => {
+                    {visibleChannels.map((channel) => {
                       const permission = findPermission(assignedPermissions, channel.id);
+                      const chInfo = channel as ChannelInfo;
 
                       return (
                         <ChannelPermissionCard
+                          channelType={chInfo.channelType}
                           connected={state.realtimeState === "connected"}
                           canListen={permission?.canListen ?? false}
                           canTalk={permission?.canTalk ?? false}
                           color={channel.color}
+                          isAllPageBlocked={isAllPageByOther}
                           isGlobal={channel.isGlobal ?? false}
                           isListening={
                             state.operatorState?.listenChannelIds.includes(channel.id) ?? false
                           }
+                          isSource={chInfo.sourceUserId === state.session?.user.id}
                           isTalking={state.operatorState?.talkChannelIds.includes(channel.id) ?? false}
+                          isVoxMode={voxEnabled}
                           key={channel.id}
                           name={channel.name}
+                          onSignal={
+                            isAdminOrOperator
+                              ? (signalType) => realtimeClientRef.current?.sendCallSignal(signalType, { channelId: channel.id })
+                              : undefined
+                          }
                           onToggleListen={() =>
                             handleToggleListen(
                               channel.id,
@@ -1466,6 +2116,7 @@ export default function App() {
                               return { ...current, [channel.id]: rounded };
                             })
                           }
+                          role={state.session?.user.role}
                           talkReady={audioReady}
                           talkMode={talkMode}
                           volumePercent={channelVolumes[channel.id] ?? 100}
