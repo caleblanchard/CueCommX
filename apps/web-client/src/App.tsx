@@ -9,6 +9,7 @@ import {
   type AuthSuccessResponse,
   type ChannelInfo,
   type ChannelPermission,
+  type ChatMessagePayload,
   type ConnectionQuality,
   type DiscoveryResponse,
   type GroupInfo,
@@ -24,12 +25,15 @@ import {
   Headphones,
   Keyboard,
   Megaphone,
+  MessageCircle,
   Mic,
   Phone,
   PhoneOff,
   RadioTower,
+  Send,
   Volume2,
   Wifi,
+  X,
 } from "lucide-react";
 
 import { Badge } from "./components/ui/badge.js";
@@ -53,7 +57,13 @@ import {
   PreflightAudioTest,
   type PreflightState,
 } from "./media/preflight-audio-test.js";
-import { playSignalTone } from "./media/signal-tone.js";
+import {
+  type NotificationSoundSettings,
+  DEFAULT_NOTIFICATION_SOUND_SETTINGS,
+  playNotificationSound,
+  playSignalTone,
+  setNotificationSoundSettings,
+} from "./media/signal-tone.js";
 import { VoxDetector } from "./media/vox-detector.js";
 import { formatLatencyIndicator, readNetworkRtt } from "./network-latency.js";
 import {
@@ -301,6 +311,16 @@ export default function App() {
   const [channelPans, setChannelPans] = useState<Record<string, number>>(persistedPreferences.channelPans);
   const [sidetone, setSidetone] = useState<SidetoneSettings>(persistedPreferences.sidetone ?? { ...DEFAULT_SIDETONE_SETTINGS });
   const [ducking, setDucking] = useState<DuckingSettings>(persistedPreferences.ducking ?? { ...DEFAULT_DUCKING_SETTINGS });
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSoundSettings>(() => {
+    const prefs = persistedPreferences.notifications;
+    const merged: NotificationSoundSettings = {
+      ...DEFAULT_NOTIFICATION_SOUND_SETTINGS,
+      ...(prefs ? { enabled: prefs.enabled, volume: prefs.volume } : {}),
+      enabledEvents: { ...DEFAULT_NOTIFICATION_SOUND_SETTINGS.enabledEvents, ...(prefs?.enabledEvents ?? {}) },
+    };
+    setNotificationSoundSettings(merged);
+    return merged;
+  });
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileNotice, setProfileNotice] = useState<string>();
   const voxDetectorRef = useRef<VoxDetector | null>(null);
@@ -326,6 +346,12 @@ export default function App() {
     fromUsername: string;
     duckLevel: number;
   } | null>(null);
+  const [chatMessages, setChatMessages] = useState<Record<string, Array<{ id: string; channelId: string; userId: string; username: string; text: string; timestamp: number; messageType: "text" | "system" }>>>({});
+  const [chatOpen, setChatOpen] = useState<string | null>(null);
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  const [chatInput, setChatInput] = useState("");
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const [recordingActiveIds, setRecordingActiveIds] = useState<string[]>([]);
 
   const connectionBadge = getConnectionBadge(state.realtimeState);
   const assignedPermissions = useMemo(
@@ -650,6 +676,7 @@ export default function App() {
 
           if (message.type === "allpage:active") {
             setAllPageActive(message.payload);
+            playNotificationSound("allpage");
           }
 
           if (message.type === "allpage:inactive") {
@@ -683,6 +710,7 @@ export default function App() {
               fromUserId: message.payload.fromUserId,
               fromUsername: message.payload.fromUsername,
             });
+            playNotificationSound("directCall");
           }
 
           if (message.type === "direct:active") {
@@ -710,6 +738,34 @@ export default function App() {
 
           if (message.type === "ifb:inactive") {
             setIFBState(null);
+          }
+
+          if (message.type === "chat:message") {
+            const msg = message.payload;
+            setChatMessages((prev) => {
+              const channelMsgs = prev[msg.channelId] ?? [];
+              return { ...prev, [msg.channelId]: [...channelMsgs, msg] };
+            });
+            setChatOpen((openChannel) => {
+              if (openChannel !== msg.channelId) {
+                setUnreadCounts((prev) => ({
+                  ...prev,
+                  [msg.channelId]: (prev[msg.channelId] ?? 0) + 1,
+                }));
+              }
+              return openChannel;
+            });
+          }
+
+          if (message.type === "chat:history") {
+            setChatMessages((prev) => ({
+              ...prev,
+              [message.payload.channelId]: message.payload.messages,
+            }));
+          }
+
+          if (message.type === "recording:state") {
+            setRecordingActiveIds(message.payload.activeChannelIds);
           }
 
           return current;
@@ -866,6 +922,11 @@ export default function App() {
       ducking,
       latchModeChannelIds,
       masterVolume,
+      notifications: {
+        enabled: notificationSettings.enabled,
+        enabledEvents: notificationSettings.enabledEvents,
+        volume: notificationSettings.volume,
+      },
       preferredListenChannelIds,
       selectedInputDeviceId,
       sidetone,
@@ -881,6 +942,7 @@ export default function App() {
     hasPersistedListenPreferences,
     latchModeChannelIds,
     masterVolume,
+    notificationSettings,
     preferredListenChannelIds,
     selectedInputDeviceId,
     sidetone,
@@ -915,6 +977,10 @@ export default function App() {
       controller.disableSidetone();
     }
   }, [audioReady, sidetone]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages, chatOpen]);
 
   useEffect(() => {
     if (!audioReady || voxModeChannelIds.length === 0) {
@@ -1402,6 +1468,48 @@ export default function App() {
   function sendSignalToChannel(channelId: string, signalType: CallSignalType): void {
     realtimeClientRef.current?.sendCallSignal(signalType, { channelId });
     setSignalMenuChannelId(undefined);
+  }
+
+  function sendChatMessage(channelId: string): void {
+    const text = chatInput.trim();
+
+    if (!text || !realtimeClientRef.current) {
+      return;
+    }
+
+    realtimeClientRef.current.sendChatMessage(channelId, text);
+    setChatInput("");
+  }
+
+  function openChat(channelId: string): void {
+    setChatOpen(channelId);
+    setUnreadCounts((prev) => {
+      const next = { ...prev };
+      delete next[channelId];
+      return next;
+    });
+  }
+
+  function formatRelativeTime(timestamp: number): string {
+    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+
+    if (seconds < 60) {
+      return "now";
+    }
+
+    const minutes = Math.floor(seconds / 60);
+
+    if (minutes < 60) {
+      return `${minutes}m ago`;
+    }
+
+    const hours = Math.floor(minutes / 60);
+
+    if (hours < 24) {
+      return `${hours}h ago`;
+    }
+
+    return `${Math.floor(hours / 24)}d ago`;
   }
 
   function requestDirectCall(targetUserId: string): void {
@@ -1972,7 +2080,15 @@ export default function App() {
                           <CardHeader className="space-y-4">
                             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                               <div className="min-w-0 space-y-1">
-                                <CardTitle>{channel.name}</CardTitle>
+                                <div className="flex items-center gap-2">
+                                  <CardTitle>{channel.name}</CardTitle>
+                                  {recordingActiveIds.includes(channel.id) ? (
+                                    <span className="flex items-center gap-1 rounded-full bg-danger/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-danger">
+                                      <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-danger" />
+                                      REC
+                                    </span>
+                                  ) : null}
+                                </div>
                                 <p className="text-sm leading-6 text-muted-foreground">
                                 {isProgramChannel
                                   ? isSource
@@ -2005,6 +2121,20 @@ export default function App() {
                               {voxModeEnabled && permission?.canTalk ? (
                                 <Badge variant="accent">VOX</Badge>
                               ) : null}
+                              <Button
+                                className="relative"
+                                onClick={() => openChat(channel.id)}
+                                size="sm"
+                                type="button"
+                                variant="ghost"
+                              >
+                                <MessageCircle className="h-4 w-4" />
+                                {(unreadCounts[channel.id] ?? 0) > 0 ? (
+                                  <span className="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground">
+                                    {unreadCounts[channel.id]}
+                                  </span>
+                                ) : null}
+                              </Button>
                             </div>
                           </div>
                         </CardHeader>
@@ -2294,7 +2424,15 @@ export default function App() {
                           <CardHeader>
                             <div className="flex items-center justify-between">
                               <div className="min-w-0 space-y-1">
-                                <CardTitle>{channel.name}</CardTitle>
+                                <div className="flex items-center gap-2">
+                                  <CardTitle>{channel.name}</CardTitle>
+                                  {recordingActiveIds.includes(channel.id) ? (
+                                    <span className="flex items-center gap-1 rounded-full bg-danger/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-danger">
+                                      <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-danger" />
+                                      REC
+                                    </span>
+                                  ) : null}
+                                </div>
                                 <p className="text-sm text-muted-foreground">
                                   Always-on confidence monitor — exempt from ducking and IFB.
                                 </p>
@@ -2676,6 +2814,75 @@ export default function App() {
 
                 <Card>
                   <CardHeader>
+                    <CardDescription>Alerts &amp; tones</CardDescription>
+                    <CardTitle className="flex items-center gap-2">
+                      🔔 Notification sounds
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Enable notification sounds</span>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={notificationSettings.enabled}
+                        onClick={() => {
+                          const next = { ...notificationSettings, enabled: !notificationSettings.enabled };
+                          setNotificationSettings(next);
+                          setNotificationSoundSettings(next);
+                        }}
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${notificationSettings.enabled ? "bg-primary" : "bg-muted"}`}
+                      >
+                        <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${notificationSettings.enabled ? "translate-x-5" : "translate-x-0"}`} />
+                      </button>
+                    </div>
+                    {notificationSettings.enabled ? (
+                      <>
+                        <div>
+                          <label className="text-xs text-muted-foreground">Alert volume</label>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            value={notificationSettings.volume}
+                            onChange={(e) => {
+                              const vol = Number(e.target.value);
+                              const next = { ...notificationSettings, volume: vol };
+                              setNotificationSettings(next);
+                              setNotificationSoundSettings(next);
+                            }}
+                            className="mt-1 w-full accent-primary"
+                          />
+                          <span className="text-xs text-muted-foreground">{notificationSettings.volume}%</span>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium text-muted-foreground">Events</p>
+                          {(["call", "standby", "go", "allpage", "directCall", "chatMessage", "connectionLost", "connectionRestored", "userOnline", "pttEngage", "pttRelease"] as const).map((event) => (
+                            <label key={event} className="flex items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={notificationSettings.enabledEvents[event] ?? DEFAULT_NOTIFICATION_SOUND_SETTINGS.enabledEvents[event]}
+                                onChange={(e) => {
+                                  const next = {
+                                    ...notificationSettings,
+                                    enabledEvents: { ...notificationSettings.enabledEvents, [event]: e.target.checked },
+                                  };
+                                  setNotificationSettings(next);
+                                  setNotificationSoundSettings(next);
+                                }}
+                                className="accent-primary"
+                              />
+                              <span className="text-muted-foreground">{event.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase())}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </>
+                    ) : null}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
                     <CardDescription>Session overview</CardDescription>
                     <CardTitle>Live link and monitor state</CardTitle>
                   </CardHeader>
@@ -2788,6 +2995,67 @@ export default function App() {
           )
         ) : null}
       </div>
+
+      {chatOpen ? (() => {
+        const channelName = state.session?.channels.find((c) => c.id === chatOpen)?.name ?? chatOpen;
+        const msgs = chatMessages[chatOpen] ?? [];
+
+        return (
+          <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-border bg-background shadow-xl">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <div className="flex items-center gap-2">
+                <MessageCircle className="h-4 w-4 text-muted-foreground" />
+                <span className="font-semibold">{channelName}</span>
+                <span className="text-xs text-muted-foreground">Chat</span>
+              </div>
+              <Button onClick={() => setChatOpen(null)} size="sm" type="button" variant="ghost">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {msgs.length === 0 ? (
+                <p className="text-center text-sm text-muted-foreground pt-8">No messages yet. Start the conversation!</p>
+              ) : (
+                msgs.map((msg) => (
+                  <div key={msg.id} className={`flex flex-col gap-0.5 ${msg.messageType === "system" ? "items-center" : ""}`}>
+                    {msg.messageType === "system" ? (
+                      <span className="text-xs italic text-muted-foreground">{msg.text}</span>
+                    ) : (
+                      <>
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-xs font-semibold text-foreground">{msg.username}</span>
+                          <span className="text-[10px] text-muted-foreground">{formatRelativeTime(msg.timestamp)}</span>
+                        </div>
+                        <p className="text-sm text-foreground">{msg.text}</p>
+                      </>
+                    )}
+                  </div>
+                ))
+              )}
+              <div ref={chatEndRef} />
+            </div>
+            <div className="border-t border-border p-3">
+              <form
+                className="flex gap-2"
+                onSubmit={(e) => { e.preventDefault(); sendChatMessage(chatOpen); }}
+              >
+                <input
+                  autoFocus
+                  className="flex-1 rounded-lg border border-border bg-secondary px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  maxLength={500}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Type a message..."
+                  type="text"
+                  value={chatInput}
+                />
+                <Button disabled={!chatInput.trim()} size="sm" type="submit" variant="default">
+                  <Send className="h-4 w-4" />
+                </Button>
+              </form>
+            </div>
+          </div>
+        );
+      })() : null}
     </main>
   );
 }

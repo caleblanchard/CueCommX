@@ -5,15 +5,19 @@ import {
   ActivityIndicator,
   AppState,
   type AppStateStatus,
+  FlatList,
   InteractionManager,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
   Switch,
   Text,
   TextInput,
+  Vibration,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
@@ -24,6 +28,7 @@ import type {
   CallSignalType,
   ChannelInfo,
   ChannelPermission,
+  ChatMessagePayload,
   ConnectionQuality,
   DiscoveryResponse,
   GroupInfo,
@@ -61,6 +66,11 @@ import {
   showAndroidLiveAudioNotification,
   triggerListenToggleHaptic,
   triggerTalkHaptic,
+  triggerCallSignalHaptic,
+  triggerAllPageHaptic,
+  triggerDirectCallHaptic,
+  triggerConnectionLostHaptic,
+  triggerMessageHaptic,
 } from "./src/mobile-runtime-native";
 
 interface ViewState {
@@ -205,10 +215,12 @@ function ChannelPermissionCard({
   isAllPageBlocked,
   isGlobal,
   isListening,
+  isRecording,
   isSource,
   isTalking,
   isVoxMode,
   name,
+  onChat,
   onSignal,
   onToggleListen,
   onTalkPress,
@@ -216,6 +228,7 @@ function ChannelPermissionCard({
   role,
   talkReady,
   talkMode,
+  unreadCount,
   volumePercent,
 }: {
   channelType?: "intercom" | "program" | "confidence";
@@ -226,10 +239,12 @@ function ChannelPermissionCard({
   isAllPageBlocked: boolean;
   isGlobal: boolean;
   isListening: boolean;
+  isRecording: boolean;
   isSource: boolean;
   isTalking: boolean;
   isVoxMode: boolean;
   name: string;
+  onChat: () => void;
   onSignal?: (signalType: CallSignalType) => void;
   onToggleListen: () => void;
   onTalkPress: (phase: "press-in" | "press-out" | "tap") => void;
@@ -237,6 +252,7 @@ function ChannelPermissionCard({
   role?: string;
   talkReady: boolean;
   talkMode: MobileTalkMode;
+  unreadCount: number;
   volumePercent: number;
 }) {
   const [signalMenuOpen, setSignalMenuOpen] = useState(false);
@@ -280,6 +296,11 @@ function ChannelPermissionCard({
           {isVoxMode && canTalk ? (
             <View className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5">
               <Text className="text-[10px] font-semibold uppercase tracking-control text-primary">VOX</Text>
+            </View>
+          ) : null}
+          {isRecording ? (
+            <View className="rounded-full border border-destructive/30 bg-destructive/10 px-2 py-0.5">
+              <Text className="text-[10px] font-semibold uppercase tracking-control text-destructive">● REC</Text>
             </View>
           ) : null}
         </View>
@@ -396,6 +417,21 @@ function ChannelPermissionCard({
           </View>
         ) : null}
 
+        <Pressable
+          accessibilityRole="button"
+          className="flex-row items-center justify-center gap-2 rounded-xl border border-border bg-secondary px-4 py-2"
+          onPress={onChat}
+        >
+          <Text className="text-xs font-semibold uppercase tracking-control text-foreground">
+            {String.fromCodePoint(0x1f4ac)} Chat
+          </Text>
+          {unreadCount > 0 ? (
+            <View className="h-5 min-w-[20px] items-center justify-center rounded-full bg-destructive px-1">
+              <Text className="text-[10px] font-bold text-white">{unreadCount}</Text>
+            </View>
+          ) : null}
+        </Pressable>
+
         <View className="gap-2">
           <View className="flex-row items-center justify-between">
             <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
@@ -421,6 +457,9 @@ function ChannelPermissionCard({
 }
 
 export default function App() {
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const isLandscape = windowWidth > windowHeight;
+  const isTablet = Math.min(windowWidth, windowHeight) >= 600;
   const [state, setState] = useState<ViewState>(initialState);
   const [serverUrlInput, setServerUrlInput] = useState("");
   const [username, setUsername] = useState("");
@@ -447,6 +486,7 @@ export default function App() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileNotice, setProfileNotice] = useState<string>();
   const [allPageActive, setAllPageActive] = useState<{ userId: string; username: string } | undefined>();
+  const [recordingActiveIds, setRecordingActiveIds] = useState<string[]>([]);
   const [incomingSignals, setIncomingSignals] = useState<Array<{ signalId: string; signalType: CallSignalType; fromUsername: string; targetChannelId?: string }>>([]);
   const [onlineUsers, setOnlineUsers] = useState<Array<{ id: string; username: string }>>([]);
   const [directCall, setDirectCall] = useState<{
@@ -472,6 +512,11 @@ export default function App() {
   const [voxThreshold, setVoxThreshold] = useState(15);
   const [preflightStep, setPreflightStep] = useState<"idle" | "recording" | "done">("idle");
   const [preflightPassed, setPreflightPassed] = useState<boolean | undefined>();
+  const [chatMessages, setChatMessages] = useState<Record<string, ChatMessagePayload[]>>({});
+  const [chatOpen, setChatOpen] = useState<string | null>(null);
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  const [chatInput, setChatInput] = useState("");
+  const chatListRef = useRef<FlatList<ChatMessagePayload>>(null);
   const androidNotificationIdRef = useRef<string | undefined>(undefined);
   const mediaControllerRef = useRef<ReturnType<typeof createMobileMediaController> | null>(null);
   const realtimeClientRef = useRef<CueCommXRealtimeClient | null>(null);
@@ -702,10 +747,12 @@ export default function App() {
           return;
         }
 
-        setState((current) => ({
-          ...current,
-          realtimeState,
-        }));
+        setState((current) => {
+          if (current.realtimeState === "connected" && realtimeState !== "connected") {
+            queueHapticFeedback(() => triggerConnectionLostHaptic());
+          }
+          return { ...current, realtimeState };
+        });
       },
       onError: (error) => {
         if (!active) {
@@ -790,6 +837,7 @@ export default function App() {
 
         if (message.type === "allpage:active") {
           setAllPageActive(message.payload);
+          queueHapticFeedback(() => triggerAllPageHaptic());
         }
 
         if (message.type === "allpage:inactive") {
@@ -806,6 +854,7 @@ export default function App() {
               targetChannelId: message.payload.targetChannelId,
             },
           ]);
+          queueHapticFeedback(() => triggerCallSignalHaptic());
         }
 
         if (message.type === "signal:cleared") {
@@ -822,6 +871,7 @@ export default function App() {
             fromUserId: message.payload.fromUserId,
             fromUsername: message.payload.fromUsername,
           });
+          queueHapticFeedback(() => triggerDirectCallHaptic());
         }
 
         if (message.type === "direct:active") {
@@ -849,6 +899,35 @@ export default function App() {
 
         if (message.type === "ifb:inactive") {
           setIFBState(null);
+        }
+
+        if (message.type === "chat:message") {
+          const msg = message.payload;
+          setChatMessages((prev) => {
+            const channelMsgs = prev[msg.channelId] ?? [];
+            return { ...prev, [msg.channelId]: [...channelMsgs, msg] };
+          });
+          setChatOpen((openChannel) => {
+            if (openChannel !== msg.channelId) {
+              setUnreadCounts((prev) => ({
+                ...prev,
+                [msg.channelId]: (prev[msg.channelId] ?? 0) + 1,
+              }));
+              Vibration.vibrate(50);
+            }
+            return openChannel;
+          });
+        }
+
+        if (message.type === "chat:history") {
+          setChatMessages((prev) => ({
+            ...prev,
+            [message.payload.channelId]: message.payload.messages,
+          }));
+        }
+
+        if (message.type === "recording:state") {
+          setRecordingActiveIds(message.payload.activeChannelIds);
         }
       },
       sessionToken: state.session.sessionToken,
@@ -1242,6 +1321,49 @@ export default function App() {
     }
 
     return realtimeClientRef.current;
+  }
+
+  function sendChatMessage(channelId: string): void {
+    const text = chatInput.trim();
+    const realtimeClient = realtimeClientRef.current;
+
+    if (!text || !realtimeClient) {
+      return;
+    }
+
+    realtimeClient.sendChatMessage(channelId, text);
+    setChatInput("");
+  }
+
+  function openChat(channelId: string): void {
+    setChatOpen(channelId);
+    setUnreadCounts((prev) => {
+      const next = { ...prev };
+      delete next[channelId];
+      return next;
+    });
+  }
+
+  function formatRelativeTime(timestamp: number): string {
+    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+
+    if (seconds < 60) {
+      return "now";
+    }
+
+    const minutes = Math.floor(seconds / 60);
+
+    if (minutes < 60) {
+      return `${minutes}m ago`;
+    }
+
+    const hours = Math.floor(minutes / 60);
+
+    if (hours < 24) {
+      return `${hours}h ago`;
+    }
+
+    return `${Math.floor(hours / 24)}d ago`;
   }
 
   function handleToggleListen(channelId: string, listening: boolean): void {
@@ -2191,12 +2313,22 @@ export default function App() {
                     </SectionCard>
                   ) : null}
 
-                  <View className="gap-3">
+                  <View className="gap-3" style={isLandscape || isTablet ? { flexDirection: "row", flexWrap: "wrap" } : undefined}>
                     {visibleChannels.map((channel) => {
                       const permission = findPermission(assignedPermissions, channel.id);
                       const chInfo = channel as ChannelInfo;
 
                       return (
+                        <View
+                          key={channel.id}
+                          style={
+                            isTablet
+                              ? { width: "31%", marginRight: "2%" }
+                              : isLandscape
+                                ? { width: "48%", marginRight: "2%" }
+                                : undefined
+                          }
+                        >
                         <ChannelPermissionCard
                           channelType={chInfo.channelType}
                           connected={state.realtimeState === "connected"}
@@ -2208,11 +2340,12 @@ export default function App() {
                           isListening={
                             state.operatorState?.listenChannelIds.includes(channel.id) ?? false
                           }
+                          isRecording={recordingActiveIds.includes(channel.id)}
                           isSource={chInfo.sourceUserId === state.session?.user.id}
                           isTalking={state.operatorState?.talkChannelIds.includes(channel.id) ?? false}
                           isVoxMode={voxEnabled}
-                          key={channel.id}
                           name={channel.name}
+                          onChat={() => openChat(channel.id)}
                           onSignal={
                             isAdminOrOperator
                               ? (signalType) => realtimeClientRef.current?.sendCallSignal(signalType, { channelId: channel.id })
@@ -2237,8 +2370,10 @@ export default function App() {
                           role={state.session?.user.role}
                           talkReady={audioReady}
                           talkMode={talkMode}
+                          unreadCount={unreadCounts[channel.id] ?? 0}
                           volumePercent={channelVolumes[channel.id] ?? 100}
                         />
+                        </View>
                       );
                     })}
                   </View>
@@ -2299,6 +2434,80 @@ export default function App() {
             </View>
           )}
         </KeyboardAvoidingView>
+
+        <Modal
+          animationType="slide"
+          onRequestClose={() => setChatOpen(null)}
+          transparent={false}
+          visible={chatOpen !== null}
+        >
+          <SafeAreaView className="flex-1 bg-background">
+            <KeyboardAvoidingView
+              behavior={Platform.OS === "ios" ? "padding" : "height"}
+              className="flex-1"
+            >
+              <View className="flex-row items-center justify-between border-b border-border px-4 py-3">
+                <View className="flex-row items-center gap-2">
+                  <Text className="text-base">{String.fromCodePoint(0x1f4ac)}</Text>
+                  <Text className="text-base font-semibold text-foreground">
+                    {activeChannels.find((c) => c.id === chatOpen)?.name ?? chatOpen ?? "Chat"}
+                  </Text>
+                </View>
+                <Pressable accessibilityRole="button" onPress={() => setChatOpen(null)}>
+                  <Text className="text-sm font-semibold text-primary">Close</Text>
+                </Pressable>
+              </View>
+              <FlatList<ChatMessagePayload>
+                ref={chatListRef}
+                className="flex-1 px-4"
+                contentContainerStyle={{ paddingVertical: 12 }}
+                data={chatOpen ? (chatMessages[chatOpen] ?? []) : []}
+                keyExtractor={(item) => item.id}
+                ListEmptyComponent={
+                  <View className="items-center pt-8">
+                    <Text className="text-sm text-muted-foreground">No messages yet. Start the conversation!</Text>
+                  </View>
+                }
+                onContentSizeChange={() => chatListRef.current?.scrollToEnd({ animated: true })}
+                renderItem={({ item }) => (
+                  <View className={`mb-3 ${item.messageType === "system" ? "items-center" : ""}`}>
+                    {item.messageType === "system" ? (
+                      <Text className="text-xs italic text-muted-foreground">{item.text}</Text>
+                    ) : (
+                      <View>
+                        <View className="flex-row items-baseline gap-2">
+                          <Text className="text-xs font-semibold text-foreground">{item.username}</Text>
+                          <Text className="text-[10px] text-muted-foreground">{formatRelativeTime(item.timestamp)}</Text>
+                        </View>
+                        <Text className="text-sm text-foreground">{item.text}</Text>
+                      </View>
+                    )}
+                  </View>
+                )}
+              />
+              <View className="flex-row items-center gap-2 border-t border-border px-4 py-3">
+                <TextInput
+                  className="flex-1 rounded-lg border border-border bg-secondary px-3 py-2 text-sm text-foreground"
+                  maxLength={500}
+                  onChangeText={setChatInput}
+                  onSubmitEditing={() => chatOpen && sendChatMessage(chatOpen)}
+                  placeholder="Type a message..."
+                  placeholderTextColor="#6b7280"
+                  returnKeyType="send"
+                  value={chatInput}
+                />
+                <Pressable
+                  accessibilityRole="button"
+                  className={`rounded-lg bg-primary px-4 py-2 ${!chatInput.trim() ? "opacity-50" : ""}`}
+                  disabled={!chatInput.trim()}
+                  onPress={() => chatOpen && sendChatMessage(chatOpen)}
+                >
+                  <Text className="text-sm font-semibold text-primary-foreground">Send</Text>
+                </Pressable>
+              </View>
+            </KeyboardAvoidingView>
+          </SafeAreaView>
+        </Modal>
       </SafeAreaView>
     </SafeAreaProvider>
   );

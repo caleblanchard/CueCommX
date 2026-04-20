@@ -40,6 +40,18 @@ export const DEFAULT_DUCKING_SETTINGS: DuckingSettings = {
   level: 30,
 };
 
+export interface NotificationPreferences {
+  enabled: boolean;
+  enabledEvents: Record<string, boolean>;
+  volume: number;
+}
+
+export const DEFAULT_NOTIFICATION_PREFS: NotificationPreferences = {
+  enabled: true,
+  enabledEvents: {},
+  volume: 50,
+};
+
 export interface WebClientPreferences {
   activeGroupId?: string;
   audioProcessing: AudioProcessingPreferences;
@@ -48,6 +60,7 @@ export interface WebClientPreferences {
   ducking: DuckingSettings;
   latchModeChannelIds: string[];
   masterVolume: number;
+  notifications: NotificationPreferences;
   preferredListenChannelIds: string[];
   selectedInputDeviceId: string;
   sidetone: SidetoneSettings;
@@ -76,6 +89,7 @@ export const DEFAULT_WEB_CLIENT_PREFERENCES: WebClientPreferences = {
   ducking: { ...DEFAULT_DUCKING_SETTINGS },
   latchModeChannelIds: [],
   masterVolume: 100,
+  notifications: { ...DEFAULT_NOTIFICATION_PREFS },
   preferredListenChannelIds: [],
   selectedInputDeviceId: "",
   sidetone: { ...DEFAULT_SIDETONE_SETTINGS },
@@ -187,6 +201,31 @@ function toDuckingSettings(value: unknown): DuckingSettings {
   };
 }
 
+function toNotificationPrefs(value: unknown): NotificationPreferences {
+  if (typeof value !== "object" || value === null) {
+    return { ...DEFAULT_NOTIFICATION_PREFS };
+  }
+
+  const obj = value as Record<string, unknown>;
+  let enabledEvents: Record<string, boolean> = {};
+
+  if (typeof obj.enabledEvents === "object" && obj.enabledEvents !== null) {
+    enabledEvents = Object.fromEntries(
+      Object.entries(obj.enabledEvents as Record<string, unknown>)
+        .filter((entry): entry is [string, boolean] => typeof entry[1] === "boolean"),
+    );
+  }
+
+  return {
+    enabled: typeof obj.enabled === "boolean" ? obj.enabled : DEFAULT_NOTIFICATION_PREFS.enabled,
+    enabledEvents,
+    volume:
+      typeof obj.volume === "number" && Number.isFinite(obj.volume)
+        ? Math.max(0, Math.min(100, Math.round(obj.volume)))
+        : DEFAULT_NOTIFICATION_PREFS.volume,
+  };
+}
+
 export function parseWebClientPreferences(input: string | null | undefined): WebClientPreferences {
   if (!input) {
     return DEFAULT_WEB_CLIENT_PREFERENCES;
@@ -201,6 +240,7 @@ export function parseWebClientPreferences(input: string | null | undefined): Web
       ducking?: unknown;
       latchModeChannelIds?: unknown;
       masterVolume?: unknown;
+      notifications?: unknown;
       preferredListenChannelIds?: unknown;
       selectedInputDeviceId?: unknown;
       sidetone?: unknown;
@@ -222,6 +262,7 @@ export function parseWebClientPreferences(input: string | null | undefined): Web
         typeof parsed.masterVolume === "number" && Number.isFinite(parsed.masterVolume)
           ? clampPercent(parsed.masterVolume)
           : DEFAULT_WEB_CLIENT_PREFERENCES.masterVolume,
+      notifications: toNotificationPrefs(parsed.notifications),
       preferredListenChannelIds: toStringArray(parsed.preferredListenChannelIds),
       selectedInputDeviceId:
         typeof parsed.selectedInputDeviceId === "string" ? parsed.selectedInputDeviceId : "",

@@ -719,6 +719,18 @@ export class DatabaseService {
   }
 
   private migrate(): void {
+    const channelsTableExists = this.connection
+      .prepare("SELECT 1 as present FROM sqlite_master WHERE type = 'table' AND name = 'channels'")
+      .get() as { present: 1 } | undefined;
+
+    if (channelsTableExists) {
+      const existingColumns = this.connection.pragma("table_info(channels)") as Array<{ name: string }>;
+
+      if (!existingColumns.some((column) => column.name === "priority")) {
+        this.connection.exec("ALTER TABLE channels ADD COLUMN priority INTEGER NOT NULL DEFAULT 5");
+      }
+    }
+
     const schema = readFileSync(new URL("./schema.sql", import.meta.url), "utf8");
     this.connection.exec(schema);
 
@@ -732,9 +744,6 @@ export class DatabaseService {
     }
     if (!columns.some((c) => c.name === "source_user_id")) {
       this.connection.exec("ALTER TABLE channels ADD COLUMN source_user_id TEXT");
-    }
-    if (!columns.some((c) => c.name === "priority")) {
-      this.connection.exec("ALTER TABLE channels ADD COLUMN priority INTEGER NOT NULL DEFAULT 5");
     }
     this.connection.exec("UPDATE channels SET priority = 8 WHERE id = 'ch-production' AND priority = 5");
 

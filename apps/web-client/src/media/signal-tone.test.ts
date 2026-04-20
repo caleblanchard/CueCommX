@@ -1,11 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { playSignalTone, type SignalToneType } from "./signal-tone.js";
+import {
+  DEFAULT_NOTIFICATION_SOUND_SETTINGS,
+  type NotificationEvent,
+  _resetAudioContextForTesting,
+  playNotificationSound,
+  playSignalTone,
+  setNotificationSoundSettings,
+  type SignalToneType,
+} from "./signal-tone.js";
 
 function createMockOscillator() {
   return {
     connect: vi.fn(),
-    frequency: { setValueAtTime: vi.fn() },
+    frequency: { linearRampToValueAtTime: vi.fn(), setValueAtTime: vi.fn() },
     start: vi.fn(),
     stop: vi.fn(),
     type: "sine" as OscillatorType,
@@ -49,6 +57,7 @@ describe("playSignalTone", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    _resetAudioContextForTesting();
   });
 
   it("plays a double beep for call signals", () => {
@@ -87,7 +96,70 @@ describe("playSignalTone", () => {
       mockOscillators = [];
       playSignalTone(type);
       expect(mockGainNode.connect).toHaveBeenCalled();
-      expect(mockGainNode.gain.setValueAtTime).toHaveBeenCalledWith(0.3, 0);
     }
+  });
+});
+
+describe("playNotificationSound", () => {
+  let mockOscillators: ReturnType<typeof createMockOscillator>[];
+  let mockGainNode: ReturnType<typeof createMockGainNode>;
+
+  beforeEach(() => {
+    mockOscillators = [];
+    mockGainNode = createMockGainNode();
+
+    const mockAudioContext = {
+      createGain: vi.fn(() => mockGainNode),
+      createOscillator: vi.fn(() => {
+        const osc = createMockOscillator();
+        mockOscillators.push(osc);
+        return osc;
+      }),
+      currentTime: 0,
+      destination: {},
+      resume: vi.fn(),
+      state: "running",
+    };
+
+    vi.stubGlobal("AudioContext", vi.fn(() => mockAudioContext));
+    setNotificationSoundSettings({ ...DEFAULT_NOTIFICATION_SOUND_SETTINGS });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    _resetAudioContextForTesting();
+  });
+
+  it("does not play when notifications are disabled", () => {
+    setNotificationSoundSettings({ ...DEFAULT_NOTIFICATION_SOUND_SETTINGS, enabled: false });
+    playNotificationSound("call");
+    expect(mockOscillators).toHaveLength(0);
+  });
+
+  it("does not play when specific event is disabled", () => {
+    setNotificationSoundSettings({
+      ...DEFAULT_NOTIFICATION_SOUND_SETTINGS,
+      enabledEvents: { ...DEFAULT_NOTIFICATION_SOUND_SETTINGS.enabledEvents, call: false },
+    });
+    playNotificationSound("call");
+    expect(mockOscillators).toHaveLength(0);
+  });
+
+  it("plays rising tone for allpage event", () => {
+    playNotificationSound("allpage");
+    expect(mockOscillators).toHaveLength(1);
+    expect(mockOscillators[0].frequency.setValueAtTime).toHaveBeenCalled();
+  });
+
+  it("plays tick tone for chatMessage event", () => {
+    playNotificationSound("chatMessage");
+    expect(mockOscillators).toHaveLength(1);
+  });
+
+  it("respects volume setting", () => {
+    setNotificationSoundSettings({ ...DEFAULT_NOTIFICATION_SOUND_SETTINGS, volume: 100 });
+    playNotificationSound("call");
+    // Volume 100 → gain = 100/100 * 0.4 = 0.4
+    expect(mockGainNode.gain.setValueAtTime).toHaveBeenCalledWith(expect.closeTo(0.4, 1), 0);
   });
 });

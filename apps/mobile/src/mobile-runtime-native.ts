@@ -158,3 +158,26 @@ export async function triggerTalkHaptic(action: "mode" | "start" | "stop"): Prom
       : Haptics.ImpactFeedbackStyle.Light,
   );
 }
+
+export async function triggerCallSignalHaptic(): Promise<void> {
+  await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+}
+
+export async function triggerAllPageHaptic(): Promise<void> {
+  // Double impact for all-page — heavy + slight delay + heavy
+  await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+  await new Promise((r) => setTimeout(r, 100));
+  await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+}
+
+export async function triggerDirectCallHaptic(): Promise<void> {
+  await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+}
+
+export async function triggerConnectionLostHaptic(): Promise<void> {
+  await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+}
+
+export async function triggerMessageHaptic(): Promise<void> {
+  await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+}

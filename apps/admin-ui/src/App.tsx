@@ -247,6 +247,11 @@ export default function App() {
   const [editingGroupId, setEditingGroupId] = useState<string | undefined>();
   const [groupName, setGroupName] = useState("");
   const [groupChannelIds, setGroupChannelIds] = useState<string[]>([]);
+  const [recordingActiveIds, setRecordingActiveIds] = useState<string[]>([]);
+  const [recordingPendingId, setRecordingPendingId] = useState<string | undefined>();
+  const [savedRecordings, setSavedRecordings] = useState<{ filename: string; channelName: string; date: string; sizeBytes: number }[]>([]);
+  const [recordingsLoading, setRecordingsLoading] = useState(false);
+  const [pruneDays, setPruneDays] = useState(30);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -454,6 +459,10 @@ export default function App() {
                 }
               : current.status,
           }));
+        }
+
+        if (message.type === "recording:state") {
+          setRecordingActiveIds(message.payload.activeChannelIds);
         }
       },
       sessionToken: state.session.sessionToken,
@@ -1063,6 +1072,84 @@ export default function App() {
   const multipleDetectedInterfaces = (state.discovery?.detectedInterfaces.length ?? 0) > 1;
   const suggestedAnnouncedHost =
     state.discovery?.announcedHost ?? state.discovery?.detectedInterfaces[0]?.address;
+
+  async function handleStartRecording(channelId: string): Promise<void> {
+    if (!state.session) return;
+    setRecordingPendingId(channelId);
+    try {
+      await fetch("/api/admin/recording/start", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${state.session.sessionToken}`,
+        },
+        body: JSON.stringify({ channelId }),
+      });
+    } catch { /* never crash */ }
+    setRecordingPendingId(undefined);
+  }
+
+  async function handleStopRecording(channelId: string): Promise<void> {
+    if (!state.session) return;
+    setRecordingPendingId(channelId);
+    try {
+      await fetch("/api/admin/recording/stop", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${state.session.sessionToken}`,
+        },
+        body: JSON.stringify({ channelId }),
+      });
+    } catch { /* never crash */ }
+    setRecordingPendingId(undefined);
+  }
+
+  async function loadSavedRecordings(): Promise<void> {
+    if (!state.session) return;
+    setRecordingsLoading(true);
+    try {
+      const response = await fetch("/api/admin/recordings", {
+        headers: { Authorization: `Bearer ${state.session.sessionToken}` },
+      });
+      if (response.ok) {
+        setSavedRecordings(await response.json());
+      }
+    } catch { /* never crash */ }
+    setRecordingsLoading(false);
+  }
+
+  async function handleDeleteRecording(filename: string): Promise<void> {
+    if (!state.session) return;
+    try {
+      await fetch(`/api/admin/recordings/${encodeURIComponent(filename)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${state.session.sessionToken}` },
+      });
+      await loadSavedRecordings();
+    } catch { /* never crash */ }
+  }
+
+  async function handlePruneRecordings(): Promise<void> {
+    if (!state.session) return;
+    try {
+      await fetch("/api/admin/recordings", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${state.session.sessionToken}`,
+        },
+        body: JSON.stringify({ olderThanDays: pruneDays }),
+      });
+      await loadSavedRecordings();
+    } catch { /* never crash */ }
+  }
+
+  function formatFileSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
 
   return (
     <main className="min-h-screen">
@@ -1774,6 +1861,154 @@ export default function App() {
                   )}
                 </CardContent>
               </Card>
+
+              {state.session ? (
+                <Card>
+                  <CardHeader>
+                    <CardDescription>Session logging</CardDescription>
+                    <CardTitle>Recording</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-3">
+                      {state.channels.map((channel) => {
+                        const isActive = recordingActiveIds.includes(channel.id);
+                        const isPending = recordingPendingId === channel.id;
+
+                        return (
+                          <div
+                            className="flex items-center justify-between rounded-xl border border-border/60 bg-background/35 px-4 py-3"
+                            key={channel.id}
+                          >
+                            <div className="flex items-center gap-3">
+                              <span
+                                aria-hidden="true"
+                                className="h-3 w-3 rounded-full"
+                                style={{ backgroundColor: channel.color }}
+                              />
+                              <span className="text-sm font-medium text-foreground">
+                                {channel.name}
+                              </span>
+                              {isActive ? (
+                                <span className="flex items-center gap-1.5 text-xs font-semibold text-danger">
+                                  <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-danger" />
+                                  REC
+                                </span>
+                              ) : null}
+                            </div>
+                            {isActive ? (
+                              <Button
+                                disabled={isPending}
+                                onClick={() => void handleStopRecording(channel.id)}
+                                size="sm"
+                                type="button"
+                                variant="danger"
+                              >
+                                {isPending ? "Stopping…" : "Stop"}
+                              </Button>
+                            ) : (
+                              <Button
+                                disabled={isPending}
+                                onClick={() => void handleStartRecording(channel.id)}
+                                size="sm"
+                                type="button"
+                                variant="outline"
+                              >
+                                {isPending ? "Starting…" : "⏺ Record"}
+                              </Button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <Separator.Root
+                      className="h-px w-full bg-border/60"
+                      decorative
+                      orientation="horizontal"
+                    />
+
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-semibold text-foreground">Saved recordings</h4>
+                        <Button
+                          onClick={() => void loadSavedRecordings()}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          {recordingsLoading ? "Loading…" : "Refresh"}
+                        </Button>
+                      </div>
+
+                      {savedRecordings.length > 0 ? (
+                        <div className="space-y-2">
+                          {savedRecordings.map((rec) => (
+                            <div
+                              className="flex items-center justify-between rounded-lg border border-border/40 bg-background/30 px-3 py-2 text-sm"
+                              key={rec.filename}
+                            >
+                              <div className="min-w-0 space-y-0.5">
+                                <p className="truncate font-medium text-foreground">
+                                  {rec.channelName}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {rec.date} • {formatFileSize(rec.sizeBytes)}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <a
+                                  className="inline-flex h-7 items-center rounded-md border border-border px-2 text-xs font-medium text-foreground hover:bg-muted"
+                                  download={rec.filename}
+                                  href={`/api/admin/recordings/${encodeURIComponent(rec.filename)}`}
+                                >
+                                  ↓
+                                </a>
+                                <Button
+                                  onClick={() => void handleDeleteRecording(rec.filename)}
+                                  size="sm"
+                                  type="button"
+                                  variant="danger"
+                                >
+                                  ×
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          {recordingsLoading
+                            ? "Loading recordings…"
+                            : "No saved recordings. Click Refresh to load."}
+                        </p>
+                      )}
+
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs text-muted-foreground" htmlFor="prune-days">
+                          Prune older than
+                        </label>
+                        <input
+                          className="h-8 w-16 rounded-md border border-border bg-background/70 px-2 text-center text-sm text-foreground"
+                          id="prune-days"
+                          min={1}
+                          onChange={(event) => setPruneDays(Number(event.target.value) || 30)}
+                          type="number"
+                          value={pruneDays}
+                        />
+                        <span className="text-xs text-muted-foreground">days</span>
+                        <Button
+                          onClick={() => void handlePruneRecordings()}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          Prune
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : null}
 
               <Card>
                 <CardHeader>

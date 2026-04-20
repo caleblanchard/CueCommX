@@ -269,6 +269,53 @@ export const OnlineUsersMessageSchema = z.object({
 });
 export type OnlineUsersMessage = z.infer<typeof OnlineUsersMessageSchema>;
 
+// --- Text Chat messages ---
+
+export const ChatMessagePayloadSchema = z.object({
+  id: z.string().min(1),
+  channelId: z.string().min(1),
+  userId: z.string().min(1),
+  username: z.string().min(1),
+  text: z.string().min(1),
+  timestamp: z.number(),
+  messageType: z.enum(["text", "system"]),
+});
+export type ChatMessagePayload = z.infer<typeof ChatMessagePayloadSchema>;
+
+export const ChatSendMessageSchema = z.object({
+  type: z.literal("chat:send"),
+  payload: z.object({
+    channelId: z.string().min(1),
+    text: z.string().min(1).max(500),
+  }),
+});
+export type ChatSendMessage = z.infer<typeof ChatSendMessageSchema>;
+
+export const ChatMessageReceivedSchema = z.object({
+  type: z.literal("chat:message"),
+  payload: ChatMessagePayloadSchema,
+});
+export type ChatMessageReceived = z.infer<typeof ChatMessageReceivedSchema>;
+
+export const ChatHistoryMessageSchema = z.object({
+  type: z.literal("chat:history"),
+  payload: z.object({
+    channelId: z.string().min(1),
+    messages: z.array(ChatMessagePayloadSchema),
+  }),
+});
+export type ChatHistoryMessage = z.infer<typeof ChatHistoryMessageSchema>;
+
+// --- Recording state messages ---
+
+export const RecordingStateMessageSchema = z.object({
+  type: z.literal("recording:state"),
+  payload: z.object({
+    activeChannelIds: z.array(z.string()),
+  }),
+});
+export type RecordingStateMessage = z.infer<typeof RecordingStateMessageSchema>;
+
 // --- Talk messages ---
 
 export const TalkStartMessageSchema = z.object({
@@ -346,6 +393,7 @@ export const ClientSignalingMessageSchema = z.discriminatedUnion("type", [
   DirectCallEndMessageSchema,
   IFBStartMessageSchema,
   IFBStopMessageSchema,
+  ChatSendMessageSchema,
   MediaCapabilitiesRequestMessageSchema,
   MediaTransportCreateRequestMessageSchema,
   MediaTransportConnectRequestMessageSchema,
@@ -373,6 +421,9 @@ export const ServerSignalingMessageSchema = z.discriminatedUnion("type", [
   OnlineUsersMessageSchema,
   IFBActiveMessageSchema,
   IFBInactiveMessageSchema,
+  RecordingStateMessageSchema,
+  ChatMessageReceivedSchema,
+  ChatHistoryMessageSchema,
   MediaCapabilitiesMessageSchema,
   MediaTransportCreatedMessageSchema,
   MediaTransportConnectedMessageSchema,
@@ -420,6 +471,10 @@ export const SignalingMessageSchema = z.discriminatedUnion("type", [
   IFBStopMessageSchema,
   IFBActiveMessageSchema,
   IFBInactiveMessageSchema,
+  RecordingStateMessageSchema,
+  ChatSendMessageSchema,
+  ChatMessageReceivedSchema,
+  ChatHistoryMessageSchema,
   MediaCapabilitiesRequestMessageSchema,
   MediaCapabilitiesMessageSchema,
   MediaTransportCreateRequestMessageSchema,

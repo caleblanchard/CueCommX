@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import type { IncomingMessage, Server as HttpServer } from "node:http";
 import type { Server as HttpsServer } from "node:https";
@@ -7,6 +8,7 @@ import type { Socket } from "node:net";
 import {
   type AdminDashboardSnapshot,
   type CallSignalType,
+  type ChatMessagePayload,
   type ConnectionQuality,
   type PreflightStatus,
   PROTOCOL_VERSION,
@@ -23,6 +25,7 @@ import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { SessionStore } from "../auth/session-store.js";
 import { DatabaseService } from "../db/database.js";
 import type { MediaRequestMessage, MediaSessionContext, RealtimeMediaService } from "../media/service.js";
+import type { RecordingService } from "../recording/service.js";
 
 interface AuthenticatedConnection {
   channels: ChannelInfo[];
@@ -125,14 +128,18 @@ export interface RealtimeServiceOptions {
   maxUsers?: number;
   mediaService?: RealtimeMediaService;
   path?: string;
+  recordingService?: RecordingService;
   sessionStore: SessionStore;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 const DEFAULT_PATH = "/ws";
+const MAX_CHAT_MESSAGES_PER_CHANNEL = 100;
 
 export class RealtimeService {
   private closing = false;
+
+  private readonly chatMessages = new Map<string, ChatMessagePayload[]>();
 
   private readonly connections = new Map<WebSocket, ConnectionRecord>();
 
@@ -326,6 +333,43 @@ export class RealtimeService {
       }
 
       this.broadcastAdminDashboard();
+    }
+  }
+
+  // --- Recording ---
+
+  async startChannelRecording(channelId: string): Promise<void> {
+    const recordingService = this.options.recordingService;
+    if (!recordingService) return;
+
+    const channel = this.options.database.listChannels().find((ch) => ch.id === channelId);
+    if (!channel) return;
+
+    await recordingService.startRecording(channelId, channel.name);
+    this.broadcastRecordingState();
+  }
+
+  async stopChannelRecording(channelId: string): Promise<{ filePath: string; durationMs: number } | undefined> {
+    const recordingService = this.options.recordingService;
+    if (!recordingService) return undefined;
+
+    const result = await recordingService.stopRecording(channelId);
+    this.broadcastRecordingState();
+    return result;
+  }
+
+  broadcastRecordingState(): void {
+    const recordingService = this.options.recordingService;
+    const activeChannelIds = recordingService?.getActiveChannelIds() ?? [];
+
+    const message: ServerSignalingMessage = {
+      type: "recording:state",
+      payload: { activeChannelIds },
+    };
+
+    for (const connection of this.connections.values()) {
+      if (!connection.authenticated) continue;
+      this.sendMessage(connection.socket, message);
     }
   }
 
@@ -927,6 +971,74 @@ export class RealtimeService {
     this.broadcastAdminDashboard();
   }
 
+  private handleChatSend(
+    connection: AuthenticatedConnection,
+    payload: { channelId: string; text: string },
+  ): void {
+    const hasAccess = connection.channels.some((ch) => ch.id === payload.channelId);
+
+    if (!hasAccess) {
+      this.sendSignalError(connection, "forbidden", "You do not have access to this channel.");
+      return;
+    }
+
+    const chatMessage: ChatMessagePayload = {
+      id: randomUUID(),
+      channelId: payload.channelId,
+      userId: connection.user.id,
+      username: connection.user.username,
+      text: payload.text,
+      timestamp: Date.now(),
+      messageType: "text",
+    };
+
+    const messages = this.chatMessages.get(payload.channelId) ?? [];
+    messages.push(chatMessage);
+
+    if (messages.length > MAX_CHAT_MESSAGES_PER_CHANNEL) {
+      messages.splice(0, messages.length - MAX_CHAT_MESSAGES_PER_CHANNEL);
+    }
+
+    this.chatMessages.set(payload.channelId, messages);
+
+    const broadcastMessage: ServerSignalingMessage = {
+      type: "chat:message",
+      payload: chatMessage,
+    };
+
+    for (const record of this.connections.values()) {
+      if (!record.authenticated) {
+        continue;
+      }
+
+      if (!record.authenticated.channels.some((ch) => ch.id === payload.channelId)) {
+        continue;
+      }
+
+      this.sendMessage(record.socket, broadcastMessage);
+    }
+
+    try { this.options.database.logEvent({ event_type: "chat:message", user_id: connection.user.id, username: connection.user.username, channel_id: payload.channelId }); } catch { /* never crash */ }
+  }
+
+  private sendChatHistory(connection: AuthenticatedConnection, socket: WebSocket): void {
+    for (const channel of connection.channels) {
+      const messages = this.chatMessages.get(channel.id);
+
+      if (!messages || messages.length === 0) {
+        continue;
+      }
+
+      this.sendMessage(socket, {
+        type: "chat:history",
+        payload: {
+          channelId: channel.id,
+          messages: [...messages],
+        },
+      });
+    }
+  }
+
   private broadcastOnlineUsers(): void {
     const onlineUsers: Array<{ id: string; username: string }> = [];
 
@@ -1126,6 +1238,10 @@ export class RealtimeService {
         this.options.database.logEvent({ event_type: eventType, user_id: connection.user.id, username: connection.user.username, channel_id: channelId });
       }
     } catch { /* never crash */ }
+
+    try {
+      this.options.recordingService?.logTalkEvent(mode, connection.user.id, connection.user.username, channelIds);
+    } catch { /* never crash */ }
   }
 
   private async authenticateConnection(
@@ -1200,6 +1316,17 @@ export class RealtimeService {
         operatorState: nextState,
       },
     });
+
+    this.sendChatHistory(authenticated, connection.socket);
+
+    // Send current recording state to newly connected client
+    const recordingActiveIds = this.options.recordingService?.getActiveChannelIds() ?? [];
+    if (recordingActiveIds.length > 0) {
+      this.sendMessage(connection.socket, {
+        type: "recording:state",
+        payload: { activeChannelIds: recordingActiveIds },
+      });
+    }
 
     await this.dispatchMediaMessages(
       (await this.options.mediaService?.registerSession(
@@ -1539,6 +1666,11 @@ export class RealtimeService {
 
       if (parsed.type === "ifb:stop") {
         await this.handleIFBStop(connection.authenticated);
+        return;
+      }
+
+      if (parsed.type === "chat:send") {
+        this.handleChatSend(connection.authenticated, parsed.payload);
         return;
       }
 

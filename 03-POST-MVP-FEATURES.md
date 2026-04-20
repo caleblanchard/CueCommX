@@ -961,25 +961,17 @@ Run two CueCommX servers in active/standby configuration. If the primary server 
 
 ---
 
-### 3.9 Audio Recording / Session Logging
+### 3.9 Audio Recording / Session Logging — **IMPLEMENTED**
 
 **Description:**
 Record audio from one or all channels for post-event review, training, or archival.
 
-**Rationale:**
-Useful for training volunteers, reviewing communication during incidents, and archiving productions. Not a core intercom feature but valuable for institutional use.
-
-**Implementation:**
-- Server-side recording using mediasoup's `PlainTransport` to capture RTP
-- Write to Opus or WAV files on disk
-- Per-channel or mixed recording options
-- Start/stop recording via admin panel
-- Storage management: auto-delete after configurable retention period
-- File browser in admin panel for playback/download
-
-**Complexity:** High  
-**Dependencies:** MVP media server  
-**Estimated effort:** 3-4 weeks
+**Implementation (actual):**
+- JSONL-based session logging service (`apps/server/src/recording/service.ts`) captures talk events with timestamps
+- Admin API routes for start/stop recording per channel, list recordings, download, delete, prune old files
+- Real-time `recording:state` WebSocket broadcast shows active recording indicator (● REC badge) on channel cards (web + mobile)
+- Admin UI recording management panel with start/stop controls, file browser, and auto-prune configuration
+- RecordingService with 17 unit tests covering start/stop, concurrent recordings, pruning, sanitization
 
 ---
 
@@ -987,52 +979,36 @@ Useful for training volunteers, reviewing communication during incidents, and ar
 
 ---
 
-### 3.11 Custom Notification Sounds
+### 3.11 Custom Notification Sounds — **IMPLEMENTED**
 
 **Description:**
-Configurable alert tones for different events:
-- Call signal received
-- User came online
-- All-Page activated
-- Text message received
-- Connection lost/restored
+Configurable alert tones for different events.
 
-**Rationale:**
-In a busy production environment, different sounds help users identify events without looking at their screen.
-
-**Implementation:**
-- Bundled set of professional alert tones
-- User-selectable per event type
-- Volume control separate from intercom audio
-- Admin can upload custom sounds
-
-**Complexity:** Low  
-**Dependencies:** Call signaling (1.7)  
-**Estimated effort:** 1 week
+**Implementation (actual):**
+- Web: 11 notification event types (call, standby, go, allpage, chatMessage, connectionLost, connectionRestored, directCall, pttEngage, pttRelease, userOnline) with distinct tone patterns (beep, double, rising, falling, tick, steady)
+- Per-event enable/disable with sensible defaults (PTT engage/release and userOnline off by default)
+- Separate volume control (0-100) independent of intercom audio
+- Settings persisted via web client preferences with full round-trip test coverage
+- Notification settings UI card in web client with master enable toggle, volume slider, and per-event checkboxes
+- 9 unit tests covering tone generation, notification enable/disable, and volume control
 
 ---
 
-### 3.12 Mobile: Haptic Feedback Patterns
+### 3.12 Mobile: Haptic Feedback Patterns — **IMPLEMENTED**
 
 **Description:**
-Custom vibration patterns on mobile devices for different events:
-- Short pulse: call signal
-- Double pulse: All-Page
-- Long vibration: urgent alert
-- Subtle tick: PTT engaged/released
+Custom vibration patterns on mobile devices for different events.
 
-**Rationale:**
-When you can't look at or hear your phone, haptic feedback provides a tactile communication channel.
-
-**Implementation:**
-- iOS: `UIImpactFeedbackGenerator` with varying styles
-- Android: `Vibrator` API with custom patterns
-- Configurable per event type in user settings
-- Can be disabled globally
-
-**Complexity:** Low  
-**Dependencies:** MVP mobile client  
-**Estimated effort:** 3-5 days
+**Implementation (actual):**
+- 5 distinct haptic patterns via expo-haptics:
+  - Call signal → Warning notification (attention-getting)
+  - All-Page → Double heavy impact with 100ms delay (urgent/distinct)
+  - Direct call → Success notification (positive attention)
+  - Connection lost → Error notification (alarm)
+  - Chat message → Light impact (subtle)
+- Existing PTT haptics preserved: Heavy impact on engage, Light on release, Selection for mode/listen toggles
+- All haptics dispatched via `queueHapticFeedback()` with InteractionManager for non-blocking execution
+- Wired to allpage:active, signal:incoming, direct:incoming, and connection lost events
 
 ---
 
@@ -1059,24 +1035,15 @@ Users shouldn't have to unlock their phone and open the app to talk. Quick acces
 
 ---
 
-### 3.14 Landscape Mode & Tablet Layout
+### 3.14 Landscape Mode & Tablet Layout — **IMPLEMENTED**
 
 **Description:**
-Optimized layouts for landscape orientation and tablet-sized screens. Channel strips arranged horizontally (like a mixing console) in landscape.
+Optimized layouts for landscape orientation and tablet-sized screens.
 
-**Rationale:**
-Tablets are commonly used in production environments (iPad mounted to a stand). A landscape layout makes better use of screen real estate.
-
-**Implementation:**
-- Responsive layouts for multiple breakpoints
-- Landscape: horizontal channel strip layout
-- Tablet: side panel for user list and admin controls
-- Web: already responsive via CSS
-- Mobile: orientation detection and layout switching
-
-**Complexity:** Medium  
-**Dependencies:** MVP clients  
-**Estimated effort:** 1-2 weeks
+**Implementation (actual):**
+- Mobile: `useWindowDimensions()` detects landscape (width > height) and tablet (min dimension ≥ 600px)
+- Channel cards wrap in a flex-row grid: 2 columns in landscape, 3 columns on tablets
+- Web: Already responsive via Tailwind CSS `auto-fit` grid and `xl:` breakpoint layouts — no changes needed
 
 ---
 
@@ -1142,40 +1109,21 @@ Houses of worship serve diverse communities. A Spanish, Korean, or Portuguese-sp
 
 ---
 
-### 3.18 Text Chat / Messaging
+### 3.18 Text Chat / Messaging — **IMPLEMENTED**
 
-> **Moved DOWN from Tier 2.** Professional intercom systems are audio-first and do not include text chat. While useful as a supplementary feature for sharing cue sheets or lyrics, it should not distract from core audio functionality development.
+> **Moved DOWN from Tier 2.** Professional intercom systems are audio-first and do not include text chat.
 
 **Description:**
-Per-channel text messaging alongside audio communication. Messages appear as a scrollable chat log within each channel.
+Per-channel text messaging alongside audio communication.
 
-**Rationale:**
-Sometimes you need to communicate without talking (e.g., during a quiet moment in a service, sending lyrics to the slides operator, sharing cue lists). Text is also useful as a fallback when audio quality is poor.
-
-**Implementation:**
-
-Message model:
-```typescript
-interface ChatMessage {
-  id: string;
-  channelId: string;
-  userId: string;
-  username: string;
-  text: string;
-  timestamp: number;
-  type: 'text' | 'system';
-}
-```
-
-- Messages sent via WebSocket signaling (not WebRTC)
-- Server stores recent messages in memory (last 100 per channel) for late-joiners
-- Optional: persist messages to SQLite for session history
-- Client shows unread message count badge per channel
-- Message notification sound/vibrate
-
-**Complexity:** Medium  
-**Dependencies:** MVP signaling  
-**Estimated effort:** 1-2 weeks
+**Implementation (actual):**
+- Protocol: `chat:send` (client→server), `chat:message` (server→client), `chat:history` (server→client on connect) with ChatMessagePayload schema
+- Server: In-memory per-channel message store (capped at 100 messages per channel), history sent on session connect
+- Core: `sendChatMessage()` method on CueCommXRealtimeClient
+- Web: Chat panel with per-channel message log, unread count badges on channel cards, message input with send button
+- Mobile: Full-screen chat modal via React Native Modal with FlatList message display, unread badges, keyboard-aware input
+- Event logging: chat:message events logged to server event log
+- Tests: Protocol schema validation tests for all chat message types
 
 ---
 

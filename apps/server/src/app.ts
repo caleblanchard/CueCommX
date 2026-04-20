@@ -38,6 +38,7 @@ import {
 } from "./discovery/mdns.js";
 import { buildDiscoveryResponse, resolveMediaAnnouncedHost } from "./discovery/targets.js";
 import { CueCommXMediaService, type RealtimeMediaService } from "./media/service.js";
+import { RecordingService } from "./recording/service.js";
 import { RealtimeService } from "./realtime/service.js";
 
 const SERVER_VERSION = "0.1.0";
@@ -144,10 +145,13 @@ export function createApp(options: CreateAppOptions) {
       rtcMinPort: options.config.rtcMinPort,
     });
 
+  const recordingService = new RecordingService();
+
   realtimeService = new RealtimeService({
     database,
     maxUsers: options.config.maxUsers,
     mediaService,
+    recordingService,
     sessionStore,
   });
 
@@ -164,6 +168,7 @@ export function createApp(options: CreateAppOptions) {
 
     configuredApp.addHook("onClose", async () => {
       await mdnsAdvertiser.stop();
+      await recordingService.closeAll();
       await realtimeService.close();
       database.close();
     });
@@ -677,6 +682,122 @@ export function createApp(options: CreateAppOptions) {
       const olderThanDays = typeof body.olderThanDays === "number" ? body.olderThanDays : 30;
 
       const pruned = database.pruneEventLog(olderThanDays);
+
+      return { pruned };
+    });
+
+    // --- Recording endpoints ---
+
+    configuredApp.post("/api/admin/recording/start", async (request, reply) => {
+      const sessionContext = requireAdminSession(request, reply, database, sessionStore);
+      if (!sessionContext) return reply;
+
+      const body = (request.body ?? {}) as { channelId?: string };
+      if (typeof body.channelId !== "string" || !body.channelId) {
+        return reply.code(400).send(createFailureResponse("channelId is required."));
+      }
+
+      const channel = database.listChannels().find((ch) => ch.id === body.channelId);
+      if (!channel) {
+        return reply.code(404).send(createFailureResponse("Channel not found."));
+      }
+
+      try {
+        await realtimeService.startChannelRecording(body.channelId);
+        return { success: true, channelId: body.channelId, channelName: channel.name };
+      } catch (error) {
+        return reply.code(500).send(createFailureResponse("Failed to start recording."));
+      }
+    });
+
+    configuredApp.post("/api/admin/recording/stop", async (request, reply) => {
+      const sessionContext = requireAdminSession(request, reply, database, sessionStore);
+      if (!sessionContext) return reply;
+
+      const body = (request.body ?? {}) as { channelId?: string };
+      if (typeof body.channelId !== "string" || !body.channelId) {
+        return reply.code(400).send(createFailureResponse("channelId is required."));
+      }
+
+      try {
+        const result = await realtimeService.stopChannelRecording(body.channelId);
+        if (!result) {
+          return reply.code(404).send(createFailureResponse("No active recording for that channel."));
+        }
+        return { success: true, filePath: result.filePath, durationMs: result.durationMs };
+      } catch (error) {
+        return reply.code(500).send(createFailureResponse("Failed to stop recording."));
+      }
+    });
+
+    configuredApp.get("/api/admin/recording/active", async (request, reply) => {
+      const sessionContext = requireAdminSession(request, reply, database, sessionStore);
+      if (!sessionContext) return reply;
+
+      return recordingService.getActiveRecordings();
+    });
+
+    configuredApp.get("/api/admin/recordings", async (request, reply) => {
+      const sessionContext = requireAdminSession(request, reply, database, sessionStore);
+      if (!sessionContext) return reply;
+
+      return recordingService.listRecordings();
+    });
+
+    configuredApp.get("/api/admin/recordings/:filename", async (request, reply) => {
+      const sessionContext = requireAdminSession(request, reply, database, sessionStore);
+      if (!sessionContext) return reply;
+
+      const filename =
+        typeof (request.params as { filename?: unknown }).filename === "string"
+          ? (request.params as { filename: string }).filename
+          : undefined;
+
+      if (!filename || !filename.endsWith(".jsonl") || filename.includes("..") || filename.includes("/")) {
+        return reply.code(400).send(createFailureResponse("Invalid filename."));
+      }
+
+      const { createReadStream, existsSync: fileExists } = await import("node:fs");
+      const { join } = await import("node:path");
+      const filePath = join(recordingService.getRecordingsDir(), filename);
+
+      if (!fileExists(filePath)) {
+        return reply.code(404).send(createFailureResponse("Recording file not found."));
+      }
+
+      void reply.header("Content-Type", "application/x-ndjson");
+      void reply.header("Content-Disposition", `attachment; filename="${filename}"`);
+      return reply.send(createReadStream(filePath));
+    });
+
+    configuredApp.delete("/api/admin/recordings/:filename", async (request, reply) => {
+      const sessionContext = requireAdminSession(request, reply, database, sessionStore);
+      if (!sessionContext) return reply;
+
+      const filename =
+        typeof (request.params as { filename?: unknown }).filename === "string"
+          ? (request.params as { filename: string }).filename
+          : undefined;
+
+      if (!filename) {
+        return reply.code(400).send(createFailureResponse("Filename is required."));
+      }
+
+      const deleted = await recordingService.deleteRecording(filename);
+      if (!deleted) {
+        return reply.code(404).send(createFailureResponse("Recording not found or could not be deleted."));
+      }
+
+      return reply.code(204).send();
+    });
+
+    configuredApp.delete("/api/admin/recordings", async (request, reply) => {
+      const sessionContext = requireAdminSession(request, reply, database, sessionStore);
+      if (!sessionContext) return reply;
+
+      const body = (request.body ?? {}) as { olderThanDays?: number };
+      const olderThanDays = typeof body.olderThanDays === "number" ? body.olderThanDays : 30;
+      const pruned = await recordingService.pruneOlderThan(olderThanDays);
 
       return { pruned };
     });

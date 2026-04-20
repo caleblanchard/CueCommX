@@ -5,6 +5,9 @@ import {
   ChannelInfoSchema,
   ChannelMutationResponseSchema,
   ChannelsListResponseSchema,
+  ChatHistoryMessageSchema,
+  ChatMessageReceivedSchema,
+  ChatSendMessageSchema,
   CreateChannelRequestSchema,
   CreateGroupRequestSchema,
   CreateUserRequestSchema,
@@ -929,5 +932,204 @@ describe("user preferences schemas", () => {
   it("accepts SavePreferencesRequestSchema as alias", () => {
     const req = SavePreferencesRequestSchema.parse({ masterVolume: 50 });
     expect(req.masterVolume).toBe(50);
+  });
+
+  it("validates ChatSendMessageSchema", () => {
+    const valid = ChatSendMessageSchema.parse({
+      type: "chat:send",
+      payload: { channelId: "ch-1", text: "Hello" },
+    });
+    expect(valid.payload.channelId).toBe("ch-1");
+    expect(valid.payload.text).toBe("Hello");
+
+    expect(() =>
+      ChatSendMessageSchema.parse({
+        type: "chat:send",
+        payload: { channelId: "", text: "Hello" },
+      }),
+    ).toThrowError();
+
+    expect(() =>
+      ChatSendMessageSchema.parse({
+        type: "chat:send",
+        payload: { channelId: "ch-1", text: "" },
+      }),
+    ).toThrowError();
+
+    expect(() =>
+      ChatSendMessageSchema.parse({
+        type: "chat:send",
+        payload: { channelId: "ch-1", text: "a".repeat(501) },
+      }),
+    ).toThrowError();
+
+    const maxLen = ChatSendMessageSchema.parse({
+      type: "chat:send",
+      payload: { channelId: "ch-1", text: "a".repeat(500) },
+    });
+    expect(maxLen.payload.text).toHaveLength(500);
+
+    const parsed = parseClientSignalingMessage({
+      type: "chat:send",
+      payload: { channelId: "ch-1", text: "test" },
+    });
+    expect(parsed.type).toBe("chat:send");
+
+    const parsedAll = parseSignalingMessage({
+      type: "chat:send",
+      payload: { channelId: "ch-1", text: "test" },
+    });
+    expect(parsedAll.type).toBe("chat:send");
+  });
+
+  it("validates ChatMessageReceivedSchema", () => {
+    const valid = ChatMessageReceivedSchema.parse({
+      type: "chat:message",
+      payload: {
+        id: "msg-1",
+        channelId: "ch-1",
+        userId: "user-1",
+        username: "alice",
+        text: "Hello world",
+        timestamp: 1700000000000,
+        messageType: "text",
+      },
+    });
+    expect(valid.payload.id).toBe("msg-1");
+    expect(valid.payload.messageType).toBe("text");
+
+    expect(() =>
+      ChatMessageReceivedSchema.parse({
+        type: "chat:message",
+        payload: {
+          id: "",
+          channelId: "ch-1",
+          userId: "user-1",
+          username: "alice",
+          text: "Hello",
+          timestamp: 1700000000000,
+          messageType: "text",
+        },
+      }),
+    ).toThrowError();
+
+    expect(() =>
+      ChatMessageReceivedSchema.parse({
+        type: "chat:message",
+        payload: {
+          id: "msg-1",
+          channelId: "ch-1",
+          userId: "user-1",
+          username: "alice",
+          text: "Hello",
+          timestamp: 1700000000000,
+          messageType: "invalid",
+        },
+      }),
+    ).toThrowError();
+
+    const system = ChatMessageReceivedSchema.parse({
+      type: "chat:message",
+      payload: {
+        id: "msg-2",
+        channelId: "ch-1",
+        userId: "system",
+        username: "System",
+        text: "User joined",
+        timestamp: 1700000000000,
+        messageType: "system",
+      },
+    });
+    expect(system.payload.messageType).toBe("system");
+
+    const parsedServer = parseServerSignalingMessage({
+      type: "chat:message",
+      payload: {
+        id: "msg-1",
+        channelId: "ch-1",
+        userId: "user-1",
+        username: "alice",
+        text: "Hello",
+        timestamp: 1700000000000,
+        messageType: "text",
+      },
+    });
+    expect(parsedServer.type).toBe("chat:message");
+  });
+
+  it("validates ChatHistoryMessageSchema", () => {
+    const valid = ChatHistoryMessageSchema.parse({
+      type: "chat:history",
+      payload: {
+        channelId: "ch-1",
+        messages: [
+          {
+            id: "msg-1",
+            channelId: "ch-1",
+            userId: "user-1",
+            username: "alice",
+            text: "Hello",
+            timestamp: 1700000000000,
+            messageType: "text",
+          },
+          {
+            id: "msg-2",
+            channelId: "ch-1",
+            userId: "user-2",
+            username: "bob",
+            text: "Hi there",
+            timestamp: 1700000001000,
+            messageType: "text",
+          },
+        ],
+      },
+    });
+    expect(valid.payload.messages).toHaveLength(2);
+    expect(valid.payload.channelId).toBe("ch-1");
+
+    const empty = ChatHistoryMessageSchema.parse({
+      type: "chat:history",
+      payload: {
+        channelId: "ch-1",
+        messages: [],
+      },
+    });
+    expect(empty.payload.messages).toHaveLength(0);
+
+    expect(() =>
+      ChatHistoryMessageSchema.parse({
+        type: "chat:history",
+        payload: {
+          channelId: "",
+          messages: [],
+        },
+      }),
+    ).toThrowError();
+
+    const parsedServer = parseServerSignalingMessage({
+      type: "chat:history",
+      payload: {
+        channelId: "ch-1",
+        messages: [{
+          id: "msg-1",
+          channelId: "ch-1",
+          userId: "user-1",
+          username: "alice",
+          text: "Test",
+          timestamp: 1700000000000,
+          messageType: "text",
+        }],
+      },
+    });
+    expect(parsedServer.type).toBe("chat:history");
+
+    const parsedAll = parseSignalingMessage({
+      type: "chat:history",
+      payload: {
+        channelId: "ch-1",
+        messages: [],
+      },
+    });
+    expect(parsedAll.type).toBe("chat:history");
   });
 });

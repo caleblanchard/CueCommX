@@ -261,6 +261,13 @@ export class CueCommXRealtimeClient {
     });
   }
 
+  sendChatMessage(channelId: string, text: string): void {
+    this.sendClientMessage({
+      type: "chat:send",
+      payload: { channelId, text },
+    });
+  }
+
   async requestMediaCapabilities(): Promise<MediaRtpCapabilities> {
     const response = await this.sendRequest("media:capabilities", (requestId) => ({
       type: "media:capabilities:get",
