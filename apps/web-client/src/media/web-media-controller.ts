@@ -33,6 +33,20 @@ export interface MediaDeviceOption {
   label: string;
 }
 
+export type BandwidthTier = "good" | "fair" | "poor";
+
+export interface BandwidthTierInfo {
+  tier: BandwidthTier;
+  bitrate: number;
+  fec: boolean;
+}
+
+const BANDWIDTH_TIERS: Record<BandwidthTier, { maxBitrate: number; fec: boolean }> = {
+  good: { maxBitrate: 32_000, fec: false },
+  fair: { maxBitrate: 24_000, fec: true },
+  poor: { maxBitrate: 16_000, fec: true },
+};
+
 export interface RemoteTalkerSnapshot {
   activeChannelIds: string[];
   consumerId: string;
@@ -41,6 +55,7 @@ export interface RemoteTalkerSnapshot {
 }
 
 export interface WebMediaControllerOptions {
+  onBandwidthTierChange?: (info: BandwidthTierInfo) => void;
   onConnectionQualityChange?: (quality: ConnectionQuality | undefined) => void;
   onError?: (error: Error) => void;
   onInputDevicesChange?: (devices: MediaDeviceOption[]) => void;
@@ -463,6 +478,8 @@ export class WebMediaController {
   private audioContext: AudioContext | undefined;
 
   private audioProcessing: AudioProcessingPreferences = { ...DEFAULT_AUDIO_PROCESSING };
+
+  private currentBandwidthTier: BandwidthTier = "good";
 
   private currentInputDeviceId: string | undefined;
 
@@ -946,10 +963,51 @@ export class WebMediaController {
       if (quality) {
         this.options.onConnectionQualityChange?.(quality);
         this.options.realtimeClient.reportConnectionQuality(quality);
+        void this.adaptBandwidth(quality.grade);
       }
     } catch {
       // Stats collection may fail during transport teardown — ignore
     }
+  }
+
+  private async adaptBandwidth(grade: ConnectionQualityGrade): Promise<void> {
+    const targetTier: BandwidthTier = grade === "good" || grade === "excellent"
+      ? "good"
+      : grade === "fair"
+        ? "fair"
+        : "poor";
+
+    if (targetTier === this.currentBandwidthTier || !this.producer) {
+      return;
+    }
+
+    this.currentBandwidthTier = targetTier;
+    const tierConfig = BANDWIDTH_TIERS[targetTier];
+
+    try {
+      const params = this.producer.rtpParameters;
+      if (params.encodings && params.encodings.length > 0) {
+        await this.producer.setMaxSpatialLayer(0);
+        // Update encoding parameters via setRtpEncodingParameters if available,
+        // otherwise update the sender directly
+        const sender = this.producer.rtpSender;
+        if (sender) {
+          const senderParams = sender.getParameters();
+          if (senderParams.encodings && senderParams.encodings.length > 0) {
+            senderParams.encodings[0].maxBitrate = tierConfig.maxBitrate;
+            await sender.setParameters(senderParams);
+          }
+        }
+      }
+    } catch {
+      // Encoding adaptation may fail on some browsers — continue with current settings
+    }
+
+    this.options.onBandwidthTierChange?.({
+      tier: targetTier,
+      bitrate: tierConfig.maxBitrate,
+      fec: tierConfig.fec,
+    });
   }
 
   private startMeter(): void {

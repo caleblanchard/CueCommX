@@ -481,7 +481,7 @@ These features enhance the user experience and add professional capabilities, bu
 
 ---
 
-### 2.3 User Profiles & Presets
+### 2.3 User Profiles & Presets ✅ IMPLEMENTED
 
 **Description:**
 Users can save their preferred settings (volume levels, listen defaults, audio mode, device selection) as a profile that persists between sessions.
@@ -501,7 +501,7 @@ Volunteers at a house of worship use the same device each week. They shouldn't h
 
 ---
 
-### 2.4 Audio Ducking (Priority Channel System)
+### 2.4 Audio Ducking (Priority Channel System) ✅ IMPLEMENTED
 
 **Description:**
 When audio is active on a high-priority channel, audio from lower-priority channels is automatically reduced in volume (ducked). When the priority channel goes silent, other channels return to normal volume.
@@ -549,7 +549,7 @@ class AudioDucker {
 
 ---
 
-### 2.6 Enhanced Audio Level Metering
+### 2.6 Enhanced Audio Level Metering ✅ IMPLEMENTED
 
 **Description:**
 Visual VU meters showing:
@@ -572,7 +572,7 @@ Visual feedback helps users verify their mic is working and at a good level, and
 
 ---
 
-### 2.7 Keyboard Shortcuts & Accessibility
+### 2.7 Keyboard Shortcuts & Accessibility ✅ IMPLEMENTED
 
 **Description:**
 Configurable keyboard shortcuts for the web client:
@@ -609,7 +609,7 @@ const defaultShortcuts = {
 
 ---
 
-### 2.8 Split-Ear Audio (Stereo Channel Panning)
+### 2.8 Split-Ear Audio (Stereo Channel Panning) ✅ IMPLEMENTED
 
 **Description:**
 When using a stereo/dual-ear headset, users can pan individual channels left or right. For example:
@@ -642,7 +642,7 @@ panNode.connect(audioContext.destination);
 
 ---
 
-### 2.10 System Event Logging
+### 2.10 System Event Logging ✅ IMPLEMENTED
 
 **Description:**
 Log all significant system events to a queryable log:
@@ -667,7 +667,7 @@ Post-event review and troubleshooting. "Who was talking on Production when the i
 
 ---
 
-### 2.11 Confidence Monitoring
+### 2.11 Confidence Monitoring ✅ IMPLEMENTED
 
 > **New feature** — essential for worship leaders and pastors who wear IEMs.
 
@@ -689,7 +689,7 @@ In many HoW setups, the pastor or worship leader wears IEMs for their monitor mi
 
 ---
 
-### 2.12 Sidetone
+### 2.12 Sidetone ✅ IMPLEMENTED
 
 > **New feature** — prevents the "talking into a void" feeling when wearing closed-back headphones.
 
@@ -723,7 +723,7 @@ function enableSidetone(micStream: MediaStream, level: number = 0.15) {
 
 ---
 
-### 2.13 Headset Button PTT
+### 2.13 Headset Button PTT ✅ IMPLEMENTED
 
 > **New feature** — critical for mobile users who need hardware PTT without a dedicated intercom belt pack.
 
@@ -747,7 +747,7 @@ Mobile users holding a phone while doing their job (camera op, stage hand) need 
 
 ---
 
-### 2.14 Bandwidth Adaptation
+### 2.14 Bandwidth Adaptation ✅ IMPLEMENTED
 
 > **Moved UP from Tier 3.** Important for WiFi-heavy environments where bandwidth varies.
 

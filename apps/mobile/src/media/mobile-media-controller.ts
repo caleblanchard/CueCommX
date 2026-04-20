@@ -43,12 +43,27 @@ export interface MobileRemoteTalkerSnapshot {
   producerUsername: string;
 }
 
+export type BandwidthTier = "good" | "fair" | "poor";
+
+export interface BandwidthTierInfo {
+  tier: BandwidthTier;
+  bitrate: number;
+  fec: boolean;
+}
+
+const BANDWIDTH_TIERS: Record<BandwidthTier, { maxBitrate: number; fec: boolean }> = {
+  good: { maxBitrate: 32_000, fec: false },
+  fair: { maxBitrate: 24_000, fec: true },
+  poor: { maxBitrate: 16_000, fec: true },
+};
+
 export interface MobileMediaControllerOptions {
   audioConstraints?: {
     noiseSuppression: boolean;
     autoGainControl: boolean;
     echoCancellation: boolean;
   };
+  onBandwidthTierChange?: (info: BandwidthTierInfo) => void;
   onConnectionQualityChange?: (quality: ConnectionQuality | undefined) => void;
   onError?: (error: Error) => void;
   onLocalLevelChange?: (level: number) => void;
@@ -341,6 +356,8 @@ function toMediasoupTransportOptions(
 }
 
 export class MobileMediaController {
+  private currentBandwidthTier: BandwidthTier = "good";
+
   private device: Device | undefined;
 
   private lastEnergySnapshot: AudioEnergySnapshot | undefined;
@@ -684,10 +701,45 @@ export class MobileMediaController {
       if (quality) {
         this.options.onConnectionQualityChange?.(quality);
         this.options.realtimeClient.reportConnectionQuality(quality);
+        void this.adaptBandwidth(quality.grade);
       }
     } catch {
       // Stats collection may fail during transport teardown
     }
+  }
+
+  private async adaptBandwidth(grade: ConnectionQualityGrade): Promise<void> {
+    const targetTier: BandwidthTier = grade === "good" || grade === "excellent"
+      ? "good"
+      : grade === "fair"
+        ? "fair"
+        : "poor";
+
+    if (targetTier === this.currentBandwidthTier || !this.producer) {
+      return;
+    }
+
+    this.currentBandwidthTier = targetTier;
+    const tierConfig = BANDWIDTH_TIERS[targetTier];
+
+    try {
+      const sender = this.producer.rtpSender;
+      if (sender) {
+        const senderParams = sender.getParameters();
+        if (senderParams.encodings && senderParams.encodings.length > 0) {
+          senderParams.encodings[0].maxBitrate = tierConfig.maxBitrate;
+          await sender.setParameters(senderParams);
+        }
+      }
+    } catch {
+      // Encoding adaptation may fail — continue with current settings
+    }
+
+    this.options.onBandwidthTierChange?.({
+      tier: targetTier,
+      bitrate: tierConfig.maxBitrate,
+      fec: tierConfig.fec,
+    });
   }
 
   private extractQualityFromStats(stats: unknown): ConnectionQuality | undefined {
