@@ -30,6 +30,11 @@ const config: CueCommXExpoConfig = {
       },
       NSCameraUsageDescription:
         "Allow CueCommX to use your camera to scan a server connection QR code.",
+      // Required by iOS 14+ so the OS permits mDNS browsing on physical devices.
+      // Without this, Bonjour discovery is silently blocked (Simulator is unaffected).
+      NSLocalNetworkUsageDescription:
+        "CueCommX needs local network access to discover intercom servers on your network.",
+      NSBonjourServices: ["_cuecommx._tcp"],
       UIBackgroundModes: ["audio"],
     },
   },
