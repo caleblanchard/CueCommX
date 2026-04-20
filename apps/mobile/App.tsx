@@ -1933,7 +1933,7 @@ export default function App() {
                       Web-only features
                     </Text>
                     <Text className="text-sm leading-6 text-muted-foreground">
-                      Sidetone (mic monitor) and split-ear stereo panning are available on the web client only. Mobile audio routing does not support these features.
+                      Sidetone (mic monitor), split-ear stereo panning, and headset button PTT are available on the web client only. Native headset button support is planned for a future release.
                     </Text>
                   </SectionCard>
 

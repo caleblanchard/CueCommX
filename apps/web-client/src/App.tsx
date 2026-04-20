@@ -43,6 +43,7 @@ import {
 } from "./components/ui/card.js";
 import { SignalMeter } from "./components/ui/signal-meter.js";
 import {
+  type BandwidthTierInfo,
   createWebMediaController,
   type MediaDeviceOption,
   type RemoteTalkerSnapshot,
@@ -282,6 +283,7 @@ export default function App() {
   const [remoteTalkers, setRemoteTalkers] = useState<RemoteTalkerSnapshot[]>([]);
   const [remoteLevels, setRemoteLevels] = useState<Record<string, number>>({});
   const [connectionQuality, setConnectionQuality] = useState<ConnectionQuality | undefined>(undefined);
+  const [bandwidthTier, setBandwidthTier] = useState<BandwidthTierInfo | undefined>(undefined);
   const [preflightState, setPreflightState] = useState<PreflightState>({
     micLevel: 0,
     passed: undefined,
@@ -345,28 +347,32 @@ export default function App() {
   // Filter visible channels based on active group
   const visibleChannels: ChannelInfo[] = useMemo(() => {
     const allChannels = state.session?.channels ?? [];
+    const nonConfidence = allChannels.filter((ch) => ch.channelType !== "confidence");
 
     if (groups.length === 0 || !activeGroupId) {
-      // No groups or no active group: show all channels (backward compatible)
-      return allChannels;
+      return nonConfidence;
     }
 
     const activeGroup = groups.find((g) => g.id === activeGroupId);
 
     if (!activeGroup) {
-      return allChannels;
+      return nonConfidence;
     }
 
     const groupChannelSet = new Set(activeGroup.channelIds);
 
-    // Global channels first, then group channels
-    const globals = allChannels.filter((ch) => ch.isGlobal);
-    const groupChannels = allChannels.filter(
+    const globals = nonConfidence.filter((ch) => ch.isGlobal);
+    const groupChannels = nonConfidence.filter(
       (ch) => !ch.isGlobal && groupChannelSet.has(ch.id),
     );
 
     return [...globals, ...groupChannels];
   }, [state.session?.channels, groups, activeGroupId]);
+
+  const confidenceChannels: ChannelInfo[] = useMemo(() =>
+    (state.session?.channels ?? []).filter((ch) => ch.channelType === "confidence"),
+    [state.session?.channels],
+  );
   const manualConnect = useMemo(() => getManualConnectState(serverUrlInput), [serverUrlInput]);
   const currentConnectUrl = state.discovery?.primaryUrl ?? window.location.origin;
   const listenChannelIds = state.operatorState?.listenChannelIds ?? [];
@@ -997,6 +1003,20 @@ export default function App() {
     state.session,
   ]);
 
+  // Auto-listen on confidence channels
+  useEffect(() => {
+    if (!state.session || !state.operatorState || state.realtimeState !== "connected") {
+      return;
+    }
+    const currentListenIds = new Set(state.operatorState.listenChannelIds);
+    for (const ch of confidenceChannels) {
+      const perm = assignedPermissions.find((p) => p.channelId === ch.id);
+      if (perm?.canListen && !currentListenIds.has(ch.id)) {
+        realtimeClientRef.current?.toggleListen(ch.id, true);
+      }
+    }
+  }, [assignedPermissions, confidenceChannels, state.operatorState, state.realtimeState, state.session]);
+
   useEffect(() => {
     mediaControllerRef.current?.updateMix({
       activeListenChannelIds: listenChannelIds,
@@ -1052,6 +1072,55 @@ export default function App() {
         setAudioBusy(false);
       });
   }, [audioArmed, audioReady, selectedInputDeviceId, state.realtimeState]);
+
+  // Headset button PTT via Media Session API
+  useEffect(() => {
+    if (!audioReady || state.realtimeState !== "connected" || !state.operatorState) {
+      return;
+    }
+
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: "CueCommX Intercom",
+        artist: state.session?.user.username ?? "Operator",
+      });
+
+      const handleToggle = (): void => {
+        const talkableChannels = visibleChannels.filter((ch) => {
+          const perm = findPermission(assignedPermissions, ch.id);
+          return perm?.canTalk && ch.channelType !== "program" && ch.channelType !== "confidence";
+        });
+        if (talkableChannels.length === 0) return;
+
+        const channelId = talkableChannels[0].id;
+        const isTalking = state.operatorState?.talkChannelIds.includes(channelId);
+
+        if (isTalking) {
+          stopTalk(channelId, true);
+        } else {
+          startTalk(channelId);
+        }
+      };
+
+      try {
+        navigator.mediaSession.setActionHandler("play", handleToggle);
+        navigator.mediaSession.setActionHandler("pause", handleToggle);
+        navigator.mediaSession.setActionHandler("togglemicrophone" as MediaSessionAction, handleToggle);
+      } catch {
+        // Some browsers don't support all action handlers
+      }
+
+      return () => {
+        try {
+          navigator.mediaSession.setActionHandler("play", null);
+          navigator.mediaSession.setActionHandler("pause", null);
+          navigator.mediaSession.setActionHandler("togglemicrophone" as MediaSessionAction, null);
+        } catch {
+          // Cleanup silently
+        }
+      };
+    }
+  });
 
   async function handleLogin(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -2209,6 +2278,62 @@ export default function App() {
                 </div>
               </div>
 
+              {confidenceChannels.length > 0 ? (
+                <div className="space-y-3">
+                  <h3 className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                    <Headphones className="mr-1.5 inline h-3.5 w-3.5" />
+                    Confidence Feeds
+                  </h3>
+                  <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(20rem,1fr))]">
+                    {confidenceChannels.map((channel) => {
+                      const listening = listenChannelIds.includes(channel.id);
+                      const monitorVolume = channelVolumes[channel.id] ?? 100;
+                      return (
+                        <Card className="overflow-hidden" key={channel.id}>
+                          <div className="h-1.5 w-full" style={{ backgroundColor: channel.color }} />
+                          <CardHeader>
+                            <div className="flex items-center justify-between">
+                              <div className="min-w-0 space-y-1">
+                                <CardTitle>{channel.name}</CardTitle>
+                                <p className="text-sm text-muted-foreground">
+                                  Always-on confidence monitor — exempt from ducking and IFB.
+                                </p>
+                              </div>
+                              <Badge variant={listening ? "accent" : "neutral"}>
+                                {listening ? "Listening" : "Idle"}
+                              </Badge>
+                            </div>
+                          </CardHeader>
+                          <CardContent>
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                                <label htmlFor={`confidence-vol-${channel.id}`}>Volume</label>
+                                <span>{monitorVolume}%</span>
+                              </div>
+                              <input
+                                className={sliderClassName}
+                                id={`confidence-vol-${channel.id}`}
+                                max={100}
+                                min={0}
+                                onChange={(event) =>
+                                  setChannelVolumes((current) => ({
+                                    ...current,
+                                    [channel.id]: Number(event.target.value),
+                                  }))
+                                }
+                                step={1}
+                                type="range"
+                                value={monitorVolume}
+                              />
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
               <div className="space-y-4">
                 <Card>
                   <CardHeader>
@@ -2538,6 +2663,10 @@ export default function App() {
                         <span className="text-muted-foreground">Stop all talk</span>
                         <kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">Esc</kbd>
                       </div>
+                      <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/35 px-3 py-2">
+                        <span className="text-muted-foreground">Headset button PTT</span>
+                        <kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">🎧</kbd>
+                      </div>
                     </div>
                     <p className="mt-3 text-xs text-muted-foreground">
                       Shortcuts are active when audio is armed and no input field is focused. Hold number keys for momentary PTT.
@@ -2577,6 +2706,12 @@ export default function App() {
                           {qualityInfo.label}
                         </p>
                         <p className="mt-1 text-sm text-muted-foreground">{qualityInfo.detail}</p>
+                        {bandwidthTier ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Codec: {bandwidthTier.bitrate / 1000}kbps{bandwidthTier.fec ? " +FEC" : ""}
+                            {bandwidthTier.tier !== "good" ? ` (adapted — ${bandwidthTier.tier})` : ""}
+                          </p>
+                        ) : null}
                       </div>
                       <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
                         <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
