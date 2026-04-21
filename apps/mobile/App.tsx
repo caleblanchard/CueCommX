@@ -1,4 +1,5 @@
 import { StatusBar } from "expo-status-bar";
+import * as Notifications from "expo-notifications";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Slider from "@react-native-community/slider";
@@ -121,6 +122,17 @@ const initialState: ViewState = {
   realtimeState: "idle",
   serverLoading: false,
 };
+
+// Configure how incoming local notifications are displayed
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
 
 const inputClassName =
   "min-h-12 rounded-xl border border-border bg-background/70 px-4 py-3 text-base text-foreground";
@@ -558,6 +570,7 @@ export default function App() {
   const [chatInput, setChatInput] = useState("");
   const chatListRef = useRef<FlatList<ChatMessagePayload>>(null);
   const androidNotificationIdRef = useRef<string | undefined>(undefined);
+  const notifPermissionGrantedRef = useRef(false);
   const mediaControllerRef = useRef<ReturnType<typeof createMobileMediaController> | null>(null);
   const realtimeClientRef = useRef<CueCommXRealtimeClient | null>(null);
   const qrScannedRef = useRef(false);
@@ -667,6 +680,13 @@ export default function App() {
 
   useEffect(() => {
     ensureMobileNotificationHandlerRegistered();
+  }, []);
+
+  // Request local notification permission once on mount
+  useEffect(() => {
+    void Notifications.requestPermissionsAsync().then(({ granted }) => {
+      notifPermissionGrantedRef.current = granted;
+    });
   }, []);
 
   useEffect(() => {
@@ -1072,6 +1092,19 @@ export default function App() {
                   [msg.channelId]: (prev[msg.channelId] ?? 0) + 1,
                 }));
                 Vibration.vibrate(50);
+                if (notifPermissionGrantedRef.current) {
+                  const channelName =
+                    state.session?.channels?.find((c) => c.id === msg.channelId)?.name ??
+                    "Chat";
+                  void Notifications.scheduleNotificationAsync({
+                    content: {
+                      title: `${channelName}: ${msg.username}`,
+                      body: msg.text.length > 100 ? msg.text.slice(0, 100) + "…" : msg.text,
+                      sound: true,
+                    },
+                    trigger: null,
+                  });
+                }
               }
               return openChannel;
             });

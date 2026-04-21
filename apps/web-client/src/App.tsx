@@ -1,3 +1,4 @@
+import { toast, Toaster } from "sonner";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import * as Separator from "@radix-ui/react-separator";
@@ -759,11 +760,18 @@ export default function App() {
               playNotificationSound("chatMessage");
             }
             setChatOpen((openChannel) => {
-              if (openChannel !== msg.channelId) {
+              if (openChannel !== msg.channelId && msg.userId !== current.session?.user.id) {
                 setUnreadCounts((prev) => ({
                   ...prev,
                   [msg.channelId]: (prev[msg.channelId] ?? 0) + 1,
                 }));
+                const channelName =
+                  current.session?.channels?.find((c) => c.id === msg.channelId)?.name ??
+                  "Chat";
+                toast(`${channelName}: ${msg.username}`, {
+                  description: msg.text.length > 80 ? msg.text.slice(0, 80) + "…" : msg.text,
+                  duration: 4000,
+                });
               }
               return openChannel;
             });
@@ -1593,6 +1601,11 @@ export default function App() {
 
   return (
     <main className="min-h-screen">
+      <Toaster
+        position="bottom-right"
+        theme="dark"
+        toastOptions={{ classNames: { toast: "font-sans text-sm" } }}
+      />
       <div className="mx-auto flex max-w-7xl flex-col gap-6 px-6 py-8 sm:px-8 lg:px-10">
         <header
           className={
