@@ -79,6 +79,8 @@ import {
   setupIOSRemoteCommands,
   teardownIOSRemoteCommands,
   addIOSRemoteCommandListener,
+  setMobileAudioOutput,
+  type AudioOutputDevice,
 } from "./src/mobile-runtime-native";
 
 interface ViewState {
@@ -380,9 +382,9 @@ function ChannelPermissionCard({
                 isTalking ? "bg-primary/80" : "bg-primary"
               } ${talkEnabled ? "" : "opacity-50"}`}
               disabled={!talkEnabled}
-              onPress={talkMode === "latched" ? () => onTalkPress("tap") : undefined}
-              onPressIn={talkMode === "momentary" ? () => onTalkPress("press-in") : undefined}
-              onPressOut={talkMode === "momentary" ? () => onTalkPress("press-out") : undefined}
+              onPress={talkMode === "latched" ? () => onTalkPress("tap") : () => {}}
+              onPressIn={talkMode === "momentary" ? () => onTalkPress("press-in") : () => {}}
+              onPressOut={talkMode === "momentary" ? () => onTalkPress("press-out") : () => {}}
             >
               <Text className="text-sm font-semibold uppercase tracking-control text-primary-foreground">
                 {talkLabel}
@@ -477,6 +479,7 @@ export default function App() {
   const [audioArmed, setAudioArmed] = useState(false);
   const [audioBusy, setAudioBusy] = useState(false);
   const [audioError, setAudioError] = useState<string>();
+  const [audioOutput, setAudioOutputState] = useState<AudioOutputDevice>("speaker");
   const [audioReady, setAudioReady] = useState(false);
   const [channelVolumes, setChannelVolumes] = useState<Record<string, number>>({});
   const [hapticsAvailable, setHapticsAvailable] = useState(true);
@@ -1199,7 +1202,7 @@ export default function App() {
         realtimeClientRef.current?.toggleListen(ch.id, true);
       }
     }
-  }, [assignedPermissions, confidenceChannels, state.operatorState, state.realtimeState, state.session]);
+  }, [assignedPermissions, confidenceChannels, state.operatorState?.listenChannelIds, state.realtimeState, state.session]);
 
   const mediaStartingRef = useRef(false);
 
@@ -1486,6 +1489,17 @@ export default function App() {
     }
   }
 
+  async function handleSetAudioOutput(output: AudioOutputDevice): Promise<void> {
+    setAudioOutputState(output);
+    if (audioReady) {
+      try {
+        await setMobileAudioOutput(output);
+      } catch {
+        // non-fatal — UI still reflects intent
+      }
+    }
+  }
+
   function requireRealtimeConnection(): CueCommXRealtimeClient | undefined {
     if (state.realtimeState !== "connected" || !realtimeClientRef.current) {
       setState((current) => ({
@@ -1706,6 +1720,15 @@ export default function App() {
       client.startTalk(talkableChannelIds);
     }
   }, [audioReady, assignedPermissions]);
+
+  // Apply audio output device whenever the user changes it or audio becomes ready.
+  // On iOS: WebRTC has already initialized the AVAudioSession; overriding the output
+  // port after getUserMedia is safe. On Android: updates AudioManager directly.
+  // The OS automatically routes the microphone to match the chosen output.
+  useEffect(() => {
+    if (!audioReady) return;
+    void setMobileAudioOutput(audioOutput).catch(() => {/* non-fatal */});
+  }, [audioReady, audioOutput]);
 
   const stopTalkAll = useCallback(() => {
     const client = realtimeClientRef.current;
@@ -2422,6 +2445,46 @@ export default function App() {
                       ) : (
                         <DetailRow label="Audio status" value={audioStatusLabel} />
                       )}
+
+                      {/* Audio output device selector — earpiece vs speakerphone */}
+                      <View className="gap-2">
+                        <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                          Audio Output
+                        </Text>
+                        <View className="flex-row gap-2">
+                          {(
+                            [
+                              { id: "earpiece", label: "📞 Earpiece", description: "Private, held to ear" },
+                              { id: "speaker", label: "🔊 Speaker", description: "Hands-free" },
+                            ] as { id: AudioOutputDevice; label: string; description: string }[]
+                          ).map(({ id, label, description }) => (
+                            <Pressable
+                              accessibilityLabel={label}
+                              accessibilityRole="radio"
+                              accessibilityState={{ checked: audioOutput === id }}
+                              className={`flex-1 rounded-lg border px-3 py-2.5 ${
+                                audioOutput === id
+                                  ? "border-primary bg-primary/15"
+                                  : "border-border bg-card"
+                              }`}
+                              key={id}
+                              onPress={() => void handleSetAudioOutput(id)}
+                            >
+                              <Text
+                                className={`text-sm font-semibold ${
+                                  audioOutput === id ? "text-primary" : "text-foreground"
+                                }`}
+                              >
+                                {label}
+                              </Text>
+                              <Text className="mt-0.5 text-xs text-muted-foreground">
+                                {description}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      </View>
+
                       <View className="gap-2">
                         <View className="flex-row items-center justify-between">
                           <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">

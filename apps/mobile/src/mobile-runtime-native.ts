@@ -6,9 +6,19 @@ import {
 import * as Haptics from "expo-haptics";
 import * as IntentLauncher from "expo-intent-launcher";
 import * as Notifications from "expo-notifications";
+import type { EventSubscription } from "expo-modules-core";
 import { Platform } from "react-native";
 
 import { createAndroidLiveAudioNotificationContent } from "./mobile-runtime";
+import {
+  type NowPlayingInfo,
+  type RemoteCommandEvent,
+  addRemoteCommandListener as _addRemoteCommandListener,
+  clearNowPlaying as _clearNowPlaying,
+  setNowPlaying as _setNowPlaying,
+  setupRemoteCommands as _setupRemoteCommands,
+  teardownRemoteCommands as _teardownRemoteCommands,
+} from "cuecommx-now-playing";
 
 export const ANDROID_LIVE_AUDIO_NOTIFICATION_CHANNEL_ID = "cuecommx-live-audio";
 
@@ -56,6 +66,25 @@ export async function configureMobileAudioSession(): Promise<void> {
   // when getUserMedia is called. Do NOT call setAudioModeAsync or
   // RTCAudioSession.audioSessionDidActivate here — doing so conflicts with
   // WebRTC's internal session management and results in a silent mic track.
+}
+
+export type AudioOutputDevice = "speaker" | "earpiece";
+
+export async function setMobileAudioOutput(output: AudioOutputDevice): Promise<void> {
+  // On both iOS and Android: override the active output port.
+  // iOS: react-native-webrtc manages the AVAudioSession category/mode; calling
+  // setAudioModeAsync after getUserMedia is safe — it only overrides the output
+  // port and does not re-initialize the WebRTC audio pipeline.
+  // Android: directly controls AudioManager speakerphone routing.
+  // The OS automatically selects the appropriate microphone (top mic for
+  // earpiece, bottom/main mic for speakerphone) when the port is switched.
+  await setAudioModeAsync({
+    allowsRecording: true,
+    interruptionMode: "doNotMix",
+    playsInSilentMode: true,
+    shouldPlayInBackground: true,
+    shouldRouteThroughEarpiece: output === "earpiece",
+  });
 }
 
 export async function resetMobileAudioSession(): Promise<void> {
@@ -182,4 +211,34 @@ export async function triggerConnectionLostHaptic(): Promise<void> {
 
 export async function triggerMessageHaptic(): Promise<void> {
   await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+}
+
+// ── iOS lock screen / Now Playing ──────────────────────────────────────────
+//
+// These functions are no-ops on Android; the native module only activates on
+// iOS, where it sets MPNowPlayingInfoCenter and registers MPRemoteCommand
+// handlers so the lock screen and Control Center show a live session widget.
+
+export type { NowPlayingInfo, RemoteCommandEvent };
+
+export function setIOSNowPlayingInfo(info: NowPlayingInfo): void {
+  _setNowPlaying(info);
+}
+
+export function clearIOSNowPlayingInfo(): void {
+  _clearNowPlaying();
+}
+
+export function setupIOSRemoteCommands(): void {
+  _setupRemoteCommands();
+}
+
+export function teardownIOSRemoteCommands(): void {
+  _teardownRemoteCommands();
+}
+
+export function addIOSRemoteCommandListener(
+  listener: (event: RemoteCommandEvent) => void,
+): EventSubscription | undefined {
+  return _addRemoteCommandListener(listener);
 }
