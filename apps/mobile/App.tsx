@@ -7,7 +7,6 @@ import {
   AppState,
   type AppStateStatus,
   FlatList,
-  InteractionManager,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -382,9 +381,9 @@ function ChannelPermissionCard({
                 isTalking ? "bg-primary/80" : "bg-primary"
               } ${talkEnabled ? "" : "opacity-50"}`}
               disabled={!talkEnabled}
-              onPress={talkMode === "latched" ? () => onTalkPress("tap") : () => {}}
-              onPressIn={talkMode === "momentary" ? () => onTalkPress("press-in") : () => {}}
-              onPressOut={talkMode === "momentary" ? () => onTalkPress("press-out") : () => {}}
+              onPress={talkMode === "latched" ? () => onTalkPress("tap") : undefined}
+              onPressIn={talkMode === "momentary" ? () => onTalkPress("press-in") : undefined}
+              onPressOut={talkMode === "momentary" ? () => onTalkPress("press-out") : undefined}
             >
               <Text className="text-sm font-semibold uppercase tracking-control text-primary-foreground">
                 {talkLabel}
@@ -623,8 +622,12 @@ export default function App() {
           `${getRuntimeMessage(error, "CueCommX haptics are unavailable in this build.")} Haptics will stay off for this session.`,
         );
       },
+      // Use setTimeout instead of InteractionManager.runAfterInteractions: in
+      // React Native's New Architecture (0.79+) interaction tracking can leave
+      // a stale handle open during a press sequence, causing runAfterInteractions
+      // callbacks to queue indefinitely and block subsequent UI events.
       (task) => {
-        InteractionManager.runAfterInteractions(task);
+        setTimeout(task, 0);
       },
     );
   }
@@ -2143,7 +2146,7 @@ export default function App() {
               {/* ── Tab content ── */}
               {activeTab === "channels" ? (
                 /* ── CHANNELS TAB ── */
-                <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
+                <ScrollView className="flex-1" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
                   <View className="gap-3 px-4 pb-6 pt-4">
 
                     {/* Error banners */}
@@ -2427,7 +2430,7 @@ export default function App() {
                 </ScrollView>
               ) : (
                 /* ── SETTINGS TAB ── */
-                <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
+                <ScrollView className="flex-1" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
                   <View className="gap-4 px-4 pb-6 pt-4">
 
                     {/* Audio */}
