@@ -39,6 +39,3 @@ yarn-error.*
 # generated native folders
 /ios
 /android
-# Track custom native modules added to the generated iOS project
-!/ios/CueCommXMobile/AudioRouterModule.h
-!/ios/CueCommXMobile/AudioRouterModule.m

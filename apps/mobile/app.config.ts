@@ -60,6 +60,7 @@ const config: CueCommXExpoConfig = {
     predictiveBackGestureEnabled: false,
   },
   plugins: [
+    "./plugins/withAudioRouter",
     "expo-camera",
     "expo-dev-client",
     "expo-notifications",
