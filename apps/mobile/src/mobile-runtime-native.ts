@@ -7,7 +7,7 @@ import * as Haptics from "expo-haptics";
 import * as IntentLauncher from "expo-intent-launcher";
 import * as Notifications from "expo-notifications";
 import type { EventSubscription } from "expo-modules-core";
-import { Platform } from "react-native";
+import { NativeModules, Platform } from "react-native";
 
 import { createAndroidLiveAudioNotificationContent } from "./mobile-runtime";
 import {
@@ -71,13 +71,22 @@ export async function configureMobileAudioSession(): Promise<void> {
 export type AudioOutputDevice = "speaker" | "earpiece";
 
 export async function setMobileAudioOutput(output: AudioOutputDevice): Promise<void> {
-  // On both iOS and Android: override the active output port.
-  // iOS: react-native-webrtc manages the AVAudioSession category/mode; calling
-  // setAudioModeAsync after getUserMedia is safe — it only overrides the output
-  // port and does not re-initialize the WebRTC audio pipeline.
-  // Android: directly controls AudioManager speakerphone routing.
-  // The OS automatically selects the appropriate microphone (top mic for
-  // earpiece, bottom/main mic for speakerphone) when the port is switched.
+  if (Platform.OS === "ios") {
+    // On iOS, react-native-webrtc owns the AVAudioSession category and mode.
+    // Calling expo-av's setAudioModeAsync changes the category/mode and disrupts
+    // WebRTC's audio pipeline. Instead, call overrideOutputAudioPort directly via
+    // a thin native module that only changes the output port — nothing else.
+    const mod = NativeModules.AudioRouterModule as
+      | { setOutputToSpeaker: (speaker: boolean) => Promise<void> }
+      | undefined;
+    if (mod?.setOutputToSpeaker) {
+      await mod.setOutputToSpeaker(output === "speaker");
+    }
+    return;
+  }
+
+  // Android: expo-av manages the audio session here (WebRTC doesn't on Android),
+  // so setAudioModeAsync is safe to call.
   await setAudioModeAsync({
     allowsRecording: true,
     interruptionMode: "doNotMix",
