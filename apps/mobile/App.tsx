@@ -689,6 +689,28 @@ export default function App() {
     });
   }, []);
 
+  // Handle notification taps — route user to the relevant chat channel
+  useEffect(() => {
+    // App was already open: listen for taps on incoming banners
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const channelId = response.notification.request.content.data?.channelId;
+      if (typeof channelId === "string") {
+        setChatOpen(channelId);
+      }
+    });
+
+    // App was closed/backgrounded: check if the launch came from a notification tap
+    void Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (!response) return;
+      const channelId = response.notification.request.content.data?.channelId;
+      if (typeof channelId === "string") {
+        setChatOpen(channelId);
+      }
+    });
+
+    return () => sub.remove();
+  }, []);
+
   useEffect(() => {
     let active = true;
 
@@ -1101,6 +1123,7 @@ export default function App() {
                       title: `${channelName}: ${msg.username}`,
                       body: msg.text.length > 100 ? msg.text.slice(0, 100) + "…" : msg.text,
                       sound: true,
+                      data: { channelId: msg.channelId },
                     },
                     trigger: null,
                   });
