@@ -1,5 +1,7 @@
 import { type FormEvent } from "react";
 
+import { Check, Circle, X } from "lucide-react";
+
 import * as Separator from "@radix-ui/react-separator";
 import {
   type AdminDashboardUser,
@@ -340,20 +342,14 @@ export function UsersPage({
                                       : "success"
                                 }
                               >
-                                {user.connectionQuality.grade === "excellent"
-                                  ? "🟢"
-                                  : user.connectionQuality.grade === "good"
-                                    ? "🟢"
-                                    : user.connectionQuality.grade === "fair"
-                                      ? "🟡"
-                                      : "🔴"}{" "}
+                                <Circle className="h-2.5 w-2.5 fill-current inline mr-1" />
                                 {user.connectionQuality.roundTripTimeMs}ms
                               </Badge>
                             ) : null}
                             {user.preflightStatus === "passed" ? (
-                              <Badge variant="success">✓ Audio OK</Badge>
+                              <Badge variant="success"><Check className="h-3 w-3 inline mr-1" /> Audio OK</Badge>
                             ) : user.preflightStatus === "failed" ? (
-                              <Badge variant="danger">✗ Audio fail</Badge>
+                              <Badge variant="danger"><X className="h-3 w-3 inline mr-1" /> Audio fail</Badge>
                             ) : null}
                           </div>
                           <p className="text-sm leading-6 text-muted-foreground">

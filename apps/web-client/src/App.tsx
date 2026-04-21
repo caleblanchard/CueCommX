@@ -23,15 +23,22 @@ import {
 } from "@cuecommx/protocol";
 import {
   Activity,
+  Bell,
+  Check,
+  Circle,
   Headphones,
   Keyboard,
+  Link,
   Megaphone,
   MessageCircle,
   Mic,
   Phone,
   PhoneOff,
+  Radio,
   RadioTower,
   Send,
+  Timer,
+  Volume1,
   Volume2,
   Wifi,
   X,
@@ -1166,9 +1173,9 @@ export default function App() {
 
       const statusLine =
         activeChannelNames.length > 0
-          ? `🎙 Talking: ${activeChannelNames.join(", ")}`
+          ? `Talking: ${activeChannelNames.join(", ")}`
           : listenChannelNames.length > 0
-            ? `🔉 Listening: ${listenChannelNames.join(", ")}`
+            ? `Listening: ${listenChannelNames.join(", ")}`
             : "Standby";
 
       navigator.mediaSession.metadata = new MediaMetadata({
@@ -1631,7 +1638,7 @@ export default function App() {
                       className="flex items-center gap-1.5 rounded-md bg-destructive px-2 py-0.5 text-xs font-bold text-destructive-foreground"
                       key={s.sourceId}
                     >
-                      🔴 PROGRAM: {s.sourceName}
+                      <Circle className="h-2 w-2 fill-current" /> PROGRAM: {s.sourceName}
                     </span>
                   ))}
                 {tallySources
@@ -1641,7 +1648,7 @@ export default function App() {
                       className="flex items-center gap-1.5 rounded-md bg-success px-2 py-0.5 text-xs font-bold text-success-foreground"
                       key={s.sourceId}
                     >
-                      🟢 PREVIEW: {s.sourceName}
+                      <Circle className="h-2 w-2 fill-current" /> PREVIEW: {s.sourceName}
                     </span>
                   ))}
               </div>
@@ -1903,7 +1910,8 @@ export default function App() {
 
                 {allPageActive ? (
                   <div className="flex items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-400">
-                    <span className="flex-1">📢 All-Page by {allPageActive.username}</span>
+                    <Megaphone className="h-4 w-4 shrink-0" />
+                    <span className="flex-1">All-Page by {allPageActive.username}</span>
                     {allPageActive.userId === state.session?.user.id ? (
                       <Button
                         onClick={() => realtimeClientRef.current?.stopAllPage()}
@@ -1934,7 +1942,7 @@ export default function App() {
                           key={signal.signalId}
                         >
                           <span className="flex-1">
-                            {signal.signalType === "call" ? "📞" : signal.signalType === "go" ? "🟢" : "⏳"}{" "}
+                            {signal.signalType === "call" ? <Phone className="h-4 w-4 shrink-0" /> : signal.signalType === "go" ? <Check className="h-4 w-4 shrink-0" /> : <Timer className="h-4 w-4 shrink-0" />}{" "}
                             {signal.signalType.toUpperCase()} from {signal.fromUsername}
                           </span>
                           <Button
@@ -1986,7 +1994,7 @@ export default function App() {
                   <div className="flex items-center gap-3 rounded-xl border border-blue-500/50 bg-blue-500/10 px-4 py-3 text-sm font-medium text-blue-400 animate-pulse">
                     <Phone className="h-4 w-4" />
                     <span className="flex-1">
-                      📞 Incoming call from {incomingCall.fromUsername}
+                      Incoming call from {incomingCall.fromUsername}
                     </span>
                     <Button
                       onClick={acceptIncomingCall}
@@ -2013,11 +2021,11 @@ export default function App() {
                       ? "border-green-500/50 bg-green-500/10 text-green-400"
                       : "border-blue-500/50 bg-blue-500/10 text-blue-400"
                   }`}>
-                    <Phone className="h-4 w-4" />
+                    {directCall.state === "active" ? <Link className="h-4 w-4" /> : <Phone className="h-4 w-4" />}
                     <span className="flex-1">
                       {directCall.state === "active"
-                        ? `🔗 Direct call with ${directCall.peerUsername}`
-                        : `📞 Calling ${directCall.peerUsername}...`}
+                        ? `Direct call with ${directCall.peerUsername}`
+                        : `Calling ${directCall.peerUsername}...`}
                     </span>
                     <Button
                       onClick={endCurrentDirectCall}
@@ -2082,7 +2090,7 @@ export default function App() {
                             </div>
                               <div className="flex shrink-0 flex-wrap items-center gap-2 md:justify-end">
                                 {isProgramChannel ? (
-                                  <Badge variant="accent">📡 Program</Badge>
+                                  <Badge variant="accent"><Radio className="h-3 w-3 mr-1 inline" /> Program</Badge>
                                 ) : null}
                                 <Badge
                                   className="min-w-[6.5rem] shrink-0 justify-center"
@@ -2306,7 +2314,7 @@ export default function App() {
                                       type="button"
                                       variant="ghost"
                                     >
-                                      📞 Call
+                                      <Phone className="h-3.5 w-3.5 mr-1" /> Call
                                     </Button>
                                     <Button
                                       className="justify-start text-amber-400"
@@ -2315,7 +2323,7 @@ export default function App() {
                                       type="button"
                                       variant="ghost"
                                     >
-                                      ⏳ Standby
+                                      <Timer className="h-3.5 w-3.5 mr-1" /> Standby
                                     </Button>
                                     <Button
                                       className="justify-start text-green-400"
@@ -2324,7 +2332,7 @@ export default function App() {
                                       type="button"
                                       variant="ghost"
                                     >
-                                      🟢 Go
+                                      <Check className="h-3.5 w-3.5 mr-1" /> Go
                                     </Button>
                                   </div>
                                 ) : null}
@@ -2796,22 +2804,22 @@ export default function App() {
                               Preflight audio test
                             </p>
                             {preflightState.step === "tone" ? (
-                              <p className="text-sm text-foreground">🔊 Playing test tone — listen for a beep…</p>
+                              <p className="text-sm text-foreground flex items-center gap-2"><Volume2 className="h-4 w-4 shrink-0" /> Playing test tone — listen for a beep…</p>
                             ) : null}
                             {preflightState.step === "recording" ? (
                               <>
-                                <p className="text-sm text-foreground">🎙 Recording — speak into your mic…</p>
+                                <p className="text-sm text-foreground flex items-center gap-2"><Mic className="h-4 w-4 shrink-0" /> Recording — speak into your mic…</p>
                                 <SignalMeter className="mt-1" label="Mic level" value={preflightState.micLevel} />
                               </>
                             ) : null}
                             {preflightState.step === "playback" ? (
-                              <p className="text-sm text-foreground">🔈 Playing back your recording…</p>
+                              <p className="text-sm text-foreground flex items-center gap-2"><Volume1 className="h-4 w-4 shrink-0" /> Playing back your recording…</p>
                             ) : null}
                             {preflightState.step === "done" && preflightState.passed ? (
-                              <p className="text-sm text-green-400">✓ Audio test passed</p>
+                              <p className="text-sm text-green-400 flex items-center gap-2"><Check className="h-4 w-4 shrink-0" /> Audio test passed</p>
                             ) : null}
                             {preflightState.step === "done" && preflightState.passed === false ? (
-                              <p className="text-sm text-red-400">✗ {preflightState.error ?? "Audio test failed"}</p>
+                              <p className="text-sm text-red-400 flex items-center gap-2"><X className="h-4 w-4 shrink-0" /> {preflightState.error ?? "Audio test failed"}</p>
                             ) : null}
                             {preflightState.step !== "done" ? (
                               <Button
@@ -2863,7 +2871,7 @@ export default function App() {
                       </div>
                       <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/35 px-3 py-2">
                         <span className="text-muted-foreground">Headset button PTT</span>
-                        <kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">🎧</kbd>
+                        <kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground"><Headphones className="h-3 w-3 inline" /></kbd>
                       </div>
                     </div>
                     <p className="mt-3 text-xs text-muted-foreground">
@@ -2876,7 +2884,7 @@ export default function App() {
                   <CardHeader>
                     <CardDescription>Alerts &amp; tones</CardDescription>
                     <CardTitle className="flex items-center gap-2">
-                      🔔 Notification sounds
+                      <Bell className="h-4 w-4" /> Notification sounds
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">

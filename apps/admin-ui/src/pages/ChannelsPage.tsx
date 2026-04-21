@@ -1,3 +1,4 @@
+import { Headphones, Radio } from "lucide-react";
 import { type FormEvent } from "react";
 
 import * as Separator from "@radix-ui/react-separator";
@@ -161,7 +162,7 @@ export function ChannelsPage({
                         onChange={() => onChannelTypeChange("program")}
                         type="radio"
                       />
-                      📡 Program (one-way feed)
+                      <Radio className="h-3.5 w-3.5 inline mr-1" /> Program (one-way feed)
                     </label>
                     <label className="inline-flex items-center gap-2 text-sm text-foreground">
                       <input
@@ -170,7 +171,7 @@ export function ChannelsPage({
                         onChange={() => onChannelTypeChange("confidence")}
                         type="radio"
                       />
-                      🎧 Confidence (always-on monitor)
+                      <Headphones className="h-3.5 w-3.5 inline mr-1" /> Confidence (always-on monitor)
                     </label>
                   </div>
                 </div>
@@ -283,10 +284,10 @@ export function ChannelsPage({
                           <Badge variant="accent">Global</Badge>
                         ) : null}
                         {channel.channelType === "program" ? (
-                          <Badge variant="accent">📡 Program</Badge>
+                          <Badge variant="accent"><Radio className="h-3 w-3 inline mr-1" /> Program</Badge>
                         ) : null}
                         {channel.channelType === "confidence" ? (
-                          <Badge variant="accent">🎧 Confidence</Badge>
+                          <Badge variant="accent"><Headphones className="h-3 w-3 inline mr-1" /> Confidence</Badge>
                         ) : null}
                         {session ? (
                           <>

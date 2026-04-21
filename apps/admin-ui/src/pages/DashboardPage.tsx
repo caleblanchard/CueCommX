@@ -4,6 +4,7 @@ import { type RealtimeConnectionState } from "@cuecommx/core";
 import * as Separator from "@radix-ui/react-separator";
 import {
   AlertTriangle,
+  Megaphone,
   QrCode,
   RadioTower,
   ShieldCheck,
@@ -500,7 +501,7 @@ export function DashboardPage({
                 <CardContent className="space-y-4">
                   {allPageActive ? (
                     <div className="flex items-center gap-3 rounded-xl border border-warning/50 bg-warning/10 px-4 py-3 text-sm font-medium text-warning">
-                      📢 All-Page active by {allPageActive.username}
+                      <Megaphone className="h-4 w-4 shrink-0" /> All-Page active by {allPageActive.username}
                     </div>
                   ) : null}
                   {channels.map((channel, index) => {
