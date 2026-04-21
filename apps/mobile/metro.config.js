@@ -16,11 +16,10 @@ config.resolver.nodeModulesPaths = [
   path.resolve(monorepoRoot, "node_modules"),
 ];
 
-// Force single copies of React to prevent "Invalid hook call" errors.
-// Mobile must use react@19.1.0 to match react-native-renderer bundled in RN 0.81.5.
-// Point to the workspace-local copy, NOT the monorepo root which runs 19.2.5.
+// Force single copy of React to prevent "Invalid hook call" errors in monorepo.
+// All packages now use react@19.1.0 matching react-native-renderer in RN 0.81.5.
 config.resolver.extraNodeModules = {
-  react: path.resolve(projectRoot, "node_modules/react"),
+  react: path.resolve(monorepoRoot, "node_modules/react"),
   "react-native": path.resolve(monorepoRoot, "node_modules/react-native"),
 };
 
