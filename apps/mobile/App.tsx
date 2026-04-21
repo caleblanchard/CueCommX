@@ -21,7 +21,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
-import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CueCommXRealtimeClient, type RealtimeConnectionState } from "@cuecommx/core";
 import type {
@@ -468,6 +468,7 @@ function ChannelPermissionCard({
 
 export default function App() {
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const isLandscape = windowWidth > windowHeight;
   const isTablet = Math.min(windowWidth, windowHeight) >= 600;
   const [state, setState] = useState<ViewState>(initialState);
@@ -2870,82 +2871,108 @@ export default function App() {
           transparent={false}
           visible={chatOpen !== null}
         >
-          <SafeAreaView className="flex-1 bg-background">
-            <KeyboardAvoidingView
-              behavior={Platform.OS === "ios" ? "padding" : "height"}
-              className="flex-1"
+          {/* KeyboardAvoidingView sits outside the safe-area padding so the
+              keyboard offset calculation is based on the full screen height. */}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={{ flex: 1, backgroundColor: "#09090b" }}
+          >
+            {/* Header — padded by the top safe area so it clears the Dynamic
+                Island on iPhone or the status bar on Android. */}
+            <View
+              className="border-b border-border bg-background"
+              style={{ paddingTop: insets.top }}
             >
-              <View className="flex-row items-center justify-between border-b border-border px-4 py-3">
+              <View className="flex-row items-center justify-between px-4 py-3">
                 <View className="flex-row items-center gap-2">
                   <Text className="text-base">{String.fromCodePoint(0x1f4ac)}</Text>
                   <Text className="text-base font-semibold text-foreground">
                     {activeChannels.find((c) => c.id === chatOpen)?.name ?? chatOpen ?? "Chat"}
                   </Text>
                 </View>
-                <Pressable accessibilityRole="button" onPress={() => setChatOpen(null)}>
+                <Pressable
+                  accessibilityLabel="Close chat"
+                  accessibilityRole="button"
+                  hitSlop={12}
+                  onPress={() => setChatOpen(null)}
+                >
                   <Text className="text-sm font-semibold text-primary">Close</Text>
                 </Pressable>
               </View>
-              <FlatList<ChatMessagePayload>
-                ref={chatListRef}
-                className="flex-1 px-4"
-                contentContainerStyle={{ paddingVertical: 12 }}
-                data={chatOpen ? (chatMessages[chatOpen] ?? []) : []}
-                keyExtractor={(item) => item.id}
-                ListEmptyComponent={
-                  <View className="items-center pt-8">
-                    <Text className="text-sm text-muted-foreground">No messages yet. Start the conversation!</Text>
-                  </View>
-                }
-                onContentSizeChange={() => chatListRef.current?.scrollToEnd({ animated: true })}
-                renderItem={({ item }) => {
-                  const isOwn = item.userId === state.session?.user.id;
-                  return (
-                    <View className={`mb-3 ${item.messageType === "system" ? "items-center" : isOwn ? "items-end" : "items-start"}`}>
-                      {item.messageType === "system" ? (
-                        <Text className="text-xs italic text-muted-foreground">{item.text}</Text>
-                      ) : (
-                        <View style={{ maxWidth: "80%" }}>
-                          {!isOwn && (
-                            <View className="mb-0.5 flex-row items-baseline gap-1.5">
-                              <Text className="text-xs font-semibold text-foreground">{item.username}</Text>
-                              <Text className="text-[10px] text-muted-foreground">{formatRelativeTime(item.timestamp)}</Text>
-                            </View>
-                          )}
-                          <View className={`rounded-2xl px-3 py-2 ${isOwn ? "rounded-tr-sm bg-primary" : "rounded-tl-sm bg-secondary"}`}>
-                            <Text className={`text-sm ${isOwn ? "text-primary-foreground" : "text-foreground"}`}>{item.text}</Text>
+            </View>
+
+            {/* Message list fills the remaining space */}
+            <FlatList<ChatMessagePayload>
+              ref={chatListRef}
+              className="flex-1 bg-background px-4"
+              contentContainerStyle={{ paddingVertical: 12, flexGrow: 1 }}
+              data={chatOpen ? (chatMessages[chatOpen] ?? []) : []}
+              keyExtractor={(item) => item.id}
+              keyboardDismissMode="interactive"
+              keyboardShouldPersistTaps="handled"
+              ListEmptyComponent={
+                <View className="flex-1 items-center justify-center pt-16">
+                  <Text className="text-sm text-muted-foreground">
+                    No messages yet. Start the conversation!
+                  </Text>
+                </View>
+              }
+              onContentSizeChange={() => chatListRef.current?.scrollToEnd({ animated: true })}
+              renderItem={({ item }) => {
+                const isOwn = item.userId === state.session?.user.id;
+                return (
+                  <View className={`mb-3 ${item.messageType === "system" ? "items-center" : isOwn ? "items-end" : "items-start"}`}>
+                    {item.messageType === "system" ? (
+                      <Text className="text-xs italic text-muted-foreground">{item.text}</Text>
+                    ) : (
+                      <View style={{ maxWidth: "80%" }}>
+                        {!isOwn && (
+                          <View className="mb-0.5 flex-row items-baseline gap-1.5">
+                            <Text className="text-xs font-semibold text-foreground">{item.username}</Text>
+                            <Text className="text-[10px] text-muted-foreground">{formatRelativeTime(item.timestamp)}</Text>
                           </View>
-                          {isOwn && (
-                            <Text className="mt-0.5 text-right text-[10px] text-muted-foreground">{formatRelativeTime(item.timestamp)}</Text>
-                          )}
+                        )}
+                        <View className={`rounded-2xl px-3 py-2 ${isOwn ? "rounded-tr-sm bg-primary" : "rounded-tl-sm bg-secondary"}`}>
+                          <Text className={`text-sm ${isOwn ? "text-primary-foreground" : "text-foreground"}`}>{item.text}</Text>
                         </View>
-                      )}
-                    </View>
-                  );
-                }}
-              />
-              <View className="flex-row items-center gap-2 border-t border-border px-4 py-3">
+                        {isOwn && (
+                          <Text className="mt-0.5 text-right text-[10px] text-muted-foreground">{formatRelativeTime(item.timestamp)}</Text>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                );
+              }}
+            />
+
+            {/* Input bar — padded by the bottom safe area so it clears the
+                iPhone home indicator. On Android the bottom inset is 0. */}
+            <View
+              className="border-t border-border bg-background"
+              style={{ paddingBottom: insets.bottom }}
+            >
+              <View className="flex-row items-center gap-2 px-4 py-3">
                 <TextInput
-                  className="flex-1 rounded-lg border border-border bg-secondary px-3 py-2 text-sm text-foreground"
+                  className="flex-1 rounded-full border border-border bg-secondary px-4 py-2.5 text-sm text-foreground"
                   maxLength={500}
                   onChangeText={setChatInput}
                   onSubmitEditing={() => chatOpen && sendChatMessage(chatOpen)}
-                  placeholder="Type a message..."
+                  placeholder="Type a message…"
                   placeholderTextColor="#6b7280"
                   returnKeyType="send"
                   value={chatInput}
                 />
                 <Pressable
                   accessibilityRole="button"
-                  className={`rounded-lg bg-primary px-4 py-2 ${!chatInput.trim() ? "opacity-50" : ""}`}
+                  className={`rounded-full bg-primary px-5 py-2.5 ${!chatInput.trim() ? "opacity-50" : ""}`}
                   disabled={!chatInput.trim()}
                   onPress={() => chatOpen && sendChatMessage(chatOpen)}
                 >
                   <Text className="text-sm font-semibold text-primary-foreground">Send</Text>
                 </Pressable>
               </View>
-            </KeyboardAvoidingView>
-          </SafeAreaView>
+            </View>
+          </KeyboardAvoidingView>
         </Modal>
       </SafeAreaView>
     </SafeAreaProvider>
