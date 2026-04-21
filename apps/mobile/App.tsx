@@ -38,6 +38,7 @@ import {
   Radio,
   Settings,
   Timer,
+  Volume2,
   X,
 } from "lucide-react-native";
 
@@ -2086,20 +2087,46 @@ export default function App() {
                         </Text>
                       </View>
                     </View>
-                    <Text className="text-xs text-muted-foreground">
-                      {state.status?.name ?? "CueCommX"}
-                      {connectionQuality
-                        ? `  ${connectionQuality.grade === "good" || connectionQuality.grade === "excellent" ? "🟢" : connectionQuality.grade === "fair" ? "🟡" : "🔴"} ${Math.round(connectionQuality.roundTripTimeMs)}ms`
-                        : ""}
-                    </Text>
+                    <View className="flex-row items-center gap-1.5">
+                      <Text className="text-xs text-muted-foreground">
+                        {state.status?.name ?? "CueCommX"}
+                      </Text>
+                      {connectionQuality ? (
+                        <>
+                          <Circle
+                            color={
+                              connectionQuality.grade === "good" || connectionQuality.grade === "excellent"
+                                ? "#4ade80"
+                                : connectionQuality.grade === "fair"
+                                  ? "#fbbf24"
+                                  : "#f87171"
+                            }
+                            fill={
+                              connectionQuality.grade === "good" || connectionQuality.grade === "excellent"
+                                ? "#4ade80"
+                                : connectionQuality.grade === "fair"
+                                  ? "#fbbf24"
+                                  : "#f87171"
+                            }
+                            size={7}
+                          />
+                          <Text className="text-xs text-muted-foreground">
+                            {Math.round(connectionQuality.roundTripTimeMs)}ms
+                          </Text>
+                        </>
+                      ) : null}
+                    </View>
                   </View>
 
                   {/* Inline arm / mic level */}
                   {audioReady ? (
                     <View className="items-end gap-1">
-                      <Text className="text-[10px] font-semibold text-primary">
-                        🎙 {inputLevel}%
-                      </Text>
+                      <View className="flex-row items-center gap-1">
+                        <Mic color="#5eead4" size={10} />
+                        <Text className="text-[10px] font-semibold text-primary">
+                          {inputLevel}%
+                        </Text>
+                      </View>
                       <View className="h-1.5 w-16 overflow-hidden rounded-full bg-secondary/80">
                         <View
                           className="h-full rounded-full bg-primary"
@@ -2149,8 +2176,9 @@ export default function App() {
                             className="flex-row items-center gap-1 rounded-md bg-destructive px-2 py-0.5"
                             key={s.sourceId}
                           >
+                            <Circle color="#fff" fill="#fff" size={6} />
                             <Text className="text-[10px] font-bold text-destructive-foreground">
-                              🔴 PGM: {s.sourceName}
+                              PGM: {s.sourceName}
                             </Text>
                           </View>
                         ))}
@@ -2161,8 +2189,9 @@ export default function App() {
                             className="flex-row items-center gap-1 rounded-md bg-success px-2 py-0.5"
                             key={s.sourceId}
                           >
+                            <Circle color="#fff" fill="#fff" size={6} />
                             <Text className="text-[10px] font-bold text-success-foreground">
-                              🟢 PVW: {s.sourceName}
+                              PVW: {s.sourceName}
                             </Text>
                           </View>
                         ))}
@@ -2409,9 +2438,12 @@ export default function App() {
                     {/* Confidence feeds */}
                     {confidenceChannels.length > 0 ? (
                       <SectionCard>
-                        <Text className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
-                          🎧 Confidence Feeds
-                        </Text>
+                        <View className="flex-row items-center gap-1.5">
+                          <Headphones color="#94a3b8" size={12} />
+                          <Text className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+                            Confidence Feeds
+                          </Text>
+                        </View>
                         {confidenceChannels.map((channel) => {
                           const listening = state.operatorState?.listenChannelIds.includes(channel.id) ?? false;
                           const vol = channelVolumes[channel.id] ?? 100;
@@ -2460,9 +2492,12 @@ export default function App() {
                             className="rounded-lg border border-primary/30 bg-primary/10 px-2 py-1"
                             key={talker.consumerId}
                           >
-                            <Text className="text-xs font-medium text-primary">
-                              🎙 {talker.producerUsername}
-                            </Text>
+                            <View className="flex-row items-center gap-1">
+                              <Mic color="#5eead4" size={10} />
+                              <Text className="text-xs font-medium text-primary">
+                                {talker.producerUsername}
+                              </Text>
+                            </View>
                           </View>
                         ))}
                       </View>
@@ -2498,10 +2533,10 @@ export default function App() {
                         <View className="flex-row gap-2">
                           {(
                             [
-                              { id: "earpiece", label: "📞 Earpiece", description: "Private, held to ear" },
-                              { id: "speaker", label: "🔊 Speaker", description: "Hands-free" },
-                            ] as { id: AudioOutputDevice; label: string; description: string }[]
-                          ).map(({ id, label, description }) => (
+                              { id: "earpiece", icon: <Phone color="#5eead4" size={14} />, iconMuted: <Phone color="#94a3b8" size={14} />, label: "Earpiece", description: "Private, held to ear" },
+                              { id: "speaker", icon: <Volume2 color="#5eead4" size={14} />, iconMuted: <Volume2 color="#94a3b8" size={14} />, label: "Speaker", description: "Hands-free" },
+                            ] as { id: AudioOutputDevice; icon: ReactNode; iconMuted: ReactNode; label: string; description: string }[]
+                          ).map(({ id, icon, iconMuted, label, description }) => (
                             <Pressable
                               accessibilityLabel={label}
                               accessibilityRole="radio"
@@ -2514,13 +2549,16 @@ export default function App() {
                               key={id}
                               onPress={() => void handleSetAudioOutput(id)}
                             >
-                              <Text
-                                className={`text-sm font-semibold ${
-                                  audioOutput === id ? "text-primary" : "text-foreground"
-                                }`}
-                              >
-                                {label}
-                              </Text>
+                              <View className="flex-row items-center gap-1.5">
+                                {audioOutput === id ? icon : iconMuted}
+                                <Text
+                                  className={`text-sm font-semibold ${
+                                    audioOutput === id ? "text-primary" : "text-foreground"
+                                  }`}
+                                >
+                                  {label}
+                                </Text>
+                              </View>
                               <Text className="mt-0.5 text-xs text-muted-foreground">
                                 {description}
                               </Text>
