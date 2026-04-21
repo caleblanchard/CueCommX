@@ -120,7 +120,7 @@ function getConnectionBadge(
     case "reconnecting":
       return {
         label: "Reconnecting",
-        toneClassName: "border-warning/30 bg-warning/10 text-warning",
+        toneClassName: "border-amber-700 bg-amber-950 text-amber-300",
       };
     case "connecting":
       return {
@@ -130,7 +130,7 @@ function getConnectionBadge(
     case "closed":
       return {
         label: "Disconnected",
-        toneClassName: "border-warning/30 bg-warning/10 text-warning",
+        toneClassName: "border-amber-700 bg-amber-950 text-amber-300",
       };
     default:
       return {
@@ -1935,8 +1935,8 @@ export default function App() {
                   </View>
 
                   {state.serverError ? (
-                    <View className="rounded-xl border border-destructive/30 bg-destructive/10 p-4">
-                      <Text className="text-sm leading-6 text-destructive">{state.serverError}</Text>
+                    <View className="rounded-xl border border-red-700 bg-red-950 p-4">
+                      <Text className="text-sm font-medium leading-6 text-red-300">{state.serverError}</Text>
                     </View>
                   ) : null}
 
@@ -2023,8 +2023,8 @@ export default function App() {
                 ) : null}
 
                 {state.loginError ? (
-                  <View className="rounded-xl border border-destructive/30 bg-destructive/10 p-4">
-                    <Text className="text-sm leading-6 text-destructive">{state.loginError}</Text>
+                  <View className="rounded-xl border border-red-700 bg-red-950 p-4">
+                    <Text className="text-sm font-medium leading-6 text-red-300">{state.loginError}</Text>
                   </View>
                 ) : null}
 
@@ -2148,18 +2148,18 @@ export default function App() {
 
                     {/* Error banners */}
                     {state.realtimeError ? (
-                      <View className="rounded-xl border border-warning/30 bg-warning/10 p-4">
-                        <Text className="text-sm leading-6 text-warning">{state.realtimeError}</Text>
+                      <View className="rounded-xl border border-amber-700 bg-amber-950 p-4">
+                        <Text className="text-sm font-medium leading-6 text-amber-300">{state.realtimeError}</Text>
                       </View>
                     ) : null}
                     {audioError ? (
-                      <View className="rounded-xl border border-warning/30 bg-warning/10 p-4">
-                        <Text className="text-sm leading-6 text-warning">{audioError}</Text>
+                      <View className="rounded-xl border border-amber-700 bg-amber-950 p-4">
+                        <Text className="text-sm font-medium leading-6 text-amber-300">{audioError}</Text>
                       </View>
                     ) : null}
                     {runtimeNotice ? (
-                      <View className="rounded-xl border border-warning/30 bg-warning/10 p-4">
-                        <Text className="text-sm leading-6 text-warning">{runtimeNotice}</Text>
+                      <View className="rounded-xl border border-amber-700 bg-amber-950 p-4">
+                        <Text className="text-sm font-medium leading-6 text-amber-300">{runtimeNotice}</Text>
                       </View>
                     ) : null}
 
@@ -2521,13 +2521,13 @@ export default function App() {
                         <DetailRow label="Background alert" value={androidBackgroundAlertActive ? "Active" : "Standby"} />
                       ) : null}
                       {audioError ? (
-                        <View className="rounded-xl border border-warning/30 bg-warning/10 p-4">
-                          <Text className="text-sm leading-6 text-warning">{audioError}</Text>
+                        <View className="rounded-xl border border-amber-700 bg-amber-950 p-4">
+                          <Text className="text-sm font-medium leading-6 text-amber-300">{audioError}</Text>
                         </View>
                       ) : null}
                       {runtimeNotice ? (
-                        <View className="rounded-xl border border-warning/30 bg-warning/10 p-4">
-                          <Text className="text-sm leading-6 text-warning">{runtimeNotice}</Text>
+                        <View className="rounded-xl border border-amber-700 bg-amber-950 p-4">
+                          <Text className="text-sm font-medium leading-6 text-amber-300">{runtimeNotice}</Text>
                         </View>
                       ) : null}
                       {remoteTalkers.length > 0 ? (
@@ -2579,8 +2579,8 @@ export default function App() {
                         </View>
                       ) : null}
                       {preflightStep === "done" && preflightPassed === false ? (
-                        <View className="rounded-xl border border-destructive/30 bg-destructive/10 p-3">
-                          <Text className="text-sm text-destructive">
+                        <View className="rounded-xl border border-red-700 bg-red-950 p-3">
+                          <Text className="text-sm font-medium text-red-300">
                             {String.fromCodePoint(0x2717)} Mic test failed — no audio detected
                           </Text>
                         </View>
