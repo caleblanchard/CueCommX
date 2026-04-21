@@ -21,6 +21,25 @@ import {
 } from "react-native";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  ArrowLeft,
+  Camera,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Circle,
+  Globe,
+  Headphones,
+  Link,
+  Megaphone,
+  MessageCircle,
+  Mic,
+  Phone,
+  Radio,
+  Settings,
+  Timer,
+  X,
+} from "lucide-react-native";
 
 import { CueCommXRealtimeClient, type RealtimeConnectionState } from "@cuecommx/core";
 import type {
@@ -291,15 +310,12 @@ function ChannelPermissionCard({
         <View className="flex-row items-center gap-2">
           <Text className="text-base font-semibold text-foreground">{name}</Text>
           {isGlobal ? (
-            <Text className="text-sm" accessibilityLabel="Global channel">
-              {String.fromCodePoint(0x1f310)}
-            </Text>
+            <Globe accessibilityLabel="Global channel" color="#94a3b8" size={16} />
           ) : null}
           {isProgram ? (
-            <View className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5">
-              <Text className="text-[10px] font-semibold uppercase tracking-control text-amber-400">
-                {String.fromCodePoint(0x1f4e1)} Program
-              </Text>
+            <View className="flex-row items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5">
+              <Radio color="#fbbf24" size={10} />
+              <Text className="text-[10px] font-semibold uppercase tracking-control text-amber-400">Program</Text>
             </View>
           ) : null}
           {isVoxMode && canTalk ? (
@@ -407,19 +423,28 @@ function ChannelPermissionCard({
                   className="rounded-lg px-3 py-2"
                   onPress={() => { onSignal("call"); setSignalMenuOpen(false); }}
                 >
-                  <Text className="text-sm font-medium text-red-400">{String.fromCodePoint(0x1f4de)} Call</Text>
+                  <View className="flex-row items-center gap-2">
+                  <Phone color="#f87171" size={14} />
+                  <Text className="text-sm font-medium text-red-400">Call</Text>
+                </View>
                 </Pressable>
                 <Pressable
                   className="rounded-lg px-3 py-2"
                   onPress={() => { onSignal("standby"); setSignalMenuOpen(false); }}
                 >
-                  <Text className="text-sm font-medium text-amber-400">{String.fromCodePoint(0x23f3)} Standby</Text>
+                  <View className="flex-row items-center gap-2">
+                  <Timer color="#fbbf24" size={14} />
+                  <Text className="text-sm font-medium text-amber-400">Standby</Text>
+                </View>
                 </Pressable>
                 <Pressable
                   className="rounded-lg px-3 py-2"
                   onPress={() => { onSignal("go"); setSignalMenuOpen(false); }}
                 >
-                  <Text className="text-sm font-medium text-green-400">{String.fromCodePoint(0x1f7e2)} Go</Text>
+                  <View className="flex-row items-center gap-2">
+                  <Check color="#4ade80" size={14} />
+                  <Text className="text-sm font-medium text-green-400">Go</Text>
+                </View>
                 </Pressable>
               </View>
             ) : null}
@@ -431,9 +456,10 @@ function ChannelPermissionCard({
           className="flex-row items-center justify-center gap-2 rounded-xl border border-border bg-secondary px-4 py-2"
           onPress={onChat}
         >
-          <Text className="text-xs font-semibold uppercase tracking-control text-foreground">
-            {String.fromCodePoint(0x1f4ac)} Chat
-          </Text>
+          <View className="flex-row items-center gap-1.5">
+            <MessageCircle color="#f8fafc" size={14} />
+            <Text className="text-xs font-semibold uppercase tracking-control text-foreground">Chat</Text>
+          </View>
           {unreadCount > 0 ? (
             <View className="h-5 min-w-[20px] items-center justify-center rounded-full bg-destructive px-1">
               <Text className="text-[10px] font-bold text-white">{unreadCount}</Text>
@@ -1836,7 +1862,7 @@ export default function App() {
                   {/* Header */}
                   <View className="items-center gap-4">
                     <View className="h-16 w-16 items-center justify-center rounded-2xl bg-primary/15">
-                      <Text className="text-3xl">{String.fromCodePoint(0x1f399)}</Text>
+                      <Mic color="#5eead4" size={32} />
                     </View>
                     <Text className="text-3xl font-bold tracking-tight text-foreground">
                       CueCommX
@@ -1867,7 +1893,7 @@ export default function App() {
                           onPress={() => void handleCheckServerUrl(server.url)}
                         >
                           <View className="h-10 w-10 items-center justify-center rounded-xl bg-primary/15">
-                            <Text className="text-xl">{String.fromCodePoint(0x1f4e1)}</Text>
+                            <Radio color="#5eead4" size={20} />
                           </View>
                           <View className="flex-1 gap-0.5">
                             <Text className="text-sm font-semibold text-foreground" numberOfLines={1}>
@@ -1877,7 +1903,7 @@ export default function App() {
                               {server.url}
                             </Text>
                           </View>
-                          <Text className="text-muted-foreground">{String.fromCodePoint(0x203a)}</Text>
+                          <ChevronRight color="#94a3b8" size={16} />
                         </Pressable>
                       ))}
 
@@ -1932,7 +1958,7 @@ export default function App() {
                         className="h-12 w-12 items-center justify-center rounded-xl border border-border bg-card active:opacity-70"
                         onPress={() => void handleOpenQrScanner()}
                       >
-                        <Text className="text-xl">{String.fromCodePoint(0x1f4f7)}</Text>
+                        <Camera color="#94a3b8" size={20} />
                       </Pressable>
                     </View>
                   </View>
@@ -1959,9 +1985,10 @@ export default function App() {
             >
               <View className="gap-8 px-6 py-10">
                 <View className="items-center gap-4">
-                  <View className="rounded-full border border-success/30 bg-success/10 px-4 py-2">
+                  <View className="flex-row items-center gap-2 rounded-full border border-success/30 bg-success/10 px-4 py-2">
+                    <Circle color="#10b981" fill="#10b981" size={8} />
                     <Text className="text-xs font-semibold text-success">
-                      {String.fromCodePoint(0x25cf)} {state.status?.name ?? "Server connected"}
+                      {state.status?.name ?? "Server connected"}
                     </Text>
                   </View>
                   <Text className="text-2xl font-bold tracking-tight text-foreground">
@@ -2032,9 +2059,10 @@ export default function App() {
                 ) : null}
 
                 <Pressable className="items-center py-2" onPress={handleDisconnect}>
-                  <Text className="text-sm font-medium text-muted-foreground">
-                    {String.fromCodePoint(0x2190)} Change server
-                  </Text>
+                  <View className="flex-row items-center gap-1.5">
+                    <ArrowLeft color="#94a3b8" size={14} />
+                    <Text className="text-sm font-medium text-muted-foreground">Change server</Text>
+                  </View>
                 </Pressable>
               </View>
             </ScrollView>
@@ -2169,9 +2197,10 @@ export default function App() {
                     {/* All-Page active banner */}
                     {allPageActive ? (
                       <View className="rounded-xl border border-amber-500/50 bg-amber-500/10 px-4 py-3">
-                        <Text className="text-sm font-medium text-amber-400">
-                          {String.fromCodePoint(0x1f4e2)} All-Page by {allPageActive.username}
-                        </Text>
+                        <View className="flex-row items-center gap-2">
+                          <Megaphone color="#fbbf24" size={16} />
+                          <Text className="text-sm font-medium text-amber-400">All-Page by {allPageActive.username}</Text>
+                        </View>
                       </View>
                     ) : null}
 
@@ -2189,19 +2218,20 @@ export default function App() {
                           : signal.signalType === "go"
                             ? "text-green-400"
                             : "text-amber-400";
-                      const icon =
+                      const signalIcon =
                         signal.signalType === "call"
-                          ? String.fromCodePoint(0x1f4de)
+                          ? <Phone color="#f87171" size={14} />
                           : signal.signalType === "go"
-                            ? String.fromCodePoint(0x1f7e2)
-                            : String.fromCodePoint(0x23f3);
+                            ? <Check color="#4ade80" size={14} />
+                            : <Timer color="#fbbf24" size={14} />;
                       return (
                         <View
                           className={`flex-row items-center gap-3 rounded-xl border px-4 py-3 ${colorClass}`}
                           key={signal.signalId}
                         >
+                          {signalIcon}
                           <Text className={`flex-1 text-sm font-medium ${textColor}`}>
-                            {icon} {signal.signalType.toUpperCase()} from {signal.fromUsername}
+                            {signal.signalType.toUpperCase()} from {signal.fromUsername}
                           </Text>
                           <Pressable
                             accessibilityRole="button"
@@ -2217,9 +2247,12 @@ export default function App() {
                     {/* Incoming call banner */}
                     {incomingCall ? (
                       <View className="flex-row items-center gap-3 rounded-xl border border-blue-500/50 bg-blue-500/10 px-4 py-3">
-                        <Text className="flex-1 text-sm font-medium text-blue-400">
-                          {String.fromCodePoint(0x1f4de)} Incoming call from {incomingCall.fromUsername}
-                        </Text>
+                        <View className="flex-1 flex-row items-center gap-2">
+                          <Phone color="#60a5fa" size={14} />
+                          <Text className="text-sm font-medium text-blue-400">
+                            Incoming call from {incomingCall.fromUsername}
+                          </Text>
+                        </View>
                         <Pressable
                           accessibilityRole="button"
                           className="rounded-lg border border-success/40 bg-success/15 px-3 py-1.5"
@@ -2246,15 +2279,20 @@ export default function App() {
                             : "border-blue-500/50 bg-blue-500/10"
                         }`}
                       >
-                        <Text
-                          className={`flex-1 text-sm font-medium ${
-                            directCall.state === "active" ? "text-green-400" : "text-blue-400"
-                          }`}
-                        >
+                        <View className="flex-1 flex-row items-center gap-2">
                           {directCall.state === "active"
-                            ? `${String.fromCodePoint(0x1f517)} Direct call with ${directCall.peerUsername}`
-                            : `${String.fromCodePoint(0x1f4de)} Calling ${directCall.peerUsername}...`}
-                        </Text>
+                            ? <Link color="#4ade80" size={14} />
+                            : <Phone color="#60a5fa" size={14} />}
+                          <Text
+                            className={`text-sm font-medium ${
+                              directCall.state === "active" ? "text-green-400" : "text-blue-400"
+                            }`}
+                          >
+                            {directCall.state === "active"
+                              ? `Direct call with ${directCall.peerUsername}`
+                              : `Calling ${directCall.peerUsername}...`}
+                          </Text>
+                        </View>
                         <Pressable
                           accessibilityRole="button"
                           className="rounded-lg border border-destructive/40 bg-destructive/15 px-3 py-1.5"
@@ -2268,9 +2306,12 @@ export default function App() {
                     {/* IFB receive status */}
                     {ifbState ? (
                       <View className="rounded-xl border border-amber-500/50 bg-amber-500/10 px-4 py-3">
-                        <Text className="text-sm font-medium text-amber-400">
-                          {String.fromCodePoint(0x1f3a7)} {ifbState.fromUsername} is speaking to you — program audio ducked
-                        </Text>
+                        <View className="flex-row items-center gap-2">
+                          <Headphones color="#fbbf24" size={16} />
+                          <Text className="flex-1 text-sm font-medium text-amber-400">
+                            {ifbState.fromUsername} is speaking to you — program audio ducked
+                          </Text>
+                        </View>
                       </View>
                     ) : null}
 
@@ -2563,9 +2604,10 @@ export default function App() {
                       />
                       {preflightStep === "recording" ? (
                         <View className="rounded-xl border border-primary/30 bg-primary/10 p-3">
-                          <Text className="text-sm text-primary">
-                            {String.fromCodePoint(0x1f399)} Recording — speak into your mic...
-                          </Text>
+                          <View className="flex-row items-center gap-2">
+                            <Mic color="#5eead4" size={14} />
+                            <Text className="text-sm text-primary">Recording — speak into your mic...</Text>
+                          </View>
                           <View className="mt-2 h-3 overflow-hidden rounded-full bg-secondary/80">
                             <View
                               className="h-full rounded-full bg-primary"
@@ -2576,16 +2618,18 @@ export default function App() {
                       ) : null}
                       {preflightStep === "done" && preflightPassed === true ? (
                         <View className="rounded-xl border border-success/30 bg-success/10 p-3">
-                          <Text className="text-sm text-success">
-                            {String.fromCodePoint(0x2713)} Mic test passed
-                          </Text>
+                          <View className="flex-row items-center gap-2">
+                            <Check color="#10b981" size={14} />
+                            <Text className="text-sm text-success">Mic test passed</Text>
+                          </View>
                         </View>
                       ) : null}
                       {preflightStep === "done" && preflightPassed === false ? (
                         <View className="rounded-xl border border-red-700 bg-red-950 p-3">
-                          <Text className="text-sm font-medium text-red-300">
-                            {String.fromCodePoint(0x2717)} Mic test failed — no audio detected
-                          </Text>
+                          <View className="flex-row items-center gap-2">
+                            <X color="#fca5a5" size={14} />
+                            <Text className="text-sm font-medium text-red-300">Mic test failed — no audio detected</Text>
+                          </View>
                         </View>
                       ) : null}
                     </SectionCard>
@@ -2735,9 +2779,10 @@ export default function App() {
                                 key={user.id}
                                 onPress={() => requestDirectCallHandler(user.id)}
                               >
-                                <Text className="text-sm font-medium text-foreground">
-                                  {String.fromCodePoint(0x1f4de)} {user.username}
-                                </Text>
+                                <View className="flex-row items-center gap-2">
+                                  <Phone color="#f8fafc" size={14} />
+                                  <Text className="text-sm font-medium text-foreground">{user.username}</Text>
+                                </View>
                               </Pressable>
                             ))}
                         </View>
@@ -2760,9 +2805,10 @@ export default function App() {
                                 key={user.id}
                                 onPress={() => handleStartIFB(user.id)}
                               >
-                                <Text className="text-sm font-medium text-foreground">
-                                  {String.fromCodePoint(0x1f3a7)} IFB → {user.username}
-                                </Text>
+                                <View className="flex-row items-center gap-2">
+                                  <Headphones color="#f8fafc" size={14} />
+                                  <Text className="text-sm font-medium text-foreground">IFB → {user.username}</Text>
+                                </View>
                               </Pressable>
                             ))}
                           <Pressable
@@ -2828,7 +2874,7 @@ export default function App() {
                   className="flex-1 items-center gap-0.5 py-2.5"
                   onPress={() => setActiveTab("channels")}
                 >
-                  <Text className="text-xl">{String.fromCodePoint(0x1f399)}</Text>
+                  <Mic color={activeTab === "channels" ? "#5eead4" : "#94a3b8"} size={22} />
                   <Text
                     className={`text-[10px] font-semibold uppercase tracking-control ${
                       activeTab === "channels" ? "text-primary" : "text-muted-foreground"
@@ -2846,7 +2892,7 @@ export default function App() {
                   className="flex-1 items-center gap-0.5 py-2.5"
                   onPress={() => setActiveTab("settings")}
                 >
-                  <Text className="text-xl">{String.fromCodePoint(0x2699, 0xfe0f)}</Text>
+                  <Settings color={activeTab === "settings" ? "#5eead4" : "#94a3b8"} size={22} />
                   <Text
                     className={`text-[10px] font-semibold uppercase tracking-control ${
                       activeTab === "settings" ? "text-primary" : "text-muted-foreground"
@@ -2894,13 +2940,13 @@ export default function App() {
                   hitSlop={8}
                   onPress={() => setChatOpen(null)}
                 >
-                  <Text className="text-xl font-light text-primary">‹</Text>
+                  <ChevronLeft color="#5eead4" size={24} />
                   <Text className="text-sm font-semibold text-primary">Back</Text>
                 </Pressable>
 
                 {/* Channel name centered in remaining space */}
                 <View className="flex-1 flex-row items-center justify-center gap-1.5 pr-14">
-                  <Text className="text-base">{String.fromCodePoint(0x1f4ac)}</Text>
+                  <MessageCircle color="#94a3b8" size={18} />
                   <Text className="text-base font-semibold text-foreground" numberOfLines={1}>
                     {activeChannels.find((c) => c.id === chatOpen)?.name ?? chatOpen ?? "Chat"}
                   </Text>
