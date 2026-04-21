@@ -41,6 +41,8 @@ import {
   Timer,
   Volume2,
   X,
+  GripVertical,
+  ListOrdered,
 } from "lucide-react-native";
 
 import { CueCommXRealtimeClient, type RealtimeConnectionState } from "@cuecommx/core";
@@ -103,6 +105,8 @@ import {
   endLiveActivity,
   addToggleTalkListener,
 } from "cuecommx-live-activity";
+
+import DraggableFlatList, { ScaleDecorator, type RenderItemParams } from "react-native-draggable-flatlist";
 
 interface ViewState {
   discovery?: DiscoveryResponse;
@@ -554,6 +558,8 @@ export default function App() {
   } | null>(null);
   const [groups, setGroups] = useState<GroupInfo[]>([]);
   const [activeGroupId, setActiveGroupId] = useState<string | undefined>();
+  const [channelOrder, setChannelOrder] = useState<string[]>([]);
+  const [arrangeChannelsOpen, setArrangeChannelsOpen] = useState(false);
   const [ifbState, setIFBState] = useState<{
     fromUserId: string;
     fromUsername: string;
@@ -618,24 +624,31 @@ export default function App() {
     const allChannels = (state.session?.channels ?? []) as ChannelInfo[];
     const nonConfidence = allChannels.filter((ch) => ch.channelType !== "confidence");
 
+    let filtered: ChannelInfo[];
     if (groups.length === 0 || !activeGroupId) {
-      return nonConfidence;
+      filtered = nonConfidence;
+    } else {
+      const activeGroup = groups.find((g) => g.id === activeGroupId);
+      if (!activeGroup) {
+        filtered = nonConfidence;
+      } else {
+        const groupChannelSet = new Set(activeGroup.channelIds);
+        const globals = nonConfidence.filter((ch) => ch.isGlobal);
+        const groupChannels = nonConfidence.filter(
+          (ch) => !ch.isGlobal && groupChannelSet.has(ch.id),
+        );
+        filtered = [...globals, ...groupChannels];
+      }
     }
 
-    const activeGroup = groups.find((g) => g.id === activeGroupId);
-
-    if (!activeGroup) {
-      return nonConfidence;
-    }
-
-    const groupChannelSet = new Set(activeGroup.channelIds);
-    const globals = nonConfidence.filter((ch) => ch.isGlobal);
-    const groupChannels = nonConfidence.filter(
-      (ch) => !ch.isGlobal && groupChannelSet.has(ch.id),
-    );
-
-    return [...globals, ...groupChannels];
-  }, [state.session?.channels, groups, activeGroupId]);
+    if (!channelOrder.length) return filtered;
+    const orderSet = new Set(channelOrder);
+    const ordered = channelOrder
+      .map((id) => filtered.find((ch) => ch.id === id))
+      .filter((ch): ch is ChannelInfo => Boolean(ch));
+    const remainder = filtered.filter((ch) => !orderSet.has(ch.id));
+    return [...ordered, ...remainder];
+  }, [state.session?.channels, groups, activeGroupId, channelOrder]);
 
   const confidenceChannels: ChannelInfo[] = useMemo(() =>
     ((state.session?.channels ?? []) as ChannelInfo[]).filter((ch) => ch.channelType === "confidence"),
@@ -851,7 +864,7 @@ export default function App() {
 
     startLiveActivity(
       state.session.user.username,
-      activeChannels.map((ch) => ch.name)
+      state.status?.name ?? "CueCommX"
     );
 
     const toggleSub = addToggleTalkListener(() => {
@@ -881,13 +894,29 @@ export default function App() {
   useEffect(() => {
     if (Platform.OS !== "ios" || !audioReady || !state.session) return;
 
+    const talkChannelNames = activeChannels
+      .filter((ch) => state.operatorState?.talkChannelIds?.includes(ch.id))
+      .map((ch) => ch.name);
+    const listenChannelNames = activeChannels
+      .filter((ch) => state.operatorState?.listenChannelIds?.includes(ch.id))
+      .map((ch) => ch.name);
     updateLiveActivity({
       isTalking: (state.operatorState?.talkChannelIds?.length ?? 0) > 0,
       isArmed: true,
-      activeChannelNames: activeChannels.map((ch) => ch.name),
-      talkingUserName: undefined,
+      talkChannelNames,
+      listenChannelNames,
+      activeTalkers: remoteTalkers.map((t) => t.producerUsername),
+      connectedUserCount: onlineUsers.length,
     });
-  }, [audioReady, state.session, state.operatorState?.talkChannelIds, activeChannels]);
+  }, [
+    audioReady,
+    state.session,
+    state.operatorState?.talkChannelIds,
+    state.operatorState?.listenChannelIds,
+    activeChannels,
+    remoteTalkers,
+    onlineUsers,
+  ]);
 
   useEffect(() => {
     if (!state.session || !state.serverBaseUrl) {
@@ -1395,6 +1424,7 @@ export default function App() {
           const ids = sp.latchModeChannelIds as string[];
           setTalkMode(ids.length > 0 ? "latched" : "momentary");
         }
+        if (Array.isArray(sp.channelOrder)) setChannelOrder(sp.channelOrder as string[]);
       }
 
       setState((current) => ({
@@ -1448,6 +1478,7 @@ export default function App() {
     setIncomingCall(null);
     setGroups([]);
     setActiveGroupId(undefined);
+    setChannelOrder([]);
     setIFBState(null);
     setVoxEnabled(false);
     setPreflightStep("idle");
@@ -1465,6 +1496,7 @@ export default function App() {
         channelVolumes,
         audioProcessing,
         activeGroupId,
+        channelOrder,
       };
       const res = await fetch(`${state.serverBaseUrl}api/preferences`, {
         method: "PUT",
@@ -2915,6 +2947,30 @@ export default function App() {
                       </SectionCard>
                     ) : null}
 
+                    {/* Arrange Channels */}
+                    {visibleChannels.length > 0 && state.session ? (
+                      <SectionCard>
+                        <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                          Arrange Channels
+                        </Text>
+                        <Text className="text-sm leading-6 text-muted-foreground">
+                          Set the order channels appear in your view.
+                        </Text>
+                        <ActionButton
+                          label="Arrange channels"
+                          onPress={() => setArrangeChannelsOpen(true)}
+                          tone="secondary"
+                        />
+                        {channelOrder.length > 0 ? (
+                          <ActionButton
+                            label="Reset to default order"
+                            onPress={() => setChannelOrder([])}
+                            tone="secondary"
+                          />
+                        ) : null}
+                      </SectionCard>
+                    ) : null}
+
                     {/* User profile */}
                     <SectionCard>
                       <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
@@ -2988,6 +3044,56 @@ export default function App() {
             </View>
           )}
         </KeyboardAvoidingView>
+
+        {/* Arrange Channels Modal */}
+        <Modal
+          animationType="slide"
+          onRequestClose={() => setArrangeChannelsOpen(false)}
+          transparent={false}
+          visible={arrangeChannelsOpen}
+        >
+          <SafeAreaView className="flex-1 bg-background">
+            <View className="flex-row items-center justify-between border-b border-border px-4 py-3">
+              <Text className="text-base font-semibold text-foreground">Arrange Channels</Text>
+              <Pressable
+                accessibilityLabel="Close"
+                hitSlop={12}
+                onPress={() => setArrangeChannelsOpen(false)}
+              >
+                <X color="#94a3b8" size={20} />
+              </Pressable>
+            </View>
+            <Text className="px-4 pt-3 pb-1 text-sm text-muted-foreground">
+              Hold and drag to reorder channels.
+            </Text>
+            <DraggableFlatList
+              data={channelOrder.length
+                ? channelOrder
+                    .map((id) => visibleChannels.find((ch) => ch.id === id))
+                    .filter((ch): ch is ChannelInfo => Boolean(ch))
+                    .concat(visibleChannels.filter((ch) => !new Set(channelOrder).has(ch.id)))
+                : visibleChannels}
+              keyExtractor={(item) => item.id}
+              onDragEnd={({ data }) => setChannelOrder(data.map((ch) => ch.id))}
+              renderItem={({ item, drag, isActive }: RenderItemParams<ChannelInfo>) => (
+                <ScaleDecorator>
+                  <Pressable
+                    onLongPress={drag}
+                    className={`flex-row items-center gap-3 mx-4 my-1 rounded-lg border px-3 py-3 ${isActive ? "border-primary bg-primary/10" : "border-border bg-card"}`}
+                  >
+                    <GripVertical color="#94a3b8" size={18} />
+                    <View
+                      className="h-3 w-3 flex-shrink-0 rounded-full"
+                      style={{ backgroundColor: item.color }}
+                    />
+                    <Text className="flex-1 text-sm text-foreground">{item.name}</Text>
+                  </Pressable>
+                </ScaleDecorator>
+              )}
+              contentContainerStyle={{ paddingBottom: 24 }}
+            />
+          </SafeAreaView>
+        </Modal>
 
         <Modal
           animationType="slide"

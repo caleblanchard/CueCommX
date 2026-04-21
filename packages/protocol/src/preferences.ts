@@ -27,6 +27,7 @@ export type SidetoneSettings = z.infer<typeof SidetoneSettingsSchema>;
 export const UserPreferencesSchema = z.object({
   activeGroupId: z.string().optional(),
   audioProcessing: AudioProcessingPreferencesSchema.optional(),
+  channelOrder: z.array(z.string()).optional(),
   channelPans: z.record(z.string(), z.number().min(-1).max(1)).optional(),
   channelVolumes: z.record(z.string(), z.number().min(0).max(100)).optional(),
   latchModeChannelIds: z.array(z.string()).optional(),

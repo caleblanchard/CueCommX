@@ -264,14 +264,6 @@ describe("Web Client App", () => {
     expect(await screen.findByText("Main Church")).toBeInTheDocument();
     expect(await screen.findAllByText("http://10.0.0.25:3000/")).not.toHaveLength(0);
 
-    fireEvent.change(screen.getByLabelText("Open a different server"), {
-      target: { value: "10.0.0.50:3000" },
-    });
-    expect(await screen.findByRole("link", { name: "Open entered server" })).toHaveAttribute(
-      "href",
-      "http://10.0.0.50:3000/",
-    );
-
     fireEvent.change(screen.getByLabelText("Operator name"), {
       target: { value: "Chuck" },
     });

@@ -1,23 +1,24 @@
 import ExpoModulesCore
 import ActivityKit
 
-// CueCommXLiveActivityAttributes must match the definition in the Widget Extension.
-// ActivityKit uses Codable serialization, so field names and types must be identical.
+// Must exactly match CueCommXLiveActivityAttributes in the Widget Extension.
+// ActivityKit serializes ContentState via Codable — field names and types must be identical.
 @available(iOS 16.2, *)
 struct CueCommXLiveActivityAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
         var isTalking: Bool
         var isArmed: Bool
-        var activeChannelNames: [String]
-        var talkingUserName: String?
+        var talkChannelNames: [String]
+        var listenChannelNames: [String]
+        var activeTalkers: [String]
+        var connectedUserCount: Int
     }
 
     var userName: String
+    var serverName: String
 }
 
 public class CueCommXLiveActivityModule: Module {
-    // Type-erased backing store: Swift forbids @available on stored properties.
-    // The computed accessor below enforces the iOS 16.2+ guard at the call site.
     private var _currentActivity: Any?
 
     @available(iOS 16.2, *)
@@ -37,13 +38,11 @@ public class CueCommXLiveActivityModule: Module {
         OnDestroy {
             self.teardownDarwinListener()
             if #available(iOS 16.2, *) {
-                Task {
-                    await self.currentActivity?.end(nil, dismissalPolicy: .immediate)
-                }
+                Task { await self.currentActivity?.end(nil, dismissalPolicy: .immediate) }
             }
         }
 
-        Function("startActivity") { (userName: String, channels: [String]) in
+        Function("startActivity") { (userName: String, serverName: String) in
             guard #available(iOS 16.2, *) else { return }
 
             Task { @MainActor in
@@ -52,12 +51,17 @@ public class CueCommXLiveActivityModule: Module {
                     self.currentActivity = nil
                 }
 
-                let attributes = CueCommXLiveActivityAttributes(userName: userName)
+                let attributes = CueCommXLiveActivityAttributes(
+                    userName: userName,
+                    serverName: serverName
+                )
                 let initialState = CueCommXLiveActivityAttributes.ContentState(
                     isTalking: false,
                     isArmed: true,
-                    activeChannelNames: channels,
-                    talkingUserName: nil
+                    talkChannelNames: [],
+                    listenChannelNames: [],
+                    activeTalkers: [],
+                    connectedUserCount: 0
                 )
 
                 do {
@@ -73,7 +77,14 @@ public class CueCommXLiveActivityModule: Module {
             }
         }
 
-        Function("updateActivity") { (isTalking: Bool, isArmed: Bool, channels: [String], talkingUser: String?) in
+        Function("updateActivity") { (
+            isTalking: Bool,
+            isArmed: Bool,
+            talkChannelNames: [String],
+            listenChannelNames: [String],
+            activeTalkers: [String],
+            connectedUserCount: Int
+        ) in
             guard #available(iOS 16.2, *) else { return }
             guard let activity = self.currentActivity else { return }
 
@@ -81,8 +92,10 @@ public class CueCommXLiveActivityModule: Module {
                 let newState = CueCommXLiveActivityAttributes.ContentState(
                     isTalking: isTalking,
                     isArmed: isArmed,
-                    activeChannelNames: channels,
-                    talkingUserName: talkingUser
+                    talkChannelNames: talkChannelNames,
+                    listenChannelNames: listenChannelNames,
+                    activeTalkers: activeTalkers,
+                    connectedUserCount: connectedUserCount
                 )
                 let content = ActivityContent(state: newState, staleDate: nil)
                 await activity.update(content)
@@ -95,26 +108,20 @@ public class CueCommXLiveActivityModule: Module {
 
             Task {
                 await activity.end(nil, dismissalPolicy: .immediate)
-                await MainActor.run {
-                    self.currentActivity = nil
-                }
+                await MainActor.run { self.currentActivity = nil }
             }
         }
     }
 
     private func setupDarwinListener() {
         let notificationName = "com.cuecommx.mobile.toggleTalk" as CFString
-        let center = CFNotificationCenterGetDarwinNotifyCenter()
-
         CFNotificationCenterAddObserver(
-            center,
+            CFNotificationCenterGetDarwinNotifyCenter(),
             Unmanaged.passUnretained(self).toOpaque(),
             { _, observer, _, _, _ in
                 guard let observer = observer else { return }
                 let module = Unmanaged<CueCommXLiveActivityModule>.fromOpaque(observer).takeUnretainedValue()
-                DispatchQueue.main.async {
-                    module.sendEvent("onToggleTalk", [:])
-                }
+                DispatchQueue.main.async { module.sendEvent("onToggleTalk", [:]) }
             },
             notificationName,
             nil,
@@ -124,9 +131,8 @@ public class CueCommXLiveActivityModule: Module {
 
     private func teardownDarwinListener() {
         let notificationName = "com.cuecommx.mobile.toggleTalk" as CFString
-        let center = CFNotificationCenterGetDarwinNotifyCenter()
         CFNotificationCenterRemoveObserver(
-            center,
+            CFNotificationCenterGetDarwinNotifyCenter(),
             Unmanaged.passUnretained(self).toOpaque(),
             CFNotificationName(notificationName),
             nil

@@ -1,5 +1,5 @@
 import { toast, Toaster } from "sonner";
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import * as Separator from "@radix-ui/react-separator";
 import { CueCommXRealtimeClient, type RealtimeConnectionState } from "@cuecommx/core";
@@ -38,11 +38,14 @@ import {
   Radio,
   RadioTower,
   Send,
+  Settings,
   Timer,
   Volume1,
   Volume2,
   Wifi,
   X,
+  GripVertical,
+  ListOrdered,
 } from "lucide-react";
 
 import { Badge } from "./components/ui/badge.js";
@@ -92,6 +95,52 @@ import {
   type VoxSettings,
   WEB_CLIENT_PREFERENCES_KEY,
 } from "./preferences.js";
+
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+
+function SortableChannelItem({ channel }: { channel: ChannelInfo }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: channel.id });
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center gap-3 rounded-lg border border-border/60 bg-background/35 px-3 py-2"
+    >
+      <button
+        {...attributes}
+        {...listeners}
+        aria-label="Drag to reorder"
+        className="cursor-grab text-muted-foreground hover:text-foreground focus:outline-none active:cursor-grabbing"
+        type="button"
+      >
+        <GripVertical className="h-4 w-4" />
+      </button>
+      <div className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: channel.color }} />
+      <span className="text-sm text-foreground">{channel.name}</span>
+    </div>
+  );
+}
 
 interface ViewState {
   discovery?: DiscoveryResponse;
@@ -192,45 +241,6 @@ function formatConnectionQuality(quality: ConnectionQuality | undefined): {
   };
 }
 
-function normalizeManualServerUrl(input: string): string {
-  const trimmed = input.trim();
-
-  if (!trimmed) {
-    throw new Error("Enter a server URL like 10.0.0.25:3000.");
-  }
-
-  const withProtocol = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed)
-    ? trimmed
-    : `http://${trimmed}`;
-  const url = new URL(withProtocol);
-
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("CueCommX manual connect requires an http:// or https:// server URL.");
-  }
-
-  url.pathname = "/";
-  url.search = "";
-  url.hash = "";
-
-  return url.toString();
-}
-
-function getManualConnectState(input: string): { error?: string; url?: string } {
-  if (!input.trim()) {
-    return {};
-  }
-
-  try {
-    return {
-      url: normalizeManualServerUrl(input),
-    };
-  } catch (error) {
-    return {
-      error:
-        error instanceof Error ? error.message : "Enter a server URL like 10.0.0.25:3000.",
-    };
-  }
-}
 
 function normalizeDeviceId(deviceId: string): string | undefined {
   return deviceId.trim() ? deviceId : undefined;
@@ -262,7 +272,6 @@ export default function App() {
     [persistedPreferencesRaw],
   );
   const [state, setState] = useState<ViewState>(initialState);
-  const [serverUrlInput, setServerUrlInput] = useState("");
   const [username, setUsername] = useState("");
   const [pin, setPin] = useState("");
   const [audioArmed, setAudioArmed] = useState(false);
@@ -357,6 +366,13 @@ export default function App() {
   } | null>(null);
   const [chatMessages, setChatMessages] = useState<Record<string, Array<{ id: string; channelId: string; userId: string; username: string; text: string; timestamp: number; messageType: "text" | "system" }>>>({});
   const [chatOpen, setChatOpen] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [channelOrder, setChannelOrder] = useState<string[]>([]);
+  const [arrangeChannelsOpen, setArrangeChannelsOpen] = useState(false);
+  const dndSensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -380,36 +396,41 @@ export default function App() {
       .map((g) => g.id) ?? [];
   }, [state.session]);
 
-  // Filter visible channels based on active group
+  // Filter visible channels based on active group, then apply user's custom order
   const visibleChannels: ChannelInfo[] = useMemo(() => {
     const allChannels = state.session?.channels ?? [];
     const nonConfidence = allChannels.filter((ch) => ch.channelType !== "confidence");
 
+    let filtered: ChannelInfo[];
     if (groups.length === 0 || !activeGroupId) {
-      return nonConfidence;
+      filtered = nonConfidence;
+    } else {
+      const activeGroup = groups.find((g) => g.id === activeGroupId);
+      if (!activeGroup) {
+        filtered = nonConfidence;
+      } else {
+        const groupChannelSet = new Set(activeGroup.channelIds);
+        const globals = nonConfidence.filter((ch) => ch.isGlobal);
+        const groupChannels = nonConfidence.filter(
+          (ch) => !ch.isGlobal && groupChannelSet.has(ch.id),
+        );
+        filtered = [...globals, ...groupChannels];
+      }
     }
 
-    const activeGroup = groups.find((g) => g.id === activeGroupId);
-
-    if (!activeGroup) {
-      return nonConfidence;
-    }
-
-    const groupChannelSet = new Set(activeGroup.channelIds);
-
-    const globals = nonConfidence.filter((ch) => ch.isGlobal);
-    const groupChannels = nonConfidence.filter(
-      (ch) => !ch.isGlobal && groupChannelSet.has(ch.id),
-    );
-
-    return [...globals, ...groupChannels];
-  }, [state.session?.channels, groups, activeGroupId]);
+    if (!channelOrder.length) return filtered;
+    const orderSet = new Set(channelOrder);
+    const ordered = channelOrder
+      .map((id) => filtered.find((ch) => ch.id === id))
+      .filter((ch): ch is ChannelInfo => Boolean(ch));
+    const remainder = filtered.filter((ch) => !orderSet.has(ch.id));
+    return [...ordered, ...remainder];
+  }, [state.session?.channels, groups, activeGroupId, channelOrder]);
 
   const confidenceChannels: ChannelInfo[] = useMemo(() =>
     (state.session?.channels ?? []).filter((ch) => ch.channelType === "confidence"),
     [state.session?.channels],
   );
-  const manualConnect = useMemo(() => getManualConnectState(serverUrlInput), [serverUrlInput]);
   const currentConnectUrl = state.discovery?.primaryUrl ?? window.location.origin;
   const listenChannelIds = state.operatorState?.listenChannelIds ?? [];
   const mixChannelVolumes = useMemo(
@@ -768,9 +789,14 @@ export default function App() {
                 const channelName =
                   current.session?.channels?.find((c) => c.id === msg.channelId)?.name ??
                   "Chat";
+                const channelId = msg.channelId;
                 toast(`${channelName}: ${msg.username}`, {
                   description: msg.text.length > 80 ? msg.text.slice(0, 80) + "…" : msg.text,
                   duration: 4000,
+                  action: {
+                    label: "Open",
+                    onClick: () => setChatOpen(channelId),
+                  },
                 });
               }
               return openChannel;
@@ -1229,6 +1255,97 @@ export default function App() {
     }
   });
 
+  // Global keyboard shortcuts
+  useEffect(() => {
+    if (!audioReady || state.realtimeState !== "connected") return;
+
+    const heldKeys = new Set<string>();
+
+    function isInputFocused(): boolean {
+      const el = document.activeElement;
+      if (!el) return false;
+      const tag = el.tagName.toLowerCase();
+      return tag === "input" || tag === "textarea" || tag === "select" || (el as HTMLElement).isContentEditable;
+    }
+
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (isInputFocused()) return;
+      if (event.repeat) return;
+
+      const { key } = event;
+
+      // Esc — stop all active talk
+      if (key === "Escape") {
+        const talkChannelIds = state.operatorState?.talkChannelIds ?? [];
+        for (const id of talkChannelIds) stopTalk(id, true);
+        return;
+      }
+
+      // Space — momentary PTT on first visible channel
+      if (key === " ") {
+        event.preventDefault();
+        const ch = visibleChannels[0];
+        if (ch && !heldKeys.has("Space")) {
+          heldKeys.add("Space");
+          startTalk(ch.id);
+        }
+        return;
+      }
+
+      // 1–9 — momentary PTT on channel N
+      if (/^[1-9]$/.test(key)) {
+        event.preventDefault();
+        const idx = Number(key) - 1;
+        const ch = visibleChannels[idx];
+        if (ch && !heldKeys.has(key)) {
+          heldKeys.add(key);
+          startTalk(ch.id);
+        }
+        return;
+      }
+
+      // F1–F9 — toggle listen on channel N
+      const fMatch = /^F([1-9])$/.exec(key);
+      if (fMatch) {
+        event.preventDefault();
+        const idx = Number(fMatch[1]) - 1;
+        const ch = visibleChannels[idx];
+        if (ch) {
+          const listening = (state.operatorState?.listenChannelIds ?? []).includes(ch.id);
+          updateListen(ch.id, !listening);
+        }
+      }
+    }
+
+    function handleKeyUp(event: KeyboardEvent): void {
+      if (isInputFocused()) return;
+
+      const { key } = event;
+
+      if (key === " ") {
+        heldKeys.delete("Space");
+        const ch = visibleChannels[0];
+        if (ch) stopTalk(ch.id);
+        return;
+      }
+
+      if (/^[1-9]$/.test(key)) {
+        heldKeys.delete(key);
+        const idx = Number(key) - 1;
+        const ch = visibleChannels[idx];
+        if (ch) stopTalk(ch.id);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, [audioReady, state.realtimeState, state.operatorState, visibleChannels, startTalk, stopTalk, updateListen]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function handleLogin(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
 
@@ -1276,6 +1393,7 @@ export default function App() {
         if (sp.channelVolumes && typeof sp.channelVolumes === "object") setChannelVolumes(sp.channelVolumes as Record<string, number>);
         if (sp.channelPans && typeof sp.channelPans === "object") setChannelPans(sp.channelPans as Record<string, number>);
         if (Array.isArray(sp.latchModeChannelIds)) setLatchModeChannelIds(sp.latchModeChannelIds as string[]);
+        if (Array.isArray(sp.channelOrder)) setChannelOrder(sp.channelOrder as string[]);
         if (Array.isArray(sp.voxModeChannelIds)) setVoxModeChannelIds(sp.voxModeChannelIds as string[]);
         if (sp.sidetone && typeof sp.sidetone === "object") {
           const st = sp.sidetone as Record<string, unknown>;
@@ -1332,6 +1450,7 @@ export default function App() {
         sidetone,
         audioProcessing,
         activeGroupId,
+        channelOrder,
       };
       const res = await fetch("/api/preferences", {
         method: "PUT",
@@ -1370,6 +1489,18 @@ export default function App() {
       );
       setAudioReady(false);
     } finally {
+      setAudioBusy(false);
+    }
+  }
+
+  async function handleDisarmAudio(): Promise<void> {
+    if (!mediaControllerRef.current) return;
+    setAudioBusy(true);
+    try {
+      await mediaControllerRef.current.close();
+    } finally {
+      setAudioReady(false);
+      setAudioArmed(false);
       setAudioBusy(false);
     }
   }
@@ -1604,7 +1735,12 @@ export default function App() {
       <Toaster
         position="bottom-right"
         theme="dark"
-        toastOptions={{ classNames: { toast: "font-sans text-sm" } }}
+        toastOptions={{
+          classNames: {
+            toast: "font-sans text-sm",
+            actionButton: "!bg-primary !text-primary-foreground text-xs font-semibold px-2 py-1 rounded cursor-pointer",
+          },
+        }}
       />
       <div className="mx-auto flex max-w-7xl flex-col gap-6 px-6 py-8 sm:px-8 lg:px-10">
         <header
@@ -1631,14 +1767,25 @@ export default function App() {
               </p>
             </div>
             {isSignedIn ? (
-              <div className="flex flex-wrap gap-3">
-                <Badge variant="success">{state.session?.user.role ?? "operator"}</Badge>
-                <Badge variant={connectionBadge.variant}>{connectionBadge.label}</Badge>
-                <Badge variant={audioStatusBadge.variant}>{audioStatusBadge.label}</Badge>
-                <Badge variant="accent">
-                  {state.session?.channels.length ?? 0} assigned channel
-                  {(state.session?.channels.length ?? 0) === 1 ? "" : "s"}
-                </Badge>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-wrap gap-3">
+                  <Badge variant="success">{state.session?.user.role ?? "operator"}</Badge>
+                  <Badge variant={connectionBadge.variant}>{connectionBadge.label}</Badge>
+                  <Badge variant={audioStatusBadge.variant}>{audioStatusBadge.label}</Badge>
+                  <Badge variant="accent">
+                    {state.session?.channels.length ?? 0} assigned channel
+                    {(state.session?.channels.length ?? 0) === 1 ? "" : "s"}
+                  </Badge>
+                </div>
+                <Button
+                  onClick={() => setSettingsOpen(true)}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  <Settings className="mr-1.5 h-4 w-4" />
+                  Settings
+                </Button>
               </div>
             ) : null}
             {isSignedIn && tallySources.some((s) => s.state !== "none") ? (
@@ -1784,39 +1931,6 @@ export default function App() {
                           value={pin}
                         />
                       </div>
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium text-foreground" htmlFor="manual-server-url">
-                          Open a different server
-                        </label>
-                        <input
-                          className={inputClassName}
-                          id="manual-server-url"
-                          onChange={(event) => setServerUrlInput(event.target.value)}
-                          placeholder="10.0.0.25:3000"
-                          value={serverUrlInput}
-                        />
-                        <div className="flex flex-wrap gap-3">
-                          {manualConnect.url ? (
-                            <Button asChild variant="outline">
-                              <a href={manualConnect.url}>Open entered server</a>
-                            </Button>
-                          ) : (
-                            <Button disabled type="button" variant="outline">
-                              Open entered server
-                            </Button>
-                          )}
-                          {manualConnect.url ? (
-                            <span className="self-center break-all text-xs text-muted-foreground">
-                              {manualConnect.url}
-                            </span>
-                          ) : null}
-                        </div>
-                        {manualConnect.error ? (
-                          <div className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
-                            {manualConnect.error}
-                          </div>
-                        ) : null}
-                      </div>
                       <Button
                         className="w-full justify-center"
                         disabled={state.loginPending}
@@ -1880,7 +1994,7 @@ export default function App() {
               </Card>
             </section>
           ) : (
-            <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]">
+            <section className="space-y-4">
               <div className="space-y-4">
                 {forceMuteNotice ? (
                   <div className="animate-pulse rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm font-medium text-warning">
@@ -1898,7 +2012,21 @@ export default function App() {
                         : "Your channel layout is ready. Arm browser audio when you are ready to go live."}
                     </p>
                   </div>
-                  <Badge variant={audioStatusBadge.variant}>{audioStatusBadge.label}</Badge>
+                  <div className="flex items-center gap-3">
+                    {!audioReady ? (
+                      <Button
+                        disabled={state.realtimeState !== "connected" || audioBusy}
+                        onClick={() => void handleArmAudio()}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        <Mic className="mr-1.5 h-4 w-4" />
+                        {audioBusy ? "Arming..." : "Arm audio"}
+                      </Button>
+                    ) : null}
+                    <Badge variant={audioStatusBadge.variant}>{audioStatusBadge.label}</Badge>
+                  </div>
                 </div>
 
                 {(state.session?.user.role === "admin" || state.session?.user.role === "operator") ? (
@@ -2414,21 +2542,27 @@ export default function App() {
                       {callableUsers.length === 0 ? (
                         <p className="text-sm text-muted-foreground">No other users are online.</p>
                       ) : (
-                        <div className="flex flex-wrap gap-2">
-                          {callableUsers.map((user) => (
-                            <Button
-                              disabled={state.realtimeState !== "connected" || !audioReady}
-                              key={user.id}
-                              onClick={() => requestDirectCall(user.id)}
-                              size="sm"
-                              title={!audioReady ? "Arm audio first" : undefined}
-                              type="button"
-                              variant="outline"
-                            >
-                              <Phone className="h-3.5 w-3.5 mr-1.5" />
-                              {user.username}
-                            </Button>
-                          ))}
+                        <div className="space-y-3">
+                          <div className="flex flex-wrap gap-2">
+                            {callableUsers.map((user) => (
+                              <Button
+                                disabled={state.realtimeState !== "connected" || !audioReady}
+                                key={user.id}
+                                onClick={() => requestDirectCall(user.id)}
+                                size="sm"
+                                type="button"
+                                variant="outline"
+                              >
+                                <Phone className="h-3.5 w-3.5 mr-1.5" />
+                                {user.username}
+                              </Button>
+                            ))}
+                          </div>
+                          {!audioReady ? (
+                            <p className="text-xs text-amber-400">
+                              Arm audio in the Audio panel before placing a call.
+                            </p>
+                          ) : null}
                         </div>
                       )}
                     </CardContent>
@@ -2467,21 +2601,27 @@ export default function App() {
                       {callableUsers.length === 0 ? (
                         <p className="text-sm text-muted-foreground">No other users are online.</p>
                       ) : (
-                        <div className="flex flex-wrap gap-2">
-                          {callableUsers.map((user) => (
-                            <Button
-                              disabled={state.realtimeState !== "connected" || !audioReady}
-                              key={user.id}
-                              onClick={() => realtimeClientRef.current?.startIFB(user.id)}
-                              size="sm"
-                              title={!audioReady ? "Arm audio first" : undefined}
-                              type="button"
-                              variant="outline"
-                            >
-                              <Headphones className="h-3.5 w-3.5 mr-1.5" />
-                              {user.username}
-                            </Button>
-                          ))}
+                        <div className="space-y-3">
+                          <div className="flex flex-wrap gap-2">
+                            {callableUsers.map((user) => (
+                              <Button
+                                disabled={state.realtimeState !== "connected" || !audioReady}
+                                key={user.id}
+                                onClick={() => realtimeClientRef.current?.startIFB(user.id)}
+                                size="sm"
+                                type="button"
+                                variant="outline"
+                              >
+                                <Headphones className="h-3.5 w-3.5 mr-1.5" />
+                                {user.username}
+                              </Button>
+                            ))}
+                          </div>
+                          {!audioReady ? (
+                            <p className="text-xs text-amber-400">
+                              Arm audio in the Audio panel before starting an IFB.
+                            </p>
+                          ) : null}
                         </div>
                       )}
                     </CardContent>
@@ -2553,529 +2693,608 @@ export default function App() {
                 </div>
               ) : null}
 
-              <div className="space-y-4">
-                <Card>
-                  <CardHeader>
-                    <CardDescription>{audioReady ? "Audio settings" : "Browser audio"}</CardDescription>
-                    <CardTitle>{audioReady ? "Audio armed for comms" : "Arm browser audio"}</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <p className="text-sm leading-6 text-muted-foreground">
-                      {audioReady
-                        ? "Mic selection, input confidence, and monitor mix stay here while the channel grid remains focused on talk and listen."
-                        : "Browser audio is only surfaced after sign-in, because that is the first moment it becomes actionable for the operator."}
-                    </p>
-                    {!audioReady ? (
-                      <Button
-                        className="w-full justify-center"
-                        disabled={state.realtimeState !== "connected" || audioBusy}
-                        onClick={() => void handleArmAudio()}
-                        type="button"
-                        variant="secondary"
-                      >
-                        {audioBusy
-                          ? "Arming audio..."
-                          : audioArmed
-                            ? "Restore browser audio"
-                            : "Arm audio context"}
-                      </Button>
-                    ) : null}
-                    {audioReady ? (
-                      <>
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium text-foreground" htmlFor="mic-input">
-                            Mic input
-                          </label>
-                          <select
-                            className={inputClassName}
-                            disabled={!inputDevices.length || audioBusy}
-                            id="mic-input"
-                            onChange={(event) => void handleInputDeviceChange(event.target.value)}
-                            value={selectedInputDeviceId}
-                          >
-                            {inputDevices.length ? null : (
-                              <option value="">Grant mic access to load inputs</option>
-                            )}
-                            {inputDevices.map((device) => (
-                              <option key={device.deviceId} value={device.deviceId}>
-                                {device.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <SignalMeter label="Mic input level" value={inputLevel} />
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                            <label htmlFor="master-volume">Master monitor volume</label>
-                            <span>{masterVolume}%</span>
-                          </div>
-                          <input
-                            className={sliderClassName}
-                            id="master-volume"
-                            max={100}
-                            min={0}
-                            onChange={(event) => setMasterVolume(Number(event.target.value))}
-                            step={1}
-                            type="range"
-                            value={masterVolume}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                            Audio processing
-                          </p>
-                          <div className="grid gap-2">
-                            {([
-                              ["noiseSuppression", "Noise suppression"],
-                              ["autoGainControl", "Auto gain control"],
-                              ["echoCancellation", "Echo cancellation"],
-                            ] as const).map(([key, label]) => (
-                              <label
-                                className="flex cursor-pointer items-center justify-between rounded-lg border border-border/60 bg-background/35 px-3 py-2"
-                                key={key}
-                              >
-                                <span className="text-sm text-foreground">{label}</span>
-                                <input
-                                  checked={audioProcessing[key]}
-                                  className="h-4 w-4 accent-primary"
-                                  onChange={() =>
-                                    setAudioProcessing((prev) => ({
-                                      ...prev,
-                                      [key]: !prev[key],
-                                    }))
-                                  }
-                                  type="checkbox"
-                                />
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                            VOX settings
-                          </p>
-                          <div className="space-y-3 rounded-lg border border-border/60 bg-background/35 p-3">
-                            <div className="space-y-1">
-                              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                                <label htmlFor="vox-threshold">Threshold</label>
-                                <span>{voxSettings.thresholdDb} dB</span>
-                              </div>
-                              <input
-                                className={sliderClassName}
-                                id="vox-threshold"
-                                max={-10}
-                                min={-60}
-                                onChange={(event) =>
-                                  setVoxSettings((prev) => ({
-                                    ...prev,
-                                    thresholdDb: Number(event.target.value),
-                                  }))
-                                }
-                                step={1}
-                                type="range"
-                                value={voxSettings.thresholdDb}
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                                <label htmlFor="vox-hold">Hold time</label>
-                                <span>{voxSettings.holdTimeMs} ms</span>
-                              </div>
-                              <input
-                                className={sliderClassName}
-                                id="vox-hold"
-                                max={2000}
-                                min={200}
-                                onChange={(event) =>
-                                  setVoxSettings((prev) => ({
-                                    ...prev,
-                                    holdTimeMs: Number(event.target.value),
-                                  }))
-                                }
-                                step={50}
-                                type="range"
-                                value={voxSettings.holdTimeMs}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                            Sidetone (mic monitor)
-                          </p>
-                          <div className="space-y-3 rounded-lg border border-border/60 bg-background/35 p-3">
-                            <label className="flex cursor-pointer items-center justify-between">
-                              <span className="text-sm text-foreground">Enable sidetone</span>
-                              <input
-                                checked={sidetone.enabled}
-                                className="h-4 w-4 accent-primary"
-                                onChange={() =>
-                                  setSidetone((prev) => ({ ...prev, enabled: !prev.enabled }))
-                                }
-                                type="checkbox"
-                              />
-                            </label>
-                            {sidetone.enabled ? (
-                              <div className="space-y-1">
-                                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                                  <label htmlFor="sidetone-level">Level</label>
-                                  <span>{sidetone.level}%</span>
-                                </div>
-                                <input
-                                  className={sliderClassName}
-                                  id="sidetone-level"
-                                  max={30}
-                                  min={0}
-                                  onChange={(event) =>
-                                    setSidetone((prev) => ({
-                                      ...prev,
-                                      level: Number(event.target.value),
-                                    }))
-                                  }
-                                  step={1}
-                                  type="range"
-                                  value={sidetone.level}
-                                />
-                                <p className="text-xs text-muted-foreground">
-                                  Hear your own mic in your headphones. Keep below 30% to avoid feedback.
-                                </p>
-                              </div>
-                            ) : null}
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                            Audio ducking
-                          </p>
-                          <div className="space-y-3 rounded-lg border border-border/60 bg-background/35 p-3">
-                            <label className="flex cursor-pointer items-center justify-between">
-                              <span className="text-sm text-foreground">Enable auto-ducking</span>
-                              <input
-                                checked={ducking.enabled}
-                                className="h-4 w-4 accent-primary"
-                                onChange={() =>
-                                  setDucking((prev) => ({ ...prev, enabled: !prev.enabled }))
-                                }
-                                type="checkbox"
-                              />
-                            </label>
-                            {ducking.enabled ? (
-                              <div className="space-y-1">
-                                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                                  <label htmlFor="duck-level">Duck level</label>
-                                  <span>{ducking.level}%</span>
-                                </div>
-                                <input
-                                  className={sliderClassName}
-                                  id="duck-level"
-                                  max={80}
-                                  min={10}
-                                  onChange={(event) =>
-                                    setDucking((prev) => ({
-                                      ...prev,
-                                      level: Number(event.target.value),
-                                    }))
-                                  }
-                                  step={5}
-                                  type="range"
-                                  value={ducking.level}
-                                />
-                                <p className="text-xs text-muted-foreground">
-                                  Lower-priority channels reduce to this level when a higher-priority channel is active.
-                                </p>
-                              </div>
-                            ) : null}
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            className="flex-1 justify-center"
-                            disabled={profileSaving || !state.session}
-                            onClick={() => void handleSaveProfile()}
-                            type="button"
-                            variant="outline"
-                          >
-                            {profileSaving ? "Saving…" : "Save profile to server"}
-                          </Button>
-                        </div>
-                        {profileNotice ? (
-                          <p className="text-center text-xs text-muted-foreground">{profileNotice}</p>
-                        ) : null}
-                        <Button
-                          className="w-full justify-center"
-                          onClick={() => void handleStartPreflight()}
-                          type="button"
-                          variant="secondary"
-                        >
-                          {preflightState.step !== "idle" && preflightState.step !== "done"
-                            ? `Testing audio (${preflightState.step})...`
-                            : "Test audio"}
-                        </Button>
-                        {preflightState.step !== "idle" ? (
-                          <div className="space-y-2 rounded-xl border border-border/60 bg-background/35 p-4">
-                            <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                              Preflight audio test
-                            </p>
-                            {preflightState.step === "tone" ? (
-                              <p className="text-sm text-foreground flex items-center gap-2"><Volume2 className="h-4 w-4 shrink-0" /> Playing test tone — listen for a beep…</p>
-                            ) : null}
-                            {preflightState.step === "recording" ? (
-                              <>
-                                <p className="text-sm text-foreground flex items-center gap-2"><Mic className="h-4 w-4 shrink-0" /> Recording — speak into your mic…</p>
-                                <SignalMeter className="mt-1" label="Mic level" value={preflightState.micLevel} />
-                              </>
-                            ) : null}
-                            {preflightState.step === "playback" ? (
-                              <p className="text-sm text-foreground flex items-center gap-2"><Volume1 className="h-4 w-4 shrink-0" /> Playing back your recording…</p>
-                            ) : null}
-                            {preflightState.step === "done" && preflightState.passed ? (
-                              <p className="text-sm text-green-400 flex items-center gap-2"><Check className="h-4 w-4 shrink-0" /> Audio test passed</p>
-                            ) : null}
-                            {preflightState.step === "done" && preflightState.passed === false ? (
-                              <p className="text-sm text-red-400 flex items-center gap-2"><X className="h-4 w-4 shrink-0" /> {preflightState.error ?? "Audio test failed"}</p>
-                            ) : null}
-                            {preflightState.step !== "done" ? (
-                              <Button
-                                className="mt-2 w-full justify-center"
-                                onClick={handleCancelPreflight}
-                                type="button"
-                                variant="ghost"
-                              >
-                                Cancel test
-                              </Button>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </>
-                    ) : null}
-                    {audioError ? (
-                      <div className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
-                        {audioError}
-                      </div>
-                    ) : null}
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardDescription>Quick reference</CardDescription>
-                    <CardTitle className="flex items-center gap-2">
-                      <Keyboard className="h-4 w-4" />
-                      Keyboard shortcuts
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid gap-2 text-sm">
-                      <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/35 px-3 py-2">
-                        <span className="text-muted-foreground">Push-to-talk (first channel)</span>
-                        <kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">Space</kbd>
-                      </div>
-                      <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/35 px-3 py-2">
-                        <span className="text-muted-foreground">Talk on channel 1–9</span>
-                        <kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">1</kbd>–<kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">9</kbd>
-                      </div>
-                      <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/35 px-3 py-2">
-                        <span className="text-muted-foreground">Toggle listen channel 1–9</span>
-                        <kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">F1</kbd>–<kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">F9</kbd>
-                      </div>
-                      <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/35 px-3 py-2">
-                        <span className="text-muted-foreground">Stop all talk</span>
-                        <kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">Esc</kbd>
-                      </div>
-                      <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/35 px-3 py-2">
-                        <span className="text-muted-foreground">Headset button PTT</span>
-                        <kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground"><Headphones className="h-3 w-3 inline" /></kbd>
-                      </div>
-                    </div>
-                    <p className="mt-3 text-xs text-muted-foreground">
-                      Shortcuts are active when audio is armed and no input field is focused. Hold number keys for momentary PTT.
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardDescription>Alerts &amp; tones</CardDescription>
-                    <CardTitle className="flex items-center gap-2">
-                      <Bell className="h-4 w-4" /> Notification sounds
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">Enable notification sounds</span>
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={notificationSettings.enabled}
-                        onClick={() => {
-                          const next = { ...notificationSettings, enabled: !notificationSettings.enabled };
-                          setNotificationSettings(next);
-                          setNotificationSoundSettings(next);
-                        }}
-                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${notificationSettings.enabled ? "bg-primary" : "bg-muted"}`}
-                      >
-                        <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${notificationSettings.enabled ? "translate-x-5" : "translate-x-0"}`} />
-                      </button>
-                    </div>
-                    {notificationSettings.enabled ? (
-                      <>
-                        <div>
-                          <label className="text-xs text-muted-foreground">Alert volume</label>
-                          <input
-                            type="range"
-                            min={0}
-                            max={100}
-                            value={notificationSettings.volume}
-                            onChange={(e) => {
-                              const vol = Number(e.target.value);
-                              const next = { ...notificationSettings, volume: vol };
-                              setNotificationSettings(next);
-                              setNotificationSoundSettings(next);
-                            }}
-                            className="mt-1 w-full accent-primary"
-                          />
-                          <span className="text-xs text-muted-foreground">{notificationSettings.volume}%</span>
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-xs font-medium text-muted-foreground">Events</p>
-                          {(["call", "standby", "go", "allpage", "directCall", "chatMessage", "connectionLost", "connectionRestored", "userOnline", "pttEngage", "pttRelease"] as const).map((event) => (
-                            <label key={event} className="flex items-center gap-2 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={notificationSettings.enabledEvents[event] ?? DEFAULT_NOTIFICATION_SOUND_SETTINGS.enabledEvents[event]}
-                                onChange={(e) => {
-                                  const next = {
-                                    ...notificationSettings,
-                                    enabledEvents: { ...notificationSettings.enabledEvents, [event]: e.target.checked },
-                                  };
-                                  setNotificationSettings(next);
-                                  setNotificationSoundSettings(next);
-                                }}
-                                className="accent-primary"
-                              />
-                              <span className="text-muted-foreground">{event.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase())}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </>
-                    ) : null}
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardDescription>Session overview</CardDescription>
-                    <CardTitle>Live link and monitor state</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                      <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
-                        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                          Connection
-                        </p>
-                        <p className="mt-2 font-medium text-foreground">{connectionBadge.label}</p>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {state.status.connectedUsers} live operator
-                          {state.status.connectedUsers === 1 ? "" : "s"} on this server.
-                        </p>
-                      </div>
-                      <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
-                        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                          Approx. browser RTT
-                        </p>
-                        <p className="mt-2 font-medium text-foreground">{latencyLabel}</p>
-                      </div>
-                      <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
-                        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                          Media quality
-                        </p>
-                        <p className={`mt-2 flex items-center gap-2 font-medium ${qualityInfo.color}`}>
-                          <span className={`inline-block h-2.5 w-2.5 rounded-full ${qualityInfo.dotClass}`} />
-                          {qualityInfo.label}
-                        </p>
-                        <p className="mt-1 text-sm text-muted-foreground">{qualityInfo.detail}</p>
-                        {bandwidthTier ? (
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            Codec: {bandwidthTier.bitrate / 1000}kbps{bandwidthTier.fec ? " +FEC" : ""}
-                            {bandwidthTier.tier !== "good" ? ` (adapted — ${bandwidthTier.tier})` : ""}
-                          </p>
-                        ) : null}
-                      </div>
-                      <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
-                        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                          Monitor routes
-                        </p>
-                        <p className="mt-2 font-medium text-foreground">
-                          {listenChannelIds.length} active listen route
-                          {listenChannelIds.length === 1 ? "" : "s"}
-                        </p>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          Local volume trim follows each enabled channel.
-                        </p>
-                      </div>
-                      <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
-                        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                          Heard now
-                        </p>
-                        <p className="mt-2 font-medium text-foreground">
-                          {liveRemoteTalkerUsernames.length} remote talker
-                          {liveRemoteTalkerUsernames.length === 1 ? "" : "s"}
-                        </p>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          Active voices currently routed into this client.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
-                      <div className="flex items-start gap-3">
-                        <RadioTower className="mt-1 h-4 w-4 shrink-0 text-primary" />
-                        <div className="space-y-2">
-                          <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                            Current server
-                          </p>
-                          <a
-                            className="break-all text-sm font-medium text-primary underline-offset-4 hover:underline"
-                            href={currentConnectUrl}
-                          >
-                            {currentConnectUrl}
-                          </a>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                        <Activity className="h-3.5 w-3.5 text-primary" />
-                        Live remote talkers
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {liveRemoteTalkerUsernames.length ? (
-                          liveRemoteTalkerUsernames.map((username) => (
-                            <Badge key={username} variant="accent">
-                              {username}
-                            </Badge>
-                          ))
-                        ) : (
-                          <span className="text-sm text-muted-foreground">
-                            No active remote talkers right now.
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {state.realtimeError ? (
-                      <div className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
-                        {state.realtimeError}
-                      </div>
-                    ) : null}
-                  </CardContent>
-                </Card>
-              </div>
             </section>
           )
         ) : null}
       </div>
+
+      {settingsOpen ? (
+        <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-lg flex-col border-l border-border bg-background shadow-xl">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <div className="flex items-center gap-2">
+              <Settings className="h-4 w-4 text-muted-foreground" />
+              <span className="font-semibold">Settings</span>
+            </div>
+            <Button onClick={() => setSettingsOpen(false)} size="sm" type="button" variant="ghost">
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <Card>
+              <CardHeader>
+                <CardDescription>{audioReady ? "Audio settings" : "Browser audio"}</CardDescription>
+                <CardTitle>{audioReady ? "Audio armed for comms" : "Arm browser audio"}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm leading-6 text-muted-foreground">
+                  {audioReady
+                    ? "Mic selection, input confidence, and monitor mix stay here while the channel grid remains focused on talk and listen."
+                    : "Browser audio is only surfaced after sign-in, because that is the first moment it becomes actionable for the operator."}
+                </p>
+                {!audioReady ? (
+                  <Button
+                    className="w-full justify-center"
+                    disabled={state.realtimeState !== "connected" || audioBusy}
+                    onClick={() => void handleArmAudio()}
+                    type="button"
+                    variant="secondary"
+                  >
+                    {audioBusy
+                      ? "Arming audio..."
+                      : audioArmed
+                        ? "Restore browser audio"
+                        : "Arm audio context"}
+                  </Button>
+                ) : (
+                  <Button
+                    className="w-full justify-center"
+                    disabled={audioBusy}
+                    onClick={() => void handleDisarmAudio()}
+                    type="button"
+                    variant="outline"
+                  >
+                    {audioBusy ? "Disarming..." : "Disarm audio"}
+                  </Button>
+                )}
+                {audioReady ? (
+                  <>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground" htmlFor="mic-input">
+                        Mic input
+                      </label>
+                      <select
+                        className={inputClassName}
+                        disabled={!inputDevices.length || audioBusy}
+                        id="mic-input"
+                        onChange={(event) => void handleInputDeviceChange(event.target.value)}
+                        value={selectedInputDeviceId}
+                      >
+                        {inputDevices.length ? null : (
+                          <option value="">Grant mic access to load inputs</option>
+                        )}
+                        {inputDevices.map((device) => (
+                          <option key={device.deviceId} value={device.deviceId}>
+                            {device.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <SignalMeter label="Mic input level" value={inputLevel} />
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                        <label htmlFor="master-volume">Master monitor volume</label>
+                        <span>{masterVolume}%</span>
+                      </div>
+                      <input
+                        className={sliderClassName}
+                        id="master-volume"
+                        max={100}
+                        min={0}
+                        onChange={(event) => setMasterVolume(Number(event.target.value))}
+                        step={1}
+                        type="range"
+                        value={masterVolume}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                        Audio processing
+                      </p>
+                      <div className="grid gap-2">
+                        {([
+                          ["noiseSuppression", "Noise suppression"],
+                          ["autoGainControl", "Auto gain control"],
+                          ["echoCancellation", "Echo cancellation"],
+                        ] as const).map(([key, label]) => (
+                          <label
+                            className="flex cursor-pointer items-center justify-between rounded-lg border border-border/60 bg-background/35 px-3 py-2"
+                            key={key}
+                          >
+                            <span className="text-sm text-foreground">{label}</span>
+                            <input
+                              checked={audioProcessing[key]}
+                              className="h-4 w-4 accent-primary"
+                              onChange={() =>
+                                setAudioProcessing((prev) => ({
+                                  ...prev,
+                                  [key]: !prev[key],
+                                }))
+                              }
+                              type="checkbox"
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                        VOX settings
+                      </p>
+                      <div className="space-y-3 rounded-lg border border-border/60 bg-background/35 p-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <label htmlFor="vox-threshold">Threshold</label>
+                            <span>{voxSettings.thresholdDb} dB</span>
+                          </div>
+                          <input
+                            className={sliderClassName}
+                            id="vox-threshold"
+                            max={-10}
+                            min={-60}
+                            onChange={(event) =>
+                              setVoxSettings((prev) => ({
+                                ...prev,
+                                thresholdDb: Number(event.target.value),
+                              }))
+                            }
+                            step={1}
+                            type="range"
+                            value={voxSettings.thresholdDb}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <label htmlFor="vox-hold">Hold time</label>
+                            <span>{voxSettings.holdTimeMs} ms</span>
+                          </div>
+                          <input
+                            className={sliderClassName}
+                            id="vox-hold"
+                            max={2000}
+                            min={200}
+                            onChange={(event) =>
+                              setVoxSettings((prev) => ({
+                                ...prev,
+                                holdTimeMs: Number(event.target.value),
+                              }))
+                            }
+                            step={50}
+                            type="range"
+                            value={voxSettings.holdTimeMs}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                        Sidetone (mic monitor)
+                      </p>
+                      <div className="space-y-3 rounded-lg border border-border/60 bg-background/35 p-3">
+                        <label className="flex cursor-pointer items-center justify-between">
+                          <span className="text-sm text-foreground">Enable sidetone</span>
+                          <input
+                            checked={sidetone.enabled}
+                            className="h-4 w-4 accent-primary"
+                            onChange={() =>
+                              setSidetone((prev) => ({ ...prev, enabled: !prev.enabled }))
+                            }
+                            type="checkbox"
+                          />
+                        </label>
+                        {sidetone.enabled ? (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-xs text-muted-foreground">
+                              <label htmlFor="sidetone-level">Level</label>
+                              <span>{sidetone.level}%</span>
+                            </div>
+                            <input
+                              className={sliderClassName}
+                              id="sidetone-level"
+                              max={30}
+                              min={0}
+                              onChange={(event) =>
+                                setSidetone((prev) => ({
+                                  ...prev,
+                                  level: Number(event.target.value),
+                                }))
+                              }
+                              step={1}
+                              type="range"
+                              value={sidetone.level}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Hear your own mic in your headphones. Keep below 30% to avoid feedback.
+                            </p>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                        Audio ducking
+                      </p>
+                      <div className="space-y-3 rounded-lg border border-border/60 bg-background/35 p-3">
+                        <label className="flex cursor-pointer items-center justify-between">
+                          <span className="text-sm text-foreground">Enable auto-ducking</span>
+                          <input
+                            checked={ducking.enabled}
+                            className="h-4 w-4 accent-primary"
+                            onChange={() =>
+                              setDucking((prev) => ({ ...prev, enabled: !prev.enabled }))
+                            }
+                            type="checkbox"
+                          />
+                        </label>
+                        {ducking.enabled ? (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-xs text-muted-foreground">
+                              <label htmlFor="duck-level">Duck level</label>
+                              <span>{ducking.level}%</span>
+                            </div>
+                            <input
+                              className={sliderClassName}
+                              id="duck-level"
+                              max={80}
+                              min={10}
+                              onChange={(event) =>
+                                setDucking((prev) => ({
+                                  ...prev,
+                                  level: Number(event.target.value),
+                                }))
+                              }
+                              step={5}
+                              type="range"
+                              value={ducking.level}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Lower-priority channels reduce to this level when a higher-priority channel is active.
+                            </p>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        className="flex-1 justify-center"
+                        disabled={profileSaving || !state.session}
+                        onClick={() => void handleSaveProfile()}
+                        type="button"
+                        variant="outline"
+                      >
+                        {profileSaving ? "Saving…" : "Save profile to server"}
+                      </Button>
+                    </div>
+                    {profileNotice ? (
+                      <p className="text-center text-xs text-muted-foreground">{profileNotice}</p>
+                    ) : null}
+                    <Button
+                      className="w-full justify-center"
+                      onClick={() => void handleStartPreflight()}
+                      type="button"
+                      variant="secondary"
+                    >
+                      {preflightState.step !== "idle" && preflightState.step !== "done"
+                        ? `Testing audio (${preflightState.step})...`
+                        : "Test audio"}
+                    </Button>
+                    {preflightState.step !== "idle" ? (
+                      <div className="space-y-2 rounded-xl border border-border/60 bg-background/35 p-4">
+                        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                          Preflight audio test
+                        </p>
+                        {preflightState.step === "tone" ? (
+                          <p className="text-sm text-foreground flex items-center gap-2"><Volume2 className="h-4 w-4 shrink-0" /> Playing test tone — listen for a beep…</p>
+                        ) : null}
+                        {preflightState.step === "recording" ? (
+                          <>
+                            <p className="text-sm text-foreground flex items-center gap-2"><Mic className="h-4 w-4 shrink-0" /> Recording — speak into your mic…</p>
+                            <SignalMeter className="mt-1" label="Mic level" value={preflightState.micLevel} />
+                          </>
+                        ) : null}
+                        {preflightState.step === "playback" ? (
+                          <p className="text-sm text-foreground flex items-center gap-2"><Volume1 className="h-4 w-4 shrink-0" /> Playing back your recording…</p>
+                        ) : null}
+                        {preflightState.step === "done" && preflightState.passed ? (
+                          <p className="text-sm text-green-400 flex items-center gap-2"><Check className="h-4 w-4 shrink-0" /> Audio test passed</p>
+                        ) : null}
+                        {preflightState.step === "done" && preflightState.passed === false ? (
+                          <p className="text-sm text-red-400 flex items-center gap-2"><X className="h-4 w-4 shrink-0" /> {preflightState.error ?? "Audio test failed"}</p>
+                        ) : null}
+                        {preflightState.step !== "done" ? (
+                          <Button
+                            className="mt-2 w-full justify-center"
+                            onClick={handleCancelPreflight}
+                            type="button"
+                            variant="ghost"
+                          >
+                            Cancel test
+                          </Button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </>
+                ) : null}
+                {audioError ? (
+                  <div className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
+                    {audioError}
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ListOrdered className="h-4 w-4 text-muted-foreground" />
+                  Arrange Channels
+                </CardTitle>
+                <CardDescription>Drag to set the order channels appear in your view.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {visibleChannels.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No channels assigned.</p>
+                ) : (
+                  <>
+                    <DndContext
+                      sensors={dndSensors}
+                      collisionDetection={closestCenter}
+                      onDragEnd={(event: DragEndEvent) => {
+                        const { active, over } = event;
+                        if (over && active.id !== over.id) {
+                          const base = channelOrder.length ? channelOrder : visibleChannels.map((ch) => ch.id);
+                          const oldIndex = base.indexOf(active.id as string);
+                          const newIndex = base.indexOf(over.id as string);
+                          if (oldIndex !== -1 && newIndex !== -1) {
+                            setChannelOrder(arrayMove(base, oldIndex, newIndex));
+                          }
+                        }
+                      }}
+                    >
+                      <SortableContext
+                        items={visibleChannels.map((ch) => ch.id)}
+                        strategy={verticalListSortingStrategy}
+                      >
+                        <div className="space-y-1.5">
+                          {visibleChannels.map((channel) => (
+                            <SortableChannelItem key={channel.id} channel={channel} />
+                          ))}
+                        </div>
+                      </SortableContext>
+                    </DndContext>
+                    {channelOrder.length > 0 ? (
+                      <Button
+                        className="mt-3 w-full justify-center"
+                        onClick={() => setChannelOrder([])}
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        Reset to default order
+                      </Button>
+                    ) : null}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardDescription>Quick reference</CardDescription>
+                <CardTitle className="flex items-center gap-2">
+                  <Keyboard className="h-4 w-4" />
+                  Keyboard shortcuts
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-2 text-sm">
+                  <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/35 px-3 py-2">
+                    <span className="text-muted-foreground">Push-to-talk (first channel)</span>
+                    <kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">Space</kbd>
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/35 px-3 py-2">
+                    <span className="text-muted-foreground">Talk on channel 1–9</span>
+                    <kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">1</kbd>–<kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">9</kbd>
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/35 px-3 py-2">
+                    <span className="text-muted-foreground">Toggle listen channel 1–9</span>
+                    <kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">F1</kbd>–<kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">F9</kbd>
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/35 px-3 py-2">
+                    <span className="text-muted-foreground">Stop all talk</span>
+                    <kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">Esc</kbd>
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/35 px-3 py-2">
+                    <span className="text-muted-foreground">Headset button PTT</span>
+                    <kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground"><Headphones className="h-3 w-3 inline" /></kbd>
+                  </div>
+                </div>
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Shortcuts are active when audio is armed and no input field is focused. Hold number keys for momentary PTT.
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardDescription>Alerts &amp; tones</CardDescription>
+                <CardTitle className="flex items-center gap-2">
+                  <Bell className="h-4 w-4" /> Notification sounds
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">Enable notification sounds</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={notificationSettings.enabled}
+                    onClick={() => {
+                      const next = { ...notificationSettings, enabled: !notificationSettings.enabled };
+                      setNotificationSettings(next);
+                      setNotificationSoundSettings(next);
+                    }}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${notificationSettings.enabled ? "bg-primary" : "bg-muted"}`}
+                  >
+                    <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${notificationSettings.enabled ? "translate-x-5" : "translate-x-0"}`} />
+                  </button>
+                </div>
+                {notificationSettings.enabled ? (
+                  <>
+                    <div>
+                      <label className="text-xs text-muted-foreground">Alert volume</label>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={notificationSettings.volume}
+                        onChange={(e) => {
+                          const vol = Number(e.target.value);
+                          const next = { ...notificationSettings, volume: vol };
+                          setNotificationSettings(next);
+                          setNotificationSoundSettings(next);
+                        }}
+                        className="mt-1 w-full accent-primary"
+                      />
+                      <span className="text-xs text-muted-foreground">{notificationSettings.volume}%</span>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-muted-foreground">Events</p>
+                      {(["call", "standby", "go", "allpage", "directCall", "chatMessage", "connectionLost", "connectionRestored", "userOnline", "pttEngage", "pttRelease"] as const).map((event) => (
+                        <label key={event} className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={notificationSettings.enabledEvents[event] ?? DEFAULT_NOTIFICATION_SOUND_SETTINGS.enabledEvents[event]}
+                            onChange={(e) => {
+                              const next = {
+                                ...notificationSettings,
+                                enabledEvents: { ...notificationSettings.enabledEvents, [event]: e.target.checked },
+                              };
+                              setNotificationSettings(next);
+                              setNotificationSoundSettings(next);
+                            }}
+                            className="accent-primary"
+                          />
+                          <span className="text-muted-foreground">{event.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase())}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                ) : null}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardDescription>Session overview</CardDescription>
+                <CardTitle>Live link and monitor state</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                  <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                      Connection
+                    </p>
+                    <p className="mt-2 font-medium text-foreground">{connectionBadge.label}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {state.status?.connectedUsers ?? 0} live operator
+                      {(state.status?.connectedUsers ?? 0) === 1 ? "" : "s"} on this server.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                      Approx. browser RTT
+                    </p>
+                    <p className="mt-2 font-medium text-foreground">{latencyLabel}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                      Media quality
+                    </p>
+                    <p className={`mt-2 flex items-center gap-2 font-medium ${qualityInfo.color}`}>
+                      <span className={`inline-block h-2.5 w-2.5 rounded-full ${qualityInfo.dotClass}`} />
+                      {qualityInfo.label}
+                    </p>
+                    <p className="mt-1 text-sm text-muted-foreground">{qualityInfo.detail}</p>
+                    {bandwidthTier ? (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Codec: {bandwidthTier.bitrate / 1000}kbps{bandwidthTier.fec ? " +FEC" : ""}
+                        {bandwidthTier.tier !== "good" ? ` (adapted — ${bandwidthTier.tier})` : ""}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                      Monitor routes
+                    </p>
+                    <p className="mt-2 font-medium text-foreground">
+                      {listenChannelIds.length} active listen route
+                      {listenChannelIds.length === 1 ? "" : "s"}
+                    </p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Local volume trim follows each enabled channel.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                      Heard now
+                    </p>
+                    <p className="mt-2 font-medium text-foreground">
+                      {liveRemoteTalkerUsernames.length} remote talker
+                      {liveRemoteTalkerUsernames.length === 1 ? "" : "s"}
+                    </p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Active voices currently routed into this client.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-border/60 bg-background/35 p-4">
+                  <div className="flex items-start gap-3">
+                    <RadioTower className="mt-1 h-4 w-4 shrink-0 text-primary" />
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                        Current server
+                      </p>
+                      <a
+                        className="break-all text-sm font-medium text-primary underline-offset-4 hover:underline"
+                        href={currentConnectUrl}
+                      >
+                        {currentConnectUrl}
+                      </a>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                    <Activity className="h-3.5 w-3.5 text-primary" />
+                    Live remote talkers
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {liveRemoteTalkerUsernames.length ? (
+                      liveRemoteTalkerUsernames.map((username) => (
+                        <Badge key={username} variant="accent">
+                          {username}
+                        </Badge>
+                      ))
+                    ) : (
+                      <span className="text-sm text-muted-foreground">
+                        No active remote talkers right now.
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {state.realtimeError ? (
+                  <div className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
+                    {state.realtimeError}
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      ) : null}
 
       {chatOpen ? (() => {
         const channelName = state.session?.channels.find((c) => c.id === chatOpen)?.name ?? chatOpen;
