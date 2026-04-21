@@ -2883,21 +2883,26 @@ export default function App() {
               className="border-b border-border bg-background"
               style={{ paddingTop: insets.top }}
             >
-              <View className="flex-row items-center justify-between px-4 py-3">
-                <View className="flex-row items-center gap-2">
-                  <Text className="text-base">{String.fromCodePoint(0x1f4ac)}</Text>
-                  <Text className="text-base font-semibold text-foreground">
-                    {activeChannels.find((c) => c.id === chatOpen)?.name ?? chatOpen ?? "Chat"}
-                  </Text>
-                </View>
+              <View className="flex-row items-center px-2 py-1">
+                {/* ← Back — large touch target, standard mobile nav pattern */}
                 <Pressable
                   accessibilityLabel="Close chat"
                   accessibilityRole="button"
-                  hitSlop={12}
+                  className="flex-row items-center gap-1 rounded-lg px-3 py-3"
+                  hitSlop={8}
                   onPress={() => setChatOpen(null)}
                 >
-                  <Text className="text-sm font-semibold text-primary">Close</Text>
+                  <Text className="text-xl font-light text-primary">‹</Text>
+                  <Text className="text-sm font-semibold text-primary">Back</Text>
                 </Pressable>
+
+                {/* Channel name centered in remaining space */}
+                <View className="flex-1 flex-row items-center justify-center gap-1.5 pr-14">
+                  <Text className="text-base">{String.fromCodePoint(0x1f4ac)}</Text>
+                  <Text className="text-base font-semibold text-foreground" numberOfLines={1}>
+                    {activeChannels.find((c) => c.id === chatOpen)?.name ?? chatOpen ?? "Chat"}
+                  </Text>
+                </View>
               </View>
             </View>
 
