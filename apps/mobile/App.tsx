@@ -69,7 +69,7 @@ import {
   loadMobileServerShell,
   loginMobileOperator,
 } from "./src/mobile-session";
-import { loadPersistedServerUrl, persistServerUrl } from "./src/server-url-storage";
+import { loadPersistedServerUrl, loadPersistedUsername, persistServerUrl, persistUsername } from "./src/server-url-storage";
 import { useServerDiscovery } from "./src/server-discovery";
 import {
   canArmMobileAudio,
@@ -94,14 +94,15 @@ import {
   triggerDirectCallHaptic,
   triggerConnectionLostHaptic,
   triggerMessageHaptic,
-  setIOSNowPlayingInfo,
-  clearIOSNowPlayingInfo,
-  setupIOSRemoteCommands,
-  teardownIOSRemoteCommands,
-  addIOSRemoteCommandListener,
   setMobileAudioOutput,
   type AudioOutputDevice,
 } from "./src/mobile-runtime-native";
+import {
+  startLiveActivity,
+  updateLiveActivity,
+  endLiveActivity,
+  addToggleTalkListener,
+} from "cuecommx-live-activity";
 
 interface ViewState {
   discovery?: DiscoveryResponse;
@@ -573,11 +574,13 @@ export default function App() {
   const notifPermissionGrantedRef = useRef(false);
   const mediaControllerRef = useRef<ReturnType<typeof createMobileMediaController> | null>(null);
   const realtimeClientRef = useRef<CueCommXRealtimeClient | null>(null);
+  const pinInputRef = useRef<TextInput>(null);
   const qrScannedRef = useRef(false);
-  // Stores the listen-channel IDs that were active just before the operator
-  // tapped "pause" on the lock screen, so "play" can restore exactly those
-  // channels rather than enabling all permitted ones.
-  const iosPreMuteListenIdsRef = useRef<string[]>([]);
+  // Refs for Live Activity Darwin notification callback (always reflects latest values).
+  const audioReadyRef = useRef(false);
+  audioReadyRef.current = audioReady;
+  const talkChannelIdsRef = useRef<string[]>([]);
+  talkChannelIdsRef.current = state.operatorState?.talkChannelIds ?? [];
 
   const [qrScanOpen, setQrScanOpen] = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -586,6 +589,9 @@ export default function App() {
   const connectionBadge = getConnectionBadge(state.realtimeState);
   const assignedPermissions = state.session?.user.channelPermissions ?? [];
   const activeChannels = state.session?.channels ?? [];
+  // Kept as a ref so the Darwin notification callback always reads the latest value.
+  const assignedPermissionsRef = useRef<typeof assignedPermissions>(assignedPermissions);
+  assignedPermissionsRef.current = assignedPermissions;
   const showAndroidRuntimeSupport = shouldShowAndroidRuntimeTools({
     hasSession: !!state.session,
     platformOs: Platform.OS,
@@ -714,20 +720,22 @@ export default function App() {
   useEffect(() => {
     let active = true;
 
-    void loadPersistedServerUrl()
-      .then((persistedServerUrl) => {
-        if (!active || !persistedServerUrl) {
-          return;
+    void Promise.all([loadPersistedServerUrl(), loadPersistedUsername()])
+      .then(([persistedServerUrl, persistedUsername]) => {
+        if (!active) return;
+
+        if (persistedServerUrl) {
+          setServerUrlInput((current) => current || persistedServerUrl);
         }
 
-        setServerUrlInput((current) => current || persistedServerUrl);
+        if (persistedUsername) {
+          setUsername((current) => current || persistedUsername);
+        }
       })
       .catch((error: unknown) => {
-        if (!active) {
-          return;
-        }
+        if (!active) return;
 
-        setRuntimeNotice(getRuntimeMessage(error, "CueCommX could not restore the last server URL."));
+        setRuntimeNotice(getRuntimeMessage(error, "CueCommX could not restore the last session."));
       });
 
     return () => {
@@ -835,103 +843,51 @@ export default function App() {
     };
   }, [appLifecycleState, audioArmed, state.session, state.status?.name]);
 
-  // iOS lock screen / Now Playing integration.
-  // When the operator has an active audio session, populate MPNowPlayingInfoCenter
-  // so iOS shows a live-session widget on the lock screen and in Control Center.
-  // Remote play/pause commands from the lock screen act as monitor mute/unmute:
-  //   pause → disable the channels that are currently being monitored (saves their IDs)
-  //   play  → restore exactly the channels that were active before the last pause
-  //   toggle → flip between muted and restored state
+  // iOS Live Activity: start when audio becomes ready, register the Darwin toggle listener.
   useEffect(() => {
-    if (Platform.OS !== "ios" || !audioArmed || !state.session) {
-      clearIOSNowPlayingInfo();
-      teardownIOSRemoteCommands();
+    if (Platform.OS !== "ios" || !audioReady || !state.session) {
       return;
     }
 
-    const session = state.session;
-    const serverName = state.status?.name ?? "CueCommX";
-    const operatorName = session.user.username;
-    const activeListenIds = state.operatorState?.listenChannelIds ?? [];
-    const isMonitoring = activeListenIds.length > 0;
-    const listenChannelNames = activeChannels
-      .filter((ch) => activeListenIds.includes(ch.id))
-      .map((ch) => ch.name);
-    const albumText = listenChannelNames.length > 0 ? listenChannelNames.join(", ") : "Intercom";
+    startLiveActivity(
+      state.session.user.username,
+      activeChannels.map((ch) => ch.name)
+    );
 
-    setIOSNowPlayingInfo({
-      title: serverName,
-      subtitle: operatorName,
-      album: albumText,
-      isPlaying: isMonitoring,
-    });
-    setupIOSRemoteCommands();
+    const toggleSub = addToggleTalkListener(() => {
+      const client = realtimeClientRef.current;
+      if (!client || !audioReadyRef.current) return;
 
-    // All channels this operator is permitted to listen to.
-    const allPermittedListenIds = activeChannels
-      .filter((ch) => {
-        const perm = (session.user.channelPermissions ?? []).find((p) => p.channelId === ch.id);
-        return perm?.canListen;
-      })
-      .map((ch) => ch.id);
+      const talkIds = talkChannelIdsRef.current;
+      const talkableIds = assignedPermissionsRef.current
+        .filter((p) => p.canTalk)
+        .map((p) => p.channelId);
 
-    const subscription = addIOSRemoteCommandListener((event) => {
-      const realtimeClient = realtimeClientRef.current;
-      if (!realtimeClient) return;
-
-      if (event.command === "pause") {
-        // Save the currently monitored channels, then mute them.
-        // activeListenIds is captured from the closure (current at effect-run time).
-        if (activeListenIds.length > 0) {
-          iosPreMuteListenIdsRef.current = activeListenIds;
-          for (const id of activeListenIds) {
-            realtimeClient.toggleListen(id, false);
-          }
-        }
-      } else if (event.command === "play") {
-        // Restore the channels that were active before the last pause.
-        // Fall back to all permitted channels if there's nothing saved.
-        const idsToRestore =
-          iosPreMuteListenIdsRef.current.length > 0
-            ? iosPreMuteListenIdsRef.current
-            : allPermittedListenIds;
-        iosPreMuteListenIdsRef.current = [];
-        for (const id of idsToRestore) {
-          realtimeClient.toggleListen(id, true);
-        }
-      } else if (event.command === "togglePlayPause") {
-        if (activeListenIds.length > 0) {
-          // Currently monitoring → mute.
-          iosPreMuteListenIdsRef.current = activeListenIds;
-          for (const id of activeListenIds) {
-            realtimeClient.toggleListen(id, false);
-          }
-        } else {
-          // Currently muted → restore.
-          const idsToRestore =
-            iosPreMuteListenIdsRef.current.length > 0
-              ? iosPreMuteListenIdsRef.current
-              : allPermittedListenIds;
-          iosPreMuteListenIdsRef.current = [];
-          for (const id of idsToRestore) {
-            realtimeClient.toggleListen(id, true);
-          }
-        }
+      if (talkIds.length > 0) {
+        client.stopTalk(talkableIds);
+      } else if (talkableIds.length > 0) {
+        client.startTalk(talkableIds);
       }
     });
 
     return () => {
-      subscription?.remove();
-      teardownIOSRemoteCommands();
-      clearIOSNowPlayingInfo();
+      toggleSub?.remove();
+      endLiveActivity();
     };
-  }, [
-    audioArmed,
-    state.session,
-    state.status?.name,
-    state.operatorState?.listenChannelIds,
-    activeChannels,
-  ]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioReady, state.session?.user.username]);
+
+  // iOS Live Activity: keep the widget state in sync with talk state and active channels.
+  useEffect(() => {
+    if (Platform.OS !== "ios" || !audioReady || !state.session) return;
+
+    updateLiveActivity({
+      isTalking: (state.operatorState?.talkChannelIds?.length ?? 0) > 0,
+      isArmed: true,
+      activeChannelNames: activeChannels.map((ch) => ch.name),
+      talkingUserName: undefined,
+    });
+  }, [audioReady, state.session, state.operatorState?.talkChannelIds, activeChannels]);
 
   useEffect(() => {
     if (!state.session || !state.serverBaseUrl) {
@@ -1427,6 +1383,7 @@ export default function App() {
       });
 
       updateServerUrlInput(shell.baseUrl);
+      void persistUsername(username).catch(() => undefined);
 
       // Apply server-stored preferences if they exist
       const serverPrefs = payload.preferences;
@@ -1573,6 +1530,18 @@ export default function App() {
       setAudioError(
         getRuntimeMessage(error, "CueCommX could not configure the mobile audio session."),
       );
+    }
+  }
+
+  async function handleDisarmAudio(): Promise<void> {
+    if (!mediaControllerRef.current) return;
+    setAudioBusy(true);
+    try {
+      await mediaControllerRef.current.close();
+    } finally {
+      setAudioReady(false);
+      setAudioArmed(false);
+      setAudioBusy(false);
     }
   }
 
@@ -2067,6 +2036,7 @@ export default function App() {
                       autoCorrect={false}
                       className={inputClassName}
                       onChangeText={setUsername}
+                      onSubmitEditing={() => pinInputRef.current?.focus()}
                       placeholder="audio1"
                       placeholderTextColor="#738094"
                       returnKeyType="next"
@@ -2079,6 +2049,7 @@ export default function App() {
                       PIN (optional)
                     </Text>
                     <TextInput
+                      ref={pinInputRef}
                       accessibilityLabel="PIN"
                       autoCapitalize="none"
                       autoCorrect={false}
@@ -2558,6 +2529,67 @@ export default function App() {
                         ))}
                       </View>
                     ) : null}
+
+                    {/* Direct call */}
+                    {!directCall && !incomingCall &&
+                      onlineUsers.filter((u) => u.id !== state.session?.user.id).length > 0 ? (
+                      <SectionCard>
+                        <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                          Direct call
+                        </Text>
+                        <View className="flex-row flex-wrap gap-2">
+                          {onlineUsers
+                            .filter((u) => u.id !== state.session?.user.id)
+                            .map((user) => (
+                              <Pressable
+                                accessibilityRole="button"
+                                className="rounded-lg border border-border bg-secondary px-3 py-2"
+                                key={user.id}
+                                onPress={() => requestDirectCallHandler(user.id)}
+                              >
+                                <View className="flex-row items-center gap-2">
+                                  <Phone color="#f8fafc" size={14} />
+                                  <Text className="text-sm font-medium text-foreground">{user.username}</Text>
+                                </View>
+                              </Pressable>
+                            ))}
+                        </View>
+                      </SectionCard>
+                    ) : null}
+
+                    {/* IFB controls (admin/operator) — channels tab */}
+                    {isAdminOrOperator &&
+                      onlineUsers.filter((u) => u.id !== state.session?.user.id).length > 0 ? (
+                      <SectionCard>
+                        <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                          IFB controls
+                        </Text>
+                        <View className="flex-row flex-wrap gap-2">
+                          {onlineUsers
+                            .filter((u) => u.id !== state.session?.user.id)
+                            .map((user) => (
+                              <Pressable
+                                accessibilityRole="button"
+                                className="rounded-lg border border-border bg-secondary px-3 py-2"
+                                key={user.id}
+                                onPress={() => handleStartIFB(user.id)}
+                              >
+                                <View className="flex-row items-center gap-2">
+                                  <Headphones color="#f8fafc" size={14} />
+                                  <Text className="text-sm font-medium text-foreground">IFB → {user.username}</Text>
+                                </View>
+                              </Pressable>
+                            ))}
+                          <Pressable
+                            accessibilityRole="button"
+                            className="rounded-lg border border-red-500 bg-red-500/20 px-3 py-2"
+                            onPress={handleStopIFB}
+                          >
+                            <Text className="text-sm font-semibold text-red-400">Stop IFB</Text>
+                          </Pressable>
+                        </View>
+                      </SectionCard>
+                    ) : null}
                   </View>
                 </ScrollView>
               ) : (
@@ -2578,7 +2610,15 @@ export default function App() {
                           tone="primary"
                         />
                       ) : (
-                        <DetailRow label="Audio status" value={audioStatusLabel} />
+                        <>
+                          <DetailRow label="Audio status" value={audioStatusLabel} />
+                          <ActionButton
+                            disabled={audioBusy}
+                            label={audioBusy ? "Disarming..." : "Disarm audio"}
+                            onPress={() => void handleDisarmAudio()}
+                            tone="secondary"
+                          />
+                        </>
                       )}
 
                       {/* Audio output device selector — earpiece vs speakerphone */}
@@ -2733,27 +2773,28 @@ export default function App() {
                       <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
                         Talk mode
                       </Text>
-                      <View className="flex-row gap-3">
-                        <ActionButton
-                          label="Momentary"
-                          onPress={() => {
-                            setTalkMode("momentary");
+                      <View className="flex-row items-center justify-between">
+                        <View className="flex-1 gap-0.5">
+                          <Text className="text-sm text-foreground">
+                            {talkMode === "latched" ? "Latched (toggle)" : "Momentary (hold)"}
+                          </Text>
+                          <Text className="text-xs text-muted-foreground">
+                            {talkMode === "latched"
+                              ? "Tap Talk to start/stop talking"
+                              : "Hold Talk to talk, release to stop"}
+                          </Text>
+                        </View>
+                        <Switch
+                          trackColor={{ false: "#334155", true: "#5eead4" }}
+                          thumbColor="#ffffff"
+                          value={talkMode === "latched"}
+                          onValueChange={(on) => {
+                            const next: MobileTalkMode = on ? "latched" : "momentary";
+                            setTalkMode(next);
                             queueHapticFeedback(() => triggerTalkHaptic("mode"));
                           }}
-                          tone={talkMode === "momentary" ? "primary" : "secondary"}
-                        />
-                        <ActionButton
-                          label="Latched"
-                          onPress={() => {
-                            setTalkMode("latched");
-                            queueHapticFeedback(() => triggerTalkHaptic("mode"));
-                          }}
-                          tone={talkMode === "latched" ? "primary" : "secondary"}
                         />
                       </View>
-                      <Text className="text-sm leading-6 text-muted-foreground">
-                        Momentary uses hold-to-talk. Latched turns Talk into a toggle.
-                      </Text>
                       <View className="flex-row items-center justify-between">
                         <Text className="text-sm text-foreground">VOX (auto-talk)</Text>
                         <Switch
@@ -2854,65 +2895,6 @@ export default function App() {
                           onPress={handleToggleAllPage}
                           tone={allPageActive && allPageActive.userId === state.session?.user.id ? "secondary" : "primary"}
                         />
-                      </SectionCard>
-                    ) : null}
-
-                    {/* Direct call */}
-                    {!directCall && !incomingCall && onlineUsers.length > 0 ? (
-                      <SectionCard>
-                        <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                        Direct call
-                        </Text>
-                        <View className="flex-row flex-wrap gap-2">
-                          {onlineUsers
-                            .filter((u) => u.id !== state.session?.user.id)
-                            .map((user) => (
-                              <Pressable
-                                accessibilityRole="button"
-                                className="rounded-lg border border-border bg-secondary px-3 py-2"
-                                key={user.id}
-                                onPress={() => requestDirectCallHandler(user.id)}
-                              >
-                                <View className="flex-row items-center gap-2">
-                                  <Phone color="#f8fafc" size={14} />
-                                  <Text className="text-sm font-medium text-foreground">{user.username}</Text>
-                                </View>
-                              </Pressable>
-                            ))}
-                        </View>
-                      </SectionCard>
-                    ) : null}
-
-                    {/* IFB controls (admin/operator) */}
-                    {isAdminOrOperator && onlineUsers.length > 0 ? (
-                      <SectionCard>
-                        <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
-                          IFB controls
-                        </Text>
-                        <View className="flex-row flex-wrap gap-2">
-                          {onlineUsers
-                            .filter((u) => u.id !== state.session?.user.id)
-                            .map((user) => (
-                              <Pressable
-                                accessibilityRole="button"
-                                className="rounded-lg border border-border bg-secondary px-3 py-2"
-                                key={user.id}
-                                onPress={() => handleStartIFB(user.id)}
-                              >
-                                <View className="flex-row items-center gap-2">
-                                  <Headphones color="#f8fafc" size={14} />
-                                  <Text className="text-sm font-medium text-foreground">IFB → {user.username}</Text>
-                                </View>
-                              </Pressable>
-                            ))}
-                          <Pressable
-                            accessibilityRole="button"
-                            className="rounded-lg border border-destructive/40 bg-destructive/15 px-3 py-2"
-                            onPress={handleStopIFB}
-                          >
-                            <Text className="text-sm font-medium text-destructive">Stop IFB</Text>
-                          </Pressable>
-                        </View>
                       </SectionCard>
                     ) : null}
 

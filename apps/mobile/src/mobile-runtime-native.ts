@@ -10,16 +10,6 @@ import type { EventSubscription } from "expo-modules-core";
 import { NativeModules, Platform } from "react-native";
 
 import { createAndroidLiveAudioNotificationContent } from "./mobile-runtime";
-import {
-  type NowPlayingInfo,
-  type RemoteCommandEvent,
-  addRemoteCommandListener as _addRemoteCommandListener,
-  clearNowPlaying as _clearNowPlaying,
-  setNowPlaying as _setNowPlaying,
-  setupRemoteCommands as _setupRemoteCommands,
-  teardownRemoteCommands as _teardownRemoteCommands,
-} from "cuecommx-now-playing";
-
 export const ANDROID_LIVE_AUDIO_NOTIFICATION_CHANNEL_ID = "cuecommx-live-audio";
 
 let notificationHandlerRegistered = false;
@@ -222,32 +212,3 @@ export async function triggerMessageHaptic(): Promise<void> {
   await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 }
 
-// ── iOS lock screen / Now Playing ──────────────────────────────────────────
-//
-// These functions are no-ops on Android; the native module only activates on
-// iOS, where it sets MPNowPlayingInfoCenter and registers MPRemoteCommand
-// handlers so the lock screen and Control Center show a live session widget.
-
-export type { NowPlayingInfo, RemoteCommandEvent };
-
-export function setIOSNowPlayingInfo(info: NowPlayingInfo): void {
-  _setNowPlaying(info);
-}
-
-export function clearIOSNowPlayingInfo(): void {
-  _clearNowPlaying();
-}
-
-export function setupIOSRemoteCommands(): void {
-  _setupRemoteCommands();
-}
-
-export function teardownIOSRemoteCommands(): void {
-  _teardownRemoteCommands();
-}
-
-export function addIOSRemoteCommandListener(
-  listener: (event: RemoteCommandEvent) => void,
-): EventSubscription | undefined {
-  return _addRemoteCommandListener(listener);
-}

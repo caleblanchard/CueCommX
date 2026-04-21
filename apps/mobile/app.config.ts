@@ -36,6 +36,8 @@ const config: CueCommXExpoConfig = {
         "CueCommX needs local network access to discover intercom servers on your network.",
       NSBonjourServices: ["_cuecommx._tcp"],
       UIBackgroundModes: ["audio"],
+      NSSupportsLiveActivities: true,
+      NSSupportsLiveActivitiesFrequentUpdates: true,
     },
   },
   android: {
@@ -61,6 +63,7 @@ const config: CueCommXExpoConfig = {
   },
   plugins: [
     "./plugins/withAudioRouter.js",
+    "./plugins/withLiveActivity.js",
     "expo-camera",
     "expo-dev-client",
     "expo-notifications",

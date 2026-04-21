@@ -1,0 +1,8 @@
+{
+  "name": "cuecommx-live-activity",
+  "version": "0.0.1",
+  "description": "iOS ActivityKit Live Activity support for CueCommX",
+  "main": "src/index.ts",
+  "source": "src/index.ts",
+  "types": "src/index.ts"
+}
