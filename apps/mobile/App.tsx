@@ -21,7 +21,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
-import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CueCommXRealtimeClient, type RealtimeConnectionState } from "@cuecommx/core";
 import type {
@@ -1778,8 +1778,7 @@ export default function App() {
   const screen = state.session ? "intercom" : state.status ? "login" : "connect";
 
   return (
-    <SafeAreaProvider>
-      <SafeAreaView className="flex-1 bg-background">
+    <SafeAreaView className="flex-1 bg-background">
         <StatusBar style="light" />
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -2980,6 +2979,5 @@ export default function App() {
           </KeyboardAvoidingView>
         </Modal>
       </SafeAreaView>
-    </SafeAreaProvider>
   );
 }

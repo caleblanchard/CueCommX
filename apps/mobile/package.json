@@ -2,7 +2,7 @@
   "name": "@cuecommx/mobile",
   "version": "0.1.0",
   "private": true,
-  "main": "index.ts",
+  "main": "index.tsx",
   "scripts": {
     "start": "expo start --dev-client",
     "dev": "expo start --dev-client",
