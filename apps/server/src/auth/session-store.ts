@@ -28,4 +28,8 @@ export class SessionStore {
   get(token: string): SessionRecord | undefined {
     return this.sessions.get(token);
   }
+
+  delete(token: string): void {
+    this.sessions.delete(token);
+  }
 }

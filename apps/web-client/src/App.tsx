@@ -48,6 +48,7 @@ import {
   FileText,
   GripVertical,
   ListOrdered,
+  LogOut,
 } from "lucide-react";
 
 import { Badge } from "./components/ui/badge.js";
@@ -1436,6 +1437,24 @@ export default function App() {
         realtimeState: "idle",
       }));
     }
+  }
+
+  async function handleSignOut(): Promise<void> {
+    const token = state.session?.sessionToken;
+    // Best-effort server-side session revocation
+    if (token) {
+      try {
+        await fetch("/api/auth/session", {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch {
+        // Ignore network errors — local state is cleared regardless
+      }
+    }
+    clearStoredSession(getBrowserStorage());
+    setSettingsOpen(false);
+    setState(initialState);
   }
 
   async function handleSaveProfile(): Promise<void> {
@@ -3315,6 +3334,18 @@ export default function App() {
                 </Button>
               </CardContent>
             </Card>
+
+            <div className="pb-2">
+              <Button
+                className="w-full justify-center"
+                onClick={() => void handleSignOut()}
+                type="button"
+                variant="outline"
+              >
+                <LogOut className="mr-2 h-4 w-4" />
+                Sign out
+              </Button>
+            </div>
           </div>
         </div>
       ) : null}

@@ -370,6 +370,17 @@ export function createApp(options: CreateAppOptions) {
       );
     });
 
+    configuredApp.delete("/api/auth/session", async (request, reply) => {
+      const authorization = request.headers.authorization;
+      const [scheme, token] = typeof authorization === "string" ? authorization.split(" ") : [];
+
+      if (scheme === "Bearer" && token) {
+        sessionStore.delete(token);
+      }
+
+      return reply.code(204).send();
+    });
+
     configuredApp.post("/api/auth/login", async (request, reply) => {
       const parsed = LoginRequestSchema.safeParse(request.body);
 
