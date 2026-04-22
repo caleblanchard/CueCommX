@@ -370,11 +370,13 @@ export function DashboardPage({
                           </Badge>
                         </div>
                         <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                          {discovery.announcedHost
-                            ? `CueCommX is pinned to ${discovery.announcedHost} via CUECOMMX_ANNOUNCED_IP.`
-                            : multipleDetectedInterfaces
-                              ? "CueCommX detected more than one LAN interface. Confirm the primary URL below and pin the correct address before service day if this machine has multiple NICs."
-                              : "CueCommX is auto-selecting the available LAN address for QR and manual connect handoff."}
+                          {discovery.primaryHost
+                            ? `CueCommX is using ${discovery.primaryHost} as the primary web URL via CUECOMMX_PRIMARY_HOST.`
+                            : discovery.announcedHost
+                              ? `CueCommX is pinned to ${discovery.announcedHost} via CUECOMMX_ANNOUNCED_IP.`
+                              : multipleDetectedInterfaces
+                                ? "CueCommX detected more than one LAN interface. Confirm the primary URL below and pin the correct address before service day if this machine has multiple NICs."
+                                : "CueCommX is auto-selecting the available LAN address for QR and manual connect handoff."}
                         </p>
                         {primaryDiscoveryTarget ? (
                           <div className="mt-3 rounded-2xl border border-border/60 bg-background/50 p-3">
@@ -423,9 +425,11 @@ export function DashboardPage({
                         ) : null}
                         {suggestedAnnouncedHost ? (
                           <div className="mt-3 rounded-2xl border border-border/60 bg-background/50 p-3 text-sm text-muted-foreground">
-                            To override the primary discovery target, set{" "}
-                            <code>CUECOMMX_ANNOUNCED_IP={suggestedAnnouncedHost}</code> and restart
-                            the server.
+                            To pin the web QR/connect URL to a specific host or domain, set{" "}
+                            <code>CUECOMMX_PRIMARY_HOST=comms.example.local</code>. To pin WebRTC
+                            media routing to a specific IP, set{" "}
+                            <code>CUECOMMX_ANNOUNCED_IP={suggestedAnnouncedHost}</code>. Restart the
+                            server after changes.
                           </div>
                         ) : null}
                         {discovery.mdns ? (

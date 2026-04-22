@@ -85,6 +85,7 @@ Data is stored in the `cuecommx-data` Docker volume and persists across upgrades
 | Variable | Default | Description |
 |---|---|---|
 | `CUECOMMX_ANNOUNCED_IP` | *(required)* | LAN IP advertised to WebRTC clients |
+| `CUECOMMX_PRIMARY_HOST` | *(same as ANNOUNCED_IP)* | Hostname/domain for the operator QR code and connect URL. Use when you want a DNS name or a different address than `ANNOUNCED_IP` for the web UI. |
 | `CUECOMMX_SERVER_NAME` | `CueCommX` | Name shown on the client connect screen |
 | `CUECOMMX_PORT` | `3000` | HTTP listen port |
 | `CUECOMMX_HTTPS_PORT` | `3443` | HTTPS listen port (only active when TLS is configured) |

@@ -12,9 +12,13 @@ services:
         required: false
     environment:
       CUECOMMX_SERVER_NAME: CueCommX
-      # !! Replace with the Linux host's LAN IP.
+      # !! Replace with the Linux host's LAN IP (for WebRTC media routing).
       # Run: ip route get 1 | awk '{print $7; exit}'
       CUECOMMX_ANNOUNCED_IP: 192.168.1.50
+      # Optional: hostname/domain for the operator QR code and connect URL.
+      # Use when CUECOMMX_ANNOUNCED_IP differs from the desired web UI address,
+      # or when you want to use a DNS name instead of an IP.
+      # CUECOMMX_PRIMARY_HOST: comms.example.local
       CUECOMMX_PORT: 3000
       CUECOMMX_RTC_MIN_PORT: 40000
       CUECOMMX_RTC_MAX_PORT: 41000

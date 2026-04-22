@@ -113,7 +113,9 @@ export function buildDiscoveryResponse(
     });
   };
 
-  if (config.announcedIp) {
+  if (config.primaryHost) {
+    addTarget(config.primaryHost, "announced", "Primary web URL", "primary");
+  } else if (config.announcedIp) {
     addTarget(config.announcedIp, "announced", "Primary LAN URL", "announced");
   }
 
@@ -153,6 +155,7 @@ export function buildDiscoveryResponse(
 
   return {
     announcedHost: config.announcedIp,
+    primaryHost: config.primaryHost,
     detectedInterfaces,
     mdns: options.mdns,
     primaryUrl: targets[0].url,

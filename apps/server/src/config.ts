@@ -33,6 +33,7 @@ const environmentSchema = z.object({
   CUECOMMX_RTC_MIN_PORT: integerFromEnv(40000),
   CUECOMMX_RTC_MAX_PORT: integerFromEnv(41000),
   CUECOMMX_ANNOUNCED_IP: optionalStringFromEnv,
+  CUECOMMX_PRIMARY_HOST: optionalStringFromEnv,
   CUECOMMX_DATA_DIR: z.string().min(1).default("./data"),
   CUECOMMX_DB_FILE: z.string().min(1).default("cuecommx.db"),
   CUECOMMX_MAX_USERS: integerFromEnv(30),
@@ -52,6 +53,8 @@ export interface CueCommXConfig {
   rtcMinPort: number;
   rtcMaxPort: number;
   announcedIp?: string;
+  /** Explicit host/domain for the web UI QR code and primary connect URL. */
+  primaryHost?: string;
   dataDir: string;
   dbFile: string;
   dbPath: string;
@@ -98,6 +101,7 @@ export function loadConfig(
     rtcMinPort: parsed.CUECOMMX_RTC_MIN_PORT,
     rtcMaxPort: parsed.CUECOMMX_RTC_MAX_PORT,
     announcedIp: parsed.CUECOMMX_ANNOUNCED_IP,
+    primaryHost: parsed.CUECOMMX_PRIMARY_HOST,
     dataDir,
     dbFile: parsed.CUECOMMX_DB_FILE,
     dbPath,

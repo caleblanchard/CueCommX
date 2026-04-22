@@ -35,6 +35,7 @@ export type DiscoveryMdns = z.infer<typeof DiscoveryMdnsSchema>;
 
 export const DiscoveryResponseSchema = z.object({
   announcedHost: z.string().min(1).optional(),
+  primaryHost: z.string().min(1).optional(),
   detectedInterfaces: z.array(DiscoveryInterfaceSchema).default([]),
   mdns: DiscoveryMdnsSchema.optional(),
   primaryUrl: z.string().url(),
