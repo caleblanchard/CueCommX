@@ -32,7 +32,7 @@
   - Expo Go is intentionally unsupported because WebRTC requires custom native code
 - Shared packages:
   - `@cuecommx/protocol` for wire types, validation, and API/shared models
-  - `@cuecommx/core` for shared client/session/state logic
+  - `@cuecommx/core` for shared client/session/state logic (used by web and mobile clients only, not by the server)
   - `@cuecommx/design-tokens` for semantic colors, spacing, typography, radii, elevation, and motion
 
 ## MVP audio rules
@@ -95,3 +95,31 @@
   - Stage
 - Prefer explicit error handling over silent fallbacks.
 - Keep changes small, typed, and composable.
+
+## Key files and directories
+
+- `apps/server/src/app.ts` — Fastify app factory; static asset serving, all API routes
+- `apps/server/src/config.ts` — all `CUECOMMX_*` env var definitions and validation
+- `apps/server/src/realtime/service.ts` — WebSocket signaling + mediasoup routing logic
+- `apps/web-client/src/App.tsx` — monolithic web client (React); all channel/talk/chat/settings UI
+- `apps/mobile/App.tsx` — monolithic mobile app entry (Expo prebuild); all channel/talk/chat/settings UI
+- `apps/admin-ui/src/` — admin panel (separate React app served at `/admin`)
+- `packages/protocol/src/preferences.ts` — `UserPreferencesSchema` (includes `channelOrder`)
+- `certs/` — self-signed CA + server cert for local HTTPS dev; see `certs/README.md` for trusting on devices
+- `.env.example` — full environment variable reference
+- `DEPLOY.md` — operator deployment guide (Docker quick-start, firewall rules, TLS, backup)
+
+## Deployment
+
+- Container deployment uses `docker compose up -d` from the repo root.
+- `CUECOMMX_ANNOUNCED_IP` **must** be set to the Linux host's LAN IP for WebRTC to work.
+- The container uses `network_mode: host`; UDP ports 40000–41000 must be open in the firewall.
+- Persistent data lives in the `cuecommx-data` Docker volume at `/var/lib/cuecommx/data`.
+- Both HTTP and HTTPS run simultaneously when `CUECOMMX_TLS_CERT_FILE` + `CUECOMMX_TLS_KEY_FILE` are set.
+- iOS clients require HTTPS for WebRTC on non-localhost origins.
+
+## Third-party notices
+
+- `apps/web-client/src/third-party-notices.json` and `apps/mobile/third-party-notices.json` are generated files.
+- Regenerate after dependency changes: `npx --yes license-checker --production --json --excludePrivatePackages` from repo root, then deduplicate by package name and copy to both locations.
+
