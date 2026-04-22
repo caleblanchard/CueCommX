@@ -5,20 +5,26 @@ services:
     image: cuecommx:local
     network_mode: host
     restart: unless-stopped
+    # Copy .env.example to .env and set CUECOMMX_ANNOUNCED_IP before starting.
+    # Values in .env override any defaults set below.
+    env_file:
+      - path: .env
+        required: false
     environment:
       CUECOMMX_SERVER_NAME: CueCommX
-      # Replace with the Linux host's LAN IP so WebRTC clients receive a reachable candidate.
+      # !! Replace with the Linux host's LAN IP.
+      # Run: ip route get 1 | awk '{print $7; exit}'
       CUECOMMX_ANNOUNCED_IP: 192.168.1.50
       CUECOMMX_PORT: 3000
       CUECOMMX_RTC_MIN_PORT: 40000
       CUECOMMX_RTC_MAX_PORT: 41000
-      # Uncomment to enable HTTPS on a second port (both HTTP and HTTPS run simultaneously)
+      # Uncomment to enable HTTPS (both HTTP and HTTPS run simultaneously):
+      # CUECOMMX_HTTPS_PORT: 3443
       # CUECOMMX_TLS_CERT_FILE: /etc/cuecommx/certs/server.crt
       # CUECOMMX_TLS_KEY_FILE: /etc/cuecommx/certs/server.key
-      # CUECOMMX_HTTPS_PORT: 3443
     volumes:
       - cuecommx-data:/var/lib/cuecommx/data
-      # Uncomment to mount TLS certificates
+      # Uncomment to mount TLS certificates:
       # - ./certs:/etc/cuecommx/certs:ro
 
 volumes:

@@ -8,3 +8,19 @@ apps/*/coverage
 packages/*/dist
 packages/*/coverage
 *.log
+
+# Mobile native build artifacts — not needed for server image
+apps/mobile/ios
+apps/mobile/android
+apps/mobile/.expo
+
+# Local development data and certificates
+data
+apps/server/data
+certs/*.key
+
+# Dev tooling
+test-results
+.vscode
+.DS_Store
+playwright.config.ts
