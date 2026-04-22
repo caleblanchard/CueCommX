@@ -1764,11 +1764,7 @@ export default function App() {
               >
                 {isSignedIn ? (state.status?.name ?? "CueCommX") : "CueCommX Web Client"}
               </h1>
-              <p className={`max-w-3xl leading-7 text-muted-foreground ${isSignedIn ? "text-base" : "text-lg"}`}>
-                {isSignedIn
-                  ? `Signed in as ${state.session?.user.username}. Your assigned channels stay front and center, while audio setup and session health only appear when they are actionable.`
-                  : "A dark-first, keyboard-friendly party-line surface with real browser audio, live listen routing, and stable Talk targets for local productions."}
-              </p>
+
             </div>
             {isSignedIn ? (
               <div className="flex flex-wrap items-center gap-3">
