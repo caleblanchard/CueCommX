@@ -12,23 +12,42 @@
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
 		5CFB0DBC39268EAFCD68B0B7 /* AudioRouterModule.m in Sources */ = {isa = PBXBuildFile; fileRef = CDB899703F9AEF8CAE39B88A /* AudioRouterModule.m */; };
 		5E2F5301D0077CB6695FAF34 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 2DD4774B0ED8C9FE79C35413 /* PrivacyInfo.xcprivacy */; };
-		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
-		BB9B01FCF33CC5A556A23147 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0BEB8A7F2279F7B6D42719A /* ExpoModulesProvider.swift */; };
-		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
+		6884FBA34B014AA4A14D2BE3 /* CueCommXLiveActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25AC069D47844F5693B5CE7E /* CueCommXLiveActivityWidget.swift */; };
 		9CE2E24524A64A2BADE12D25 /* CueCommXLiveActivity.appex in Copy Files */ = {isa = PBXBuildFile; fileRef = 4CBE246CF7114A5DB4F2D47F /* CueCommXLiveActivity.appex */; };
 		AE17089926AA461B9ABF45E9 /* CueCommXLiveActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 765BC6022B444E7283AEFEDD /* CueCommXLiveActivityAttributes.swift */; };
-		6884FBA34B014AA4A14D2BE3 /* CueCommXLiveActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25AC069D47844F5693B5CE7E /* CueCommXLiveActivityWidget.swift */; };
+		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
+		BB9B01FCF33CC5A556A23147 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0BEB8A7F2279F7B6D42719A /* ExpoModulesProvider.swift */; };
 		BC550789A05143D48E41AA90 /* CueCommXLiveActivityBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76A6B92A16DD43DCBE97CA17 /* CueCommXLiveActivityBundle.swift */; };
 		C29182D1960F45E4B3E47937 /* ToggleTalkIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71B1889B64F44B349E1A85EE /* ToggleTalkIntent.swift */; };
+		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		D22E61647F2D403AA3C949AB /* Copy Files */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				9CE2E24524A64A2BADE12D25 /* CueCommXLiveActivity.appex in Copy Files */,
+			);
+			name = "Copy Files";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		13B07F961A680F5B00A75B9A /* CueCommXMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CueCommXMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = CueCommXMobile/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = CueCommXMobile/Info.plist; sourceTree = "<group>"; };
+		25AC069D47844F5693B5CE7E /* CueCommXLiveActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CueCommXLiveActivityWidget.swift; path = CueCommXLiveActivity/CueCommXLiveActivityWidget.swift; sourceTree = "<group>"; };
 		27EF3C82693C99086BDCC34F /* Pods-CueCommXMobile.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CueCommXMobile.release.xcconfig"; path = "Target Support Files/Pods-CueCommXMobile/Pods-CueCommXMobile.release.xcconfig"; sourceTree = "<group>"; };
 		2DD4774B0ED8C9FE79C35413 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = CueCommXMobile/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		4CBE246CF7114A5DB4F2D47F /* CueCommXLiveActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = undefined; name = CueCommXLiveActivity.appex; path = CueCommXLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		4DE54A4E979A41310F35C59A /* libPods-CueCommXMobile.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-CueCommXMobile.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		71B1889B64F44B349E1A85EE /* ToggleTalkIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ToggleTalkIntent.swift; path = CueCommXLiveActivity/ToggleTalkIntent.swift; sourceTree = "<group>"; };
+		765BC6022B444E7283AEFEDD /* CueCommXLiveActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CueCommXLiveActivityAttributes.swift; path = CueCommXLiveActivity/CueCommXLiveActivityAttributes.swift; sourceTree = "<group>"; };
+		76A6B92A16DD43DCBE97CA17 /* CueCommXLiveActivityBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CueCommXLiveActivityBundle.swift; path = CueCommXLiveActivity/CueCommXLiveActivityBundle.swift; sourceTree = "<group>"; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = CueCommXMobile/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
 		CDB899703F9AEF8CAE39B88A /* AudioRouterModule.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; name = AudioRouterModule.m; path = CueCommXMobile/AudioRouterModule.m; sourceTree = "<group>"; };
@@ -38,11 +57,6 @@
 		F11748442D0722820044C1D9 /* CueCommXMobile-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "CueCommXMobile-Bridging-Header.h"; path = "CueCommXMobile/CueCommXMobile-Bridging-Header.h"; sourceTree = "<group>"; };
 		F84546FF39FA61B55AA0AC8B /* AudioRouterModule.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; name = AudioRouterModule.h; path = CueCommXMobile/AudioRouterModule.h; sourceTree = "<group>"; };
 		FD64F9DEC3E8AE641B2D4B10 /* Pods-CueCommXMobile.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CueCommXMobile.debug.xcconfig"; path = "Target Support Files/Pods-CueCommXMobile/Pods-CueCommXMobile.debug.xcconfig"; sourceTree = "<group>"; };
-		4CBE246CF7114A5DB4F2D47F /* CueCommXLiveActivity.appex */ = {isa = PBXFileReference; name = "CueCommXLiveActivity.appex"; path = "CueCommXLiveActivity.appex"; sourceTree = BUILT_PRODUCTS_DIR; fileEncoding = undefined; lastKnownFileType = undefined; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; };
-		765BC6022B444E7283AEFEDD /* CueCommXLiveActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "CueCommXLiveActivityAttributes.swift"; path = "CueCommXLiveActivity/CueCommXLiveActivityAttributes.swift"; sourceTree = "<group>"; };
-		25AC069D47844F5693B5CE7E /* CueCommXLiveActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "CueCommXLiveActivityWidget.swift"; path = "CueCommXLiveActivity/CueCommXLiveActivityWidget.swift"; sourceTree = "<group>"; };
-		76A6B92A16DD43DCBE97CA17 /* CueCommXLiveActivityBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "CueCommXLiveActivityBundle.swift"; path = "CueCommXLiveActivity/CueCommXLiveActivityBundle.swift"; sourceTree = "<group>"; };
-		71B1889B64F44B349E1A85EE /* ToggleTalkIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "ToggleTalkIntent.swift"; path = "CueCommXLiveActivity/ToggleTalkIntent.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -180,13 +194,9 @@
 			productReference = 13B07F961A680F5B00A75B9A /* CueCommXMobile.app */;
 			productType = "com.apple.product-type.application";
 		};
-		1A9454DC0867466AB778E36A /* "CueCommXLiveActivity" */ = {
+		1A9454DC0867466AB778E36A /* CueCommXLiveActivity */ = {
 			isa = PBXNativeTarget;
-			name = "CueCommXLiveActivity";
-			productName = "CueCommXLiveActivity";
-			productReference = 4CBE246CF7114A5DB4F2D47F;
-			productType = "com.apple.product-type.app-extension";
-			buildConfigurationList = 4C51BDDA1D714AF9A6385965;
+			buildConfigurationList = 4C51BDDA1D714AF9A6385965 /* Build configuration list for PBXNativeTarget "CueCommXLiveActivity" */;
 			buildPhases = (
 				CB068ABCF6D5445FBB82B375 /* Sources */,
 				3F5DC1B190A0490A9A501069 /* Frameworks */,
@@ -195,6 +205,10 @@
 			);
 			dependencies = (
 			);
+			name = CueCommXLiveActivity;
+			productName = CueCommXLiveActivity;
+			productReference = 4CBE246CF7114A5DB4F2D47F /* CueCommXLiveActivity.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -223,7 +237,7 @@
 			projectRoot = "";
 			targets = (
 				13B07F861A680F5B00A75B9A /* CueCommXMobile */,
-				1A9454DC0867466AB778E36A /* "CueCommXLiveActivity" */,
+				1A9454DC0867466AB778E36A /* CueCommXLiveActivity */,
 			);
 		};
 /* End PBXProject section */
@@ -295,6 +309,7 @@
 				"${PODS_CONFIGURATION_BUILD_DIR}/EXConstants/ExpoConstants_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/EXNotifications/ExpoNotifications_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/ExpoFileSystem/ExpoFileSystem_privacy.bundle",
+				"${PODS_CONFIGURATION_BUILD_DIR}/RNSVG/RNSVGFilters.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/React-Core/React-Core_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/React-cxxreact/React-cxxreact_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/expo-dev-launcher/EXDevLauncher.bundle",
@@ -308,6 +323,7 @@
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoConstants_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoNotifications_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoFileSystem_privacy.bundle",
+				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/RNSVGFilters.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/React-Core_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/React-cxxreact_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/EXDevLauncher.bundle",
@@ -421,11 +437,11 @@
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
 				PRODUCT_BUNDLE_IDENTIFIER = com.cuecommx.mobile;
-				PRODUCT_NAME = "CueCommXMobile";
+				PRODUCT_NAME = CueCommXMobile;
 				SWIFT_OBJC_BRIDGING_HEADER = "CueCommXMobile/CueCommXMobile-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1";
+				TARGETED_DEVICE_FAMILY = 1;
 				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Debug;
@@ -454,13 +470,59 @@
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
 				PRODUCT_BUNDLE_IDENTIFIER = com.cuecommx.mobile;
-				PRODUCT_NAME = "CueCommXMobile";
+				PRODUCT_NAME = CueCommXMobile;
 				SWIFT_OBJC_BRIDGING_HEADER = "CueCommXMobile/CueCommXMobile-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1";
+				TARGETED_DEVICE_FAMILY = 1;
 				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Release;
+		};
+		5A5C3C25AD594F518AD526D4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 5CD7VZ5QK5;
+				INFOPLIST_FILE = CueCommXLiveActivity/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.cuecommx.mobile.live-activity";
+				PRODUCT_NAME = CueCommXLiveActivity;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		7D7C7D551DE6421DB109D5D3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 5CD7VZ5QK5;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				INFOPLIST_FILE = CueCommXLiveActivity/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.cuecommx.mobile.live-activity";
+				PRODUCT_NAME = CueCommXLiveActivity;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
 		};
 		83CBBA201A601CBA00E9B192 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -582,42 +644,6 @@
 			};
 			name = Release;
 		};
-		7D7C7D551DE6421DB109D5D3 /* Debug */ = {
-			name = Debug;
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"DEBUG=1",
-					"$(inherited)",
-				);
-				INFOPLIST_FILE = "CueCommXLiveActivity/Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				PRODUCT_NAME = "CueCommXLiveActivity";
-				SKIP_INSTALL = YES;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.cuecommx.mobile.live-activity";
-				SWIFT_VERSION = 5.9;
-				TARGETED_DEVICE_FAMILY = "1";
-				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
-				DEVELOPMENT_TEAM = "5CD7VZ5QK5";
-				CODE_SIGN_STYLE = "Automatic";
-			};
-		};
-		5A5C3C25AD594F518AD526D4 /* Release */ = {
-			name = Release;
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				INFOPLIST_FILE = "CueCommXLiveActivity/Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				PRODUCT_NAME = "CueCommXLiveActivity";
-				SKIP_INSTALL = YES;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.cuecommx.mobile.live-activity";
-				SWIFT_VERSION = 5.9;
-				TARGETED_DEVICE_FAMILY = "1";
-				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
-				DEVELOPMENT_TEAM = "5CD7VZ5QK5";
-				CODE_SIGN_STYLE = "Automatic";
-			};
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -626,15 +652,6 @@
 			buildConfigurations = (
 				13B07F941A680F5B00A75B9A /* Debug */,
 				13B07F951A680F5B00A75B9A /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "CueCommXMobile" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				83CBBA201A601CBA00E9B192 /* Debug */,
-				83CBBA211A601CBA00E9B192 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -648,21 +665,16 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-/* End XCConfigurationList section */
-
-/* Begin PBXCopyFilesBuildPhase section */
-		D22E61647F2D403AA3C949AB /* Copy Files */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				9CE2E24524A64A2BADE12D25 /* CueCommXLiveActivity.appex in Copy Files */,
+		83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "CueCommXMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				83CBBA201A601CBA00E9B192 /* Debug */,
+				83CBBA211A601CBA00E9B192 /* Release */,
 			);
-			runOnlyForDeploymentPostprocessing = 0;
-			name = "Copy Files";
-			dstPath = "";
-			dstSubfolderSpec = 13;
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
 		};
-/* End PBXCopyFilesBuildPhase section */
+/* End XCConfigurationList section */
 	};
 	rootObject = 83CBB9F71A601CBA00E9B192 /* Project object */;
 }

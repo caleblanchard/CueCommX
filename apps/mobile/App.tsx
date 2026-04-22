@@ -22,6 +22,7 @@ import {
 } from "react-native";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import {
   ArrowLeft,
   Camera,
@@ -1865,6 +1866,7 @@ export default function App() {
   const screen = state.session ? "intercom" : state.status ? "login" : "connect";
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaView className="flex-1 bg-background">
         <StatusBar style="light" />
         <KeyboardAvoidingView
@@ -3210,5 +3212,6 @@ export default function App() {
           </KeyboardAvoidingView>
         </Modal>
       </SafeAreaView>
+    </GestureHandlerRootView>
   );
 }
