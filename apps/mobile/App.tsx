@@ -3054,16 +3054,21 @@ export default function App() {
           transparent={false}
           visible={arrangeChannelsOpen}
         >
-          <SafeAreaView className="flex-1 bg-background">
-            <View className="flex-row items-center justify-between border-b border-border px-4 py-3">
-              <Text className="text-base font-semibold text-foreground">Arrange Channels</Text>
-              <Pressable
-                accessibilityLabel="Close"
-                hitSlop={12}
-                onPress={() => setArrangeChannelsOpen(false)}
-              >
-                <X color="#94a3b8" size={20} />
-              </Pressable>
+          <View style={{ flex: 1, backgroundColor: "#09090b" }}>
+            <View
+              className="border-b border-border bg-background"
+              style={{ paddingTop: insets.top }}
+            >
+              <View className="flex-row items-center justify-between px-4 py-3">
+                <Text className="text-base font-semibold text-foreground">Arrange Channels</Text>
+                <Pressable
+                  accessibilityLabel="Close"
+                  hitSlop={12}
+                  onPress={() => setArrangeChannelsOpen(false)}
+                >
+                  <X color="#94a3b8" size={20} />
+                </Pressable>
+              </View>
             </View>
             <Text className="px-4 pt-3 pb-1 text-sm text-muted-foreground">
               Hold and drag to reorder channels.
@@ -3092,9 +3097,9 @@ export default function App() {
                   </Pressable>
                 </ScaleDecorator>
               )}
-              contentContainerStyle={{ paddingBottom: 24 }}
+              contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
             />
-          </SafeAreaView>
+          </View>
         </Modal>
 
         <Modal
