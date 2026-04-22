@@ -33,6 +33,8 @@ cp .env.example .env
 Open `.env` and set **`CUECOMMX_ANNOUNCED_IP`** to the LAN IP you found in step 1.
 Every other variable has a sensible default, but review them before going live.
 
+> **How `.env` works:** Docker Compose reads `.env` automatically from the same directory as `docker-compose.yml` and uses it for variable substitution (`${VAR:-default}`) inside the compose file. Make sure your `.env` is in the same directory as `docker-compose.yml` when you run `docker compose up`.
+
 ### 4. Open the firewall
 
 CueCommX uses UDP for WebRTC media. Open the configured RTP port range on the host:

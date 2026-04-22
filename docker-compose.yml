@@ -5,27 +5,24 @@ services:
     image: cuecommx:local
     network_mode: host
     restart: unless-stopped
-    # Copy .env.example to .env and set CUECOMMX_ANNOUNCED_IP before starting.
-    # Values in .env override any defaults set below.
-    env_file:
-      - path: .env
-        required: false
+    # Copy .env.example to .env and edit values before running.
+    # Docker Compose reads .env automatically for variable substitution below.
+    # You can also set variables directly in the environment block.
     environment:
-      CUECOMMX_SERVER_NAME: CueCommX
+      CUECOMMX_SERVER_NAME: ${CUECOMMX_SERVER_NAME:-CueCommX}
       # !! Replace with the Linux host's LAN IP (for WebRTC media routing).
       # Run: ip route get 1 | awk '{print $7; exit}'
-      CUECOMMX_ANNOUNCED_IP: 192.168.1.50
+      CUECOMMX_ANNOUNCED_IP: ${CUECOMMX_ANNOUNCED_IP:-192.168.1.50}
+      CUECOMMX_PORT: ${CUECOMMX_PORT:-3000}
+      CUECOMMX_RTC_MIN_PORT: ${CUECOMMX_RTC_MIN_PORT:-40000}
+      CUECOMMX_RTC_MAX_PORT: ${CUECOMMX_RTC_MAX_PORT:-41000}
+      CUECOMMX_LOG_LEVEL: ${CUECOMMX_LOG_LEVEL:-info}
       # Optional: hostname/domain for the operator QR code and connect URL.
-      # Use when CUECOMMX_ANNOUNCED_IP differs from the desired web UI address,
-      # or when you want to use a DNS name instead of an IP.
-      # CUECOMMX_PRIMARY_HOST: comms.example.local
-      CUECOMMX_PORT: 3000
-      CUECOMMX_RTC_MIN_PORT: 40000
-      CUECOMMX_RTC_MAX_PORT: 41000
+      # CUECOMMX_PRIMARY_HOST: ${CUECOMMX_PRIMARY_HOST:-}
       # Uncomment to enable HTTPS (both HTTP and HTTPS run simultaneously):
-      # CUECOMMX_HTTPS_PORT: 3443
-      # CUECOMMX_TLS_CERT_FILE: /etc/cuecommx/certs/server.crt
-      # CUECOMMX_TLS_KEY_FILE: /etc/cuecommx/certs/server.key
+      # CUECOMMX_HTTPS_PORT: ${CUECOMMX_HTTPS_PORT:-3443}
+      # CUECOMMX_TLS_CERT_FILE: ${CUECOMMX_TLS_CERT_FILE:-/etc/cuecommx/certs/server.crt}
+      # CUECOMMX_TLS_KEY_FILE: ${CUECOMMX_TLS_KEY_FILE:-/etc/cuecommx/certs/server.key}
     volumes:
       - cuecommx-data:/var/lib/cuecommx/data
       # Uncomment to mount TLS certificates:
