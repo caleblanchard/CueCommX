@@ -1834,40 +1834,6 @@ export default function App() {
             ) : null}
           </div>
 
-          {!isSignedIn ? (
-            <Card className="w-full max-w-xl">
-              <CardHeader>
-                <CardDescription>Live session shell</CardDescription>
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="space-y-2">
-                    <CardTitle>{state.status?.name ?? "CueCommX"}</CardTitle>
-                    <p className="text-sm leading-6 text-muted-foreground">
-                      Join the local intercom first. Browser audio and live telemetry stay hidden
-                      until they can actually help the operator.
-                    </p>
-                  </div>
-                  <Badge variant={connectionBadge.variant}>{connectionBadge.label}</Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="flex flex-wrap gap-3 text-sm text-muted-foreground">
-                <div className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/60 px-3 py-2">
-                  <Keyboard className="h-4 w-4 text-primary" />
-                  Momentary and latch Talk
-                </div>
-                <div className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/60 px-3 py-2">
-                  <Wifi className="h-4 w-4 text-primary" />
-                  Exponential reconnect
-                </div>
-                <a
-                  className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/60 px-3 py-2 text-foreground underline-offset-4 hover:text-primary hover:underline"
-                  href={currentConnectUrl}
-                >
-                  <RadioTower className="h-4 w-4 text-primary" />
-                  {currentConnectUrl}
-                </a>
-              </CardContent>
-            </Card>
-          ) : null}
         </header>
 
         {state.loading ? (
