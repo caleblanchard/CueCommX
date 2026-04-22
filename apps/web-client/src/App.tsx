@@ -1,5 +1,6 @@
 import { toast, Toaster } from "sonner";
 import { type CSSProperties, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import notices from "./third-party-notices.json" with { type: "json" };
 
 import * as Separator from "@radix-ui/react-separator";
 import { CueCommXRealtimeClient, type RealtimeConnectionState } from "@cuecommx/core";
@@ -44,6 +45,7 @@ import {
   Volume2,
   Wifi,
   X,
+  FileText,
   GripVertical,
   ListOrdered,
 } from "lucide-react";
@@ -367,6 +369,8 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<Record<string, Array<{ id: string; channelId: string; userId: string; username: string; text: string; timestamp: number; messageType: "text" | "system" }>>>({});
   const [chatOpen, setChatOpen] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [noticesOpen, setNoticesOpen] = useState(false);
+  const [noticesSearch, setNoticesSearch] = useState("");
   const [channelOrder, setChannelOrder] = useState<string[]>([]);
   const [arrangeChannelsOpen, setArrangeChannelsOpen] = useState(false);
   const dndSensors = useSensors(
@@ -3292,6 +3296,84 @@ export default function App() {
                 ) : null}
               </CardContent>
             </Card>
+
+            <Card>
+              <CardHeader>
+                <CardDescription>Legal</CardDescription>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  Third-party notices
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="mb-3 text-sm text-muted-foreground">
+                  CueCommX is built on {notices.length} open-source packages.
+                </p>
+                <Button
+                  className="w-full justify-center"
+                  onClick={() => { setNoticesOpen(true); setNoticesSearch(""); }}
+                  type="button"
+                  variant="outline"
+                >
+                  View open-source notices
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Third-party notices overlay */}
+      {noticesOpen ? (
+        <div className="fixed inset-y-0 right-0 z-[60] flex w-full max-w-lg flex-col border-l border-border bg-background shadow-xl">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-muted-foreground" />
+              <span className="font-semibold">Third-party notices</span>
+            </div>
+            <Button onClick={() => setNoticesOpen(false)} size="sm" type="button" variant="ghost">
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="border-b border-border px-4 py-2">
+            <input
+              autoFocus
+              className="w-full rounded-md border border-border bg-muted/30 px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              onChange={(e) => setNoticesSearch(e.target.value)}
+              placeholder="Search packages…"
+              type="search"
+              value={noticesSearch}
+            />
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {notices
+              .filter((n) =>
+                !noticesSearch || n.name.toLowerCase().includes(noticesSearch.toLowerCase()),
+              )
+              .map((n) => (
+                <div
+                  className="flex items-start justify-between gap-3 border-b border-border/40 px-4 py-2.5 last:border-0"
+                  key={n.name}
+                >
+                  <div className="min-w-0">
+                    {n.url ? (
+                      <a
+                        className="truncate text-sm font-medium text-foreground hover:text-primary hover:underline"
+                        href={n.url}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        {n.name}
+                      </a>
+                    ) : (
+                      <span className="truncate text-sm font-medium text-foreground">{n.name}</span>
+                    )}
+                  </div>
+                  <span className="flex-shrink-0 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                    {n.license}
+                  </span>
+                </div>
+              ))}
           </div>
         </div>
       ) : null}

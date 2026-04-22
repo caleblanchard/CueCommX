@@ -108,6 +108,7 @@ import {
 } from "cuecommx-live-activity";
 
 import DraggableFlatList, { ScaleDecorator, type RenderItemParams } from "react-native-draggable-flatlist";
+import notices from "./third-party-notices.json";
 
 interface ViewState {
   discovery?: DiscoveryResponse;
@@ -561,6 +562,8 @@ export default function App() {
   const [activeGroupId, setActiveGroupId] = useState<string | undefined>();
   const [channelOrder, setChannelOrder] = useState<string[]>([]);
   const [arrangeChannelsOpen, setArrangeChannelsOpen] = useState(false);
+  const [noticesOpen, setNoticesOpen] = useState(false);
+  const [noticesSearch, setNoticesSearch] = useState("");
   const [ifbState, setIFBState] = useState<{
     fromUserId: string;
     fromUsername: string;
@@ -2992,6 +2995,21 @@ export default function App() {
                       </Text>
                     </SectionCard>
 
+                    {/* Third-party notices */}
+                    <SectionCard>
+                      <Text className="text-xs font-semibold uppercase tracking-control text-muted-foreground">
+                        Legal
+                      </Text>
+                      <Text className="text-sm leading-6 text-muted-foreground">
+                        CueCommX is built on {notices.length} open-source packages.
+                      </Text>
+                      <ActionButton
+                        label="View open-source notices"
+                        onPress={() => { setNoticesOpen(true); setNoticesSearch(""); }}
+                        tone="secondary"
+                      />
+                    </SectionCard>
+
                     {/* Sign out */}
                     <View>
                       <ActionButton label="Sign out" onPress={handleSignOut} tone="secondary" />
@@ -3098,6 +3116,61 @@ export default function App() {
                 </ScaleDecorator>
               )}
               contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+            />
+          </View>
+        </Modal>
+
+        {/* Third-party Notices Modal */}
+        <Modal
+          animationType="slide"
+          onRequestClose={() => setNoticesOpen(false)}
+          transparent={false}
+          visible={noticesOpen}
+        >
+          <View style={{ flex: 1, backgroundColor: "#09090b" }}>
+            <View
+              className="border-b border-border bg-background"
+              style={{ paddingTop: insets.top }}
+            >
+              <View className="flex-row items-center justify-between px-4 py-3">
+                <Text className="text-base font-semibold text-foreground">Open-source notices</Text>
+                <Pressable
+                  accessibilityLabel="Close"
+                  hitSlop={12}
+                  onPress={() => setNoticesOpen(false)}
+                >
+                  <X color="#94a3b8" size={20} />
+                </Pressable>
+              </View>
+              <View className="px-4 pb-3">
+                <TextInput
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground"
+                  onChangeText={setNoticesSearch}
+                  placeholder="Search packages…"
+                  placeholderTextColor="#64748b"
+                  value={noticesSearch}
+                />
+              </View>
+            </View>
+            <FlatList
+              data={notices.filter((n: { name: string; license: string; url: string }) =>
+                !noticesSearch || n.name.toLowerCase().includes(noticesSearch.toLowerCase()),
+              )}
+              keyExtractor={(item) => item.name}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+              renderItem={({ item }) => (
+                <View className="flex-row items-center justify-between border-b border-border/40 px-4 py-3">
+                  <Text className="flex-1 mr-2 text-sm text-foreground" numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                  <View className="rounded border border-border/60 bg-muted/40 px-2 py-0.5">
+                    <Text className="font-mono text-[10px] text-muted-foreground">{item.license}</Text>
+                  </View>
+                </View>
+              )}
             />
           </View>
         </Modal>
