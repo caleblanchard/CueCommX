@@ -52,11 +52,12 @@ class CueCommXForegroundServiceModule : Module() {
     }
 
     Function("stopService") {
-      val context = appContext.reactContext ?: return@Function
-      val intent = Intent(context, CueCommXIntercomService::class.java).apply {
-        action = CueCommXIntercomService.ACTION_STOP
+      appContext.reactContext?.let { context ->
+        val intent = Intent(context, CueCommXIntercomService::class.java).apply {
+          action = CueCommXIntercomService.ACTION_STOP
+        }
+        context.startService(intent)
       }
-      context.startService(intent)
     }
   }
 }

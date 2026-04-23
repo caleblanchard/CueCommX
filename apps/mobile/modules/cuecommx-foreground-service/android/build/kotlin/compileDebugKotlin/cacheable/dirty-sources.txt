@@ -1,0 +1,3 @@
+/Users/cblanchard/Repos/CueCommX/apps/mobile/modules/cuecommx-foreground-service/android/src/main/java/com/cuecommx/foregroundservice/CueCommXIntercomService.kt
+/Users/cblanchard/Repos/CueCommX/apps/mobile/modules/cuecommx-foreground-service/android/src/main/java/com/cuecommx/foregroundservice/CueCommXServiceEventBus.kt
+/Users/cblanchard/Repos/CueCommX/apps/mobile/modules/cuecommx-foreground-service/android/src/main/java/com/cuecommx/foregroundservice/CueCommXForegroundServiceModule.kt
