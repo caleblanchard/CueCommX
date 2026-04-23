@@ -63,6 +63,7 @@ const config: CueCommXExpoConfig = {
   },
   plugins: [
     "./plugins/withAudioRouter.js",
+    "./plugins/withForegroundService.js",
     "./plugins/withLiveActivity.js",
     "expo-camera",
     "expo-dev-client",

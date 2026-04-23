@@ -1,0 +1,8 @@
+{
+  "name": "cuecommx-foreground-service",
+  "version": "0.0.1",
+  "description": "Android Foreground Service for CueCommX intercom lock-screen controls",
+  "main": "src/index.ts",
+  "source": "src/index.ts",
+  "types": "src/index.ts"
+}

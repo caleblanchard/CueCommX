@@ -106,6 +106,12 @@ import {
   endLiveActivity,
   addToggleTalkListener,
 } from "cuecommx-live-activity";
+import {
+  startForegroundService,
+  updateForegroundService,
+  stopForegroundService,
+  addForegroundServiceToggleTalkListener,
+} from "cuecommx-foreground-service";
 
 import DraggableFlatList, { ScaleDecorator, type RenderItemParams } from "react-native-draggable-flatlist";
 import notices from "./third-party-notices.json";
@@ -921,6 +927,69 @@ export default function App() {
     remoteTalkers,
     onlineUsers,
   ]);
+
+  // Android Foreground Service: start when audio becomes ready, register notification toggle listener.
+  useEffect(() => {
+    if (Platform.OS !== "android" || !audioReady || !state.session) {
+      return;
+    }
+
+    startForegroundService(
+      state.session.user.username,
+      state.status?.name ?? "CueCommX"
+    );
+
+    const toggleSub = addForegroundServiceToggleTalkListener(() => {
+      const client = realtimeClientRef.current;
+      if (!client || !audioReadyRef.current) return;
+
+      const talkIds = talkChannelIdsRef.current;
+      const talkableIds = assignedPermissionsRef.current
+        .filter((p) => p.canTalk)
+        .map((p) => p.channelId);
+
+      if (talkIds.length > 0) {
+        client.stopTalk(talkableIds);
+      } else if (talkableIds.length > 0) {
+        client.startTalk(talkableIds);
+      }
+    });
+
+    return () => {
+      toggleSub?.remove();
+      stopForegroundService();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioReady, state.session?.user.username]);
+
+  // Android Foreground Service: keep notification state in sync with talk/channel/user state.
+  useEffect(() => {
+    if (Platform.OS !== "android" || !audioReady || !state.session) return;
+
+    const talkChannelNames = activeChannels
+      .filter((ch) => state.operatorState?.talkChannelIds?.includes(ch.id))
+      .map((ch) => ch.name);
+    const listenChannelNames = activeChannels
+      .filter((ch) => state.operatorState?.listenChannelIds?.includes(ch.id))
+      .map((ch) => ch.name);
+    updateForegroundService({
+      isTalking: (state.operatorState?.talkChannelIds?.length ?? 0) > 0,
+      isArmed: true,
+      talkChannelNames,
+      listenChannelNames,
+      activeTalkers: remoteTalkers.map((t) => t.producerUsername),
+      connectedUserCount: onlineUsers.length,
+    });
+  }, [
+    audioReady,
+    state.session,
+    state.operatorState?.talkChannelIds,
+    state.operatorState?.listenChannelIds,
+    activeChannels,
+    remoteTalkers,
+    onlineUsers,
+  ]);
+
 
   useEffect(() => {
     if (!state.session || !state.serverBaseUrl) {

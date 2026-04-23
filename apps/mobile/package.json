@@ -25,6 +25,7 @@
     "@cuecommx/protocol": "0.1.0",
     "@react-native-async-storage/async-storage": "^2.1.2",
     "@react-native-community/slider": "5.1.2",
+    "cuecommx-foreground-service": "file:./modules/cuecommx-foreground-service",
     "cuecommx-live-activity": "file:./modules/cuecommx-live-activity",
     "expo": "~54.0.33",
     "expo-audio": "~1.1.1",
