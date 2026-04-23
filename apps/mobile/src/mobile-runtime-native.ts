@@ -60,15 +60,18 @@ export async function configureMobileAudioSession(): Promise<void> {
 
 export type AudioOutputDevice = "speaker" | "earpiece";
 
+type AudioRouterModule = {
+  setOutputToSpeaker: (speaker: boolean) => Promise<void>;
+  clearOutputPreference?: () => Promise<void>;
+};
+
 export async function setMobileAudioOutput(output: AudioOutputDevice): Promise<void> {
   if (Platform.OS === "ios") {
     // On iOS, react-native-webrtc owns the AVAudioSession category and mode.
     // Calling expo-av's setAudioModeAsync changes the category/mode and disrupts
     // WebRTC's audio pipeline. Instead, call overrideOutputAudioPort directly via
     // a thin native module that only changes the output port — nothing else.
-    const mod = NativeModules.AudioRouterModule as
-      | { setOutputToSpeaker: (speaker: boolean) => Promise<void> }
-      | undefined;
+    const mod = NativeModules.AudioRouterModule as AudioRouterModule | undefined;
     if (mod?.setOutputToSpeaker) {
       await mod.setOutputToSpeaker(output === "speaker");
     }
@@ -98,8 +101,12 @@ export async function resetMobileAudioSession(): Promise<void> {
     });
   }
 
-  // On iOS, react-native-webrtc cleans up the AVAudioSession when
-  // transports and tracks are closed. No manual intervention needed.
+  if (Platform.OS === "ios") {
+    // Clear the AudioRouterModule's sticky output preference so the route-change
+    // observer stops re-applying the override after the session ends.
+    const mod = NativeModules.AudioRouterModule as AudioRouterModule | undefined;
+    await mod?.clearOutputPreference?.();
+  }
 }
 
 export async function ensureAndroidRuntimeSupport(): Promise<boolean> {
