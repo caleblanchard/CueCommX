@@ -1,1 +1,0 @@
-int drawable ic_notification_mic 0x0
