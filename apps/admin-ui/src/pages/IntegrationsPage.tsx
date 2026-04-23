@@ -57,6 +57,24 @@ export function IntegrationsPage({
   onTallyExpandedChange,
   formatFileSize,
 }: IntegrationsPageProps) {
+  async function handleDownloadRecording(filename: string): Promise<void> {
+    const token = session?.sessionToken;
+    if (!token) return;
+    const response = await fetch(`/api/admin/recordings/${encodeURIComponent(filename)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) return;
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="mx-auto max-w-5xl px-6 py-8 sm:px-8">
       <div className="space-y-6">
@@ -168,13 +186,13 @@ export function IntegrationsPage({
                             </p>
                           </div>
                           <div className="flex items-center gap-1.5">
-                            <a
+                            <button
                               className="inline-flex h-7 items-center rounded-md border border-border px-2 text-xs font-medium text-foreground hover:bg-muted"
-                              download={rec.filename}
-                              href={`/api/admin/recordings/${encodeURIComponent(rec.filename)}`}
+                              onClick={() => void handleDownloadRecording(rec.filename)}
+                              type="button"
                             >
                               ↓
-                            </a>
+                            </button>
                             <Button
                               onClick={() => onDeleteRecording(rec.filename)}
                               size="sm"
