@@ -59,11 +59,17 @@ export function IntegrationsPage({
 }: IntegrationsPageProps) {
   async function handleDownloadRecording(filename: string): Promise<void> {
     const token = session?.sessionToken;
-    if (!token) return;
+    if (!token) {
+      alert("Not authenticated. Please reload and log in again.");
+      return;
+    }
     const response = await fetch(`/api/admin/recordings/${encodeURIComponent(filename)}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!response.ok) return;
+    if (!response.ok) {
+      alert(`Download failed: ${response.status} ${response.statusText}`);
+      return;
+    }
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -72,7 +78,8 @@ export function IntegrationsPage({
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    // Delay revoke so the browser has time to start the download
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
   }
 
   return (
