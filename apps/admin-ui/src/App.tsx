@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useState } from "react";
 
 import {
   CueCommXRealtimeClient,
@@ -7,6 +7,7 @@ import {
 import {
   type AdminDashboardUser,
   AuthFailureResponseSchema,
+  AuthSuccessResponseSchema,
   ChannelMutationResponseSchema,
   ChannelsListResponseSchema,
   DiscoveryResponseSchema,
@@ -35,6 +36,8 @@ import { IntegrationsPage } from "./pages/IntegrationsPage.js";
 import { UsersPage } from "./pages/UsersPage.js";
 
 export type AdminPage = "dashboard" | "users" | "channels" | "groups" | "integrations";
+
+const ADMIN_TOKEN_KEY = "cuecommx_admin_token";
 
 interface ViewState {
   allPageActive?: { userId: string; username: string };
@@ -219,6 +222,26 @@ export default function App() {
         const parsedChannels = ChannelsListResponseSchema.parse(await channelsResponse.json());
         const discovery = DiscoveryResponseSchema.parse(await discoveryResponse.json());
 
+        // Attempt to restore a previously saved session before rendering the login form.
+        let restoredSession: AuthSuccessResponse | undefined;
+        const savedToken = localStorage.getItem(ADMIN_TOKEN_KEY);
+        if (savedToken) {
+          try {
+            const sessionResponse = await fetch("/api/auth/session", {
+              headers: { Authorization: `Bearer ${savedToken}` },
+              signal: abortController.signal,
+            });
+            if (sessionResponse.ok) {
+              restoredSession = AuthSuccessResponseSchema.parse(await sessionResponse.json());
+            } else {
+              localStorage.removeItem(ADMIN_TOKEN_KEY);
+            }
+          } catch {
+            // Token invalid or network error — proceed to login form
+            localStorage.removeItem(ADMIN_TOKEN_KEY);
+          }
+        }
+
         setUserPermissions(buildPermissionDraft(parsedChannels));
         setState({
           channelFormPending: false,
@@ -233,6 +256,7 @@ export default function App() {
           users: [],
           usersLoading: false,
           status,
+          session: restoredSession,
         });
       } catch (error) {
         if (abortController.signal.aborted) {
@@ -589,6 +613,7 @@ export default function App() {
       }
 
       setLoginUsername(payload.user.username);
+      localStorage.setItem(ADMIN_TOKEN_KEY, payload.sessionToken);
       setState((current) => ({
         ...current,
         session: payload,
@@ -641,6 +666,7 @@ export default function App() {
         throw new Error("Admin access is required.");
       }
 
+      localStorage.setItem(ADMIN_TOKEN_KEY, payload.sessionToken);
       setState((current) => ({
         ...current,
         loginError: undefined,
@@ -1075,7 +1101,7 @@ export default function App() {
     setRecordingPendingId(undefined);
   }
 
-  async function loadSavedRecordings(): Promise<void> {
+  const loadSavedRecordings = useCallback(async (): Promise<void> => {
     if (!state.session) return;
     setRecordingsLoading(true);
     try {
@@ -1087,7 +1113,7 @@ export default function App() {
       }
     } catch { /* never crash */ }
     setRecordingsLoading(false);
-  }
+  }, [state.session]);
 
   async function handleDeleteRecording(filename: string): Promise<void> {
     if (!state.session) return;
@@ -1122,6 +1148,14 @@ export default function App() {
   }
 
   function handleSignOut(): void {
+    const token = state.session?.sessionToken;
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
+    if (token) {
+      void fetch("/api/auth/session", {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => { /* best-effort */ });
+    }
     setState((current) => ({ ...current, session: undefined }));
     setCurrentPage("dashboard");
   }

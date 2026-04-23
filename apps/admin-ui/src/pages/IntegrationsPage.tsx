@@ -61,6 +61,11 @@ export function IntegrationsPage({
 }: IntegrationsPageProps) {
   const [viewingFilename, setViewingFilename] = React.useState<string | null>(null);
 
+  React.useEffect(() => {
+    onLoadSavedRecordings();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function handleDownloadRecording(filename: string): Promise<void> {
     const token = session?.sessionToken;
     if (!token) {
