@@ -77,7 +77,6 @@ import { useServerDiscovery } from "./src/server-discovery";
 import {
   canArmMobileAudio,
   describeMobileAudioError,
-  shouldKeepAndroidSessionNotification,
   getAudioStatusLabel,
   shouldKeepScreenAwake,
   shouldShowAndroidRuntimeTools,
@@ -86,10 +85,8 @@ import {
   configureMobileAudioSession,
   ensureAndroidRuntimeSupport,
   ensureMobileNotificationHandlerRegistered,
-  hideAndroidLiveAudioNotification,
   openAndroidBatteryOptimizationSettings,
   resetMobileAudioSession,
-  showAndroidLiveAudioNotification,
   triggerListenToggleHaptic,
   triggerTalkHaptic,
   triggerCallSignalHaptic,
@@ -527,7 +524,6 @@ export default function App() {
   const [username, setUsername] = useState("");
   const [pin, setPin] = useState("");
   const [appLifecycleState, setAppLifecycleState] = useState<AppStateStatus>(AppState.currentState);
-  const [androidBackgroundAlertActive, setAndroidBackgroundAlertActive] = useState(false);
   const [audioArmed, setAudioArmed] = useState(false);
   const [audioBusy, setAudioBusy] = useState(false);
   const [audioError, setAudioError] = useState<string>();
@@ -586,7 +582,6 @@ export default function App() {
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const [chatInput, setChatInput] = useState("");
   const chatListRef = useRef<FlatList<ChatMessagePayload>>(null);
-  const androidNotificationIdRef = useRef<string | undefined>(undefined);
   const notifPermissionGrantedRef = useRef(false);
   const mediaControllerRef = useRef<ReturnType<typeof createMobileMediaController> | null>(null);
   const realtimeClientRef = useRef<CueCommXRealtimeClient | null>(null);
@@ -782,89 +777,6 @@ export default function App() {
       deactivateKeepAwake();
     };
   }, [audioArmed, state.session?.sessionToken]);
-
-  useEffect(() => {
-    const session = state.session;
-    const shouldShowBackgroundAlert = shouldKeepAndroidSessionNotification({
-      appLifecycleState,
-      audioArmed,
-      hasSession: !!session,
-      platformOs: Platform.OS,
-    });
-    const currentNotificationId = androidNotificationIdRef.current;
-
-    if (!shouldShowBackgroundAlert || !session) {
-      androidNotificationIdRef.current = undefined;
-      setAndroidBackgroundAlertActive(false);
-
-      if (currentNotificationId) {
-        void hideAndroidLiveAudioNotification(currentNotificationId).catch((error: unknown) => {
-          setRuntimeNotice(
-            getRuntimeMessage(error, "CueCommX could not clear the Android live-audio alert."),
-          );
-        });
-      }
-
-      return;
-    }
-
-    let cancelled = false;
-
-    void ensureAndroidRuntimeSupport()
-      .then(async (notificationsEnabled) => {
-        if (cancelled) {
-          return;
-        }
-
-        if (!notificationsEnabled) {
-          setAndroidBackgroundAlertActive(false);
-          setRuntimeNotice(ANDROID_NOTIFICATION_GUIDANCE);
-          return;
-        }
-
-        setRuntimeNotice((current) =>
-          current === ANDROID_NOTIFICATION_GUIDANCE ? undefined : current,
-        );
-
-        if (androidNotificationIdRef.current) {
-          setAndroidBackgroundAlertActive(true);
-          return;
-        }
-
-        const notificationId = await showAndroidLiveAudioNotification({
-          serverName: state.status?.name,
-          username: session.user.username,
-          activeChannelNames: activeChannels
-            .filter((ch) => state.operatorState?.talkChannelIds.includes(ch.id))
-            .map((ch) => ch.name),
-          listenChannelNames: activeChannels
-            .filter((ch) => state.operatorState?.listenChannelIds.includes(ch.id))
-            .map((ch) => ch.name),
-        });
-
-        if (cancelled) {
-          await hideAndroidLiveAudioNotification(notificationId);
-          return;
-        }
-
-        androidNotificationIdRef.current = notificationId;
-        setAndroidBackgroundAlertActive(Boolean(notificationId));
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setRuntimeNotice(
-            getRuntimeMessage(
-              error,
-              "CueCommX could not prepare the Android live-audio background alert.",
-            ),
-          );
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [appLifecycleState, audioArmed, state.session, state.status?.name]);
 
   // iOS Live Activity: start when audio becomes ready, register the Darwin toggle listener.
   useEffect(() => {
@@ -1248,9 +1160,6 @@ export default function App() {
 
     return () => {
       active = false;
-      const notificationId = androidNotificationIdRef.current;
-
-      androidNotificationIdRef.current = undefined;
       mediaControllerRef.current = null;
       realtimeClientRef.current = null;
       realtimeClient.disconnect();
@@ -1260,14 +1169,6 @@ export default function App() {
           getRuntimeMessage(error, "CueCommX could not reset the mobile audio session."),
         );
       });
-      if (notificationId) {
-        void hideAndroidLiveAudioNotification(notificationId).catch((error: unknown) => {
-          setRuntimeNotice(
-            getRuntimeMessage(error, "CueCommX could not clear the Android live-audio alert."),
-          );
-        });
-      }
-      setAndroidBackgroundAlertActive(false);
       setAudioArmed(false);
       setAudioBusy(false);
       setAudioError(undefined);
@@ -1532,7 +1433,6 @@ export default function App() {
       realtimeState: "idle",
       session: undefined,
     }));
-    setAndroidBackgroundAlertActive(false);
     setAudioArmed(false);
     setAudioBusy(false);
     setAudioError(undefined);
@@ -2802,7 +2702,7 @@ export default function App() {
                         />
                       </View>
                       {showAndroidRuntimeSupport ? (
-                        <DetailRow label="Background alert" value={androidBackgroundAlertActive ? "Active" : "Standby"} />
+                        <DetailRow label="Foreground service" value={audioReady && !!state.session ? "Active" : "Inactive"} />
                       ) : null}
                       {audioError ? (
                         <View className="rounded-xl border border-amber-700 bg-amber-950 p-4">
