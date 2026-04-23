@@ -3,7 +3,9 @@ import {
   type AuthSuccessResponse,
   type ChannelInfo,
 } from "@cuecommx/protocol";
+import * as React from "react";
 
+import { RecordingViewer } from "../components/RecordingViewer.js";
 import { Button } from "../components/ui/button.js";
 import {
   Card,
@@ -57,6 +59,8 @@ export function IntegrationsPage({
   onTallyExpandedChange,
   formatFileSize,
 }: IntegrationsPageProps) {
+  const [viewingFilename, setViewingFilename] = React.useState<string | null>(null);
+
   async function handleDownloadRecording(filename: string): Promise<void> {
     const token = session?.sessionToken;
     if (!token) {
@@ -193,6 +197,13 @@ export function IntegrationsPage({
                             </p>
                           </div>
                           <div className="flex items-center gap-1.5">
+                            <button
+                              className="inline-flex h-7 items-center rounded-md border border-border px-2 text-xs font-medium text-foreground hover:bg-muted"
+                              onClick={() => setViewingFilename(rec.filename)}
+                              type="button"
+                            >
+                              View
+                            </button>
                             <button
                               className="inline-flex h-7 items-center rounded-md border border-border px-2 text-xs font-medium text-foreground hover:bg-muted"
                               onClick={() => void handleDownloadRecording(rec.filename)}
@@ -425,6 +436,14 @@ Content-Type: application/json
           </>
         )}
       </div>
+
+      {viewingFilename && session?.sessionToken && (
+        <RecordingViewer
+          filename={viewingFilename}
+          sessionToken={session.sessionToken}
+          onClose={() => setViewingFilename(null)}
+        />
+      )}
     </div>
   );
 }

@@ -14,6 +14,7 @@
     "@cuecommx/core": "0.1.0",
     "@cuecommx/design-tokens": "0.1.0",
     "@cuecommx/protocol": "0.1.0",
+    "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-separator": "^1.1.7",
     "@radix-ui/react-slot": "^1.2.3",
     "class-variance-authority": "^0.7.1",
