@@ -45,8 +45,8 @@ async function main(): Promise<void> {
       }) as typeof app.close;
     }
   } catch (error) {
-    app.log.error(error);
-    process.exitCode = 1;
+    console.error("[CueCommX] Fatal startup error:", error);
+    process.exit(1);
   }
 }
 
