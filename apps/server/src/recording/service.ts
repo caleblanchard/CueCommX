@@ -33,6 +33,16 @@ export interface StopRecordingResult {
   durationMs: number;
 }
 
+export type DeleteRecordingResult = "active" | "deleted" | "invalid" | "not-found";
+
+export type RecordingErrorHandler = (channelId: string, error: Error) => void | Promise<void>;
+
+export interface RecordingServiceOptions {
+  createWriteStream?: (filePath: string) => WriteStream;
+  onError?: RecordingErrorHandler;
+  recordingsDir?: string;
+}
+
 function sanitizeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
@@ -61,12 +71,29 @@ function parseFilenameDate(filename: string): Date | undefined {
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
+function isValidRecordingFilename(filename: string): boolean {
+  return filename.endsWith(".jsonl") && !filename.includes("..") && !filename.includes("/");
+}
+
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
+}
+
 export class RecordingService {
   private readonly recordings = new Map<string, RecordingSession>();
   private readonly recordingsDir: string;
+  private readonly createWriteStream: (filePath: string) => WriteStream;
+  private readonly onError?: RecordingErrorHandler;
 
-  constructor(recordingsDir?: string) {
-    this.recordingsDir = recordingsDir ?? path.join(process.cwd(), "data", "recordings");
+  constructor(recordingsDirOrOptions?: string | RecordingServiceOptions, options: RecordingServiceOptions = {}) {
+    const resolved = typeof recordingsDirOrOptions === "string"
+      ? { recordingsDir: recordingsDirOrOptions, ...options }
+      : recordingsDirOrOptions ?? {};
+
+    this.recordingsDir = resolved.recordingsDir ?? path.join(process.cwd(), "data", "recordings");
+    this.createWriteStream = resolved.createWriteStream ?? ((filePath) =>
+      createWriteStream(filePath, { flags: "a", encoding: "utf-8" }));
+    this.onError = resolved.onError;
   }
 
   async ensureDirectory(): Promise<void> {
@@ -89,7 +116,27 @@ export class RecordingService {
     const filename = `${safeName}_${formatTimestamp(now)}.jsonl`;
     const filePath = path.join(this.recordingsDir, filename);
 
-    const writeStream = createWriteStream(filePath, { flags: "a", encoding: "utf-8" });
+    const writeStream = this.createWriteStream(filePath);
+    let errorReported = false;
+    writeStream.on("error", (error) => {
+      if (errorReported) {
+        return;
+      }
+
+      errorReported = true;
+
+      if (this.recordings.get(channelId)?.writeStream === writeStream) {
+        this.recordings.delete(channelId);
+      }
+
+      console.error(`[Recording] Stream error for channel ${channelId}:`, error);
+
+      if (this.onError) {
+        void Promise.resolve(this.onError(channelId, error)).catch((callbackError) => {
+          console.error(`[Recording] Error handler failed for channel ${channelId}:`, callbackError);
+        });
+      }
+    });
 
     const session: RecordingSession = {
       channelId,
@@ -124,8 +171,16 @@ export class RecordingService {
     this.recordings.delete(channelId);
 
     await new Promise<void>((resolve, reject) => {
-      session.writeStream.end(() => resolve());
-      session.writeStream.on("error", reject);
+      const handleError = (error: Error) => {
+        session.writeStream.off("error", handleError);
+        reject(error);
+      };
+
+      session.writeStream.once("error", handleError);
+      session.writeStream.end(() => {
+        session.writeStream.off("error", handleError);
+        resolve();
+      });
     });
 
     return {
@@ -181,6 +236,10 @@ export class RecordingService {
     return this.recordings.has(channelId);
   }
 
+  isActiveRecordingFilename(filename: string): boolean {
+    return [...this.recordings.values()].some((session) => session.filename === filename);
+  }
+
   async listRecordings(): Promise<RecordingFileInfo[]> {
     try {
       await this.ensureDirectory();
@@ -215,17 +274,25 @@ export class RecordingService {
     }
   }
 
-  async deleteRecording(filename: string): Promise<boolean> {
-    if (!filename.endsWith(".jsonl") || filename.includes("..") || filename.includes("/")) {
-      return false;
+  async deleteRecording(filename: string): Promise<DeleteRecordingResult> {
+    if (!isValidRecordingFilename(filename)) {
+      return "invalid";
+    }
+
+    if (this.isActiveRecordingFilename(filename)) {
+      return "active";
     }
 
     try {
       const filePath = path.join(this.recordingsDir, filename);
       await unlink(filePath);
-      return true;
-    } catch {
-      return false;
+      return "deleted";
+    } catch (error) {
+      if (isErrnoException(error) && error.code === "ENOENT") {
+        return "not-found";
+      }
+
+      throw error;
     }
   }
 
@@ -236,9 +303,12 @@ export class RecordingService {
     try {
       await this.ensureDirectory();
       const entries = await readdir(this.recordingsDir);
+      const activeFilenames = new Set(
+        [...this.recordings.values()].map((session) => session.filename),
+      );
 
       for (const entry of entries) {
-        if (!entry.endsWith(".jsonl")) continue;
+        if (!entry.endsWith(".jsonl") || activeFilenames.has(entry)) continue;
 
         try {
           const filePath = path.join(this.recordingsDir, entry);

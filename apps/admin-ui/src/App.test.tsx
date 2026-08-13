@@ -105,6 +105,7 @@ const discovery = {
 describe("Admin App", () => {
   afterEach(() => {
     cleanup();
+    localStorage.clear();
     MockWebSocket.instances = [];
     vi.unstubAllGlobals();
   });
@@ -178,6 +179,10 @@ describe("Admin App", () => {
           return new Response(JSON.stringify(users), { status: 200 });
         }
 
+        if (url.endsWith("/api/groups")) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+
         throw new Error(`Unexpected request: ${url}`);
       }),
     );
@@ -185,14 +190,13 @@ describe("Admin App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Main Church")).toBeInTheDocument();
-    expect(await screen.findByText("Production")).toBeInTheDocument();
+    expect(await screen.findAllByText("Main Church")).not.toHaveLength(0);
     expect(await screen.findAllByText("Primary discovery")).not.toHaveLength(0);
     expect(await screen.findByText("Network confirmation")).toBeInTheDocument();
     expect(await screen.findByText("Pinned by announced IP")).toBeInTheDocument();
     expect(await screen.findByText("mDNS broadcast active")).toBeInTheDocument();
     expect(await screen.findByText("en7")).toBeInTheDocument();
-    expect(await screen.findByText("Needs first admin")).toBeInTheDocument();
+    expect(await screen.findByText("Create the first admin")).toBeInTheDocument();
     expect(await screen.findByLabelText("CueCommX connect QR")).toBeInTheDocument();
     expect(await screen.findAllByText("http://10.0.0.25:3000/")).not.toHaveLength(0);
 
@@ -204,9 +208,11 @@ describe("Admin App", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Create first admin" }));
 
-    expect(await screen.findByText("Signed in as Chuck")).toBeInTheDocument();
-    expect(await screen.findByText("1 managed users")).toBeInTheDocument();
-    expect(await screen.findByText("Chuck")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Sign Out" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Users" }));
+    expect(await screen.findByRole("heading", { name: "Users" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText("Chuck")).toHaveLength(2));
+    expect(screen.getByLabelText("Display name")).toBeInTheDocument();
   });
 
   it("signs in an admin and manages the local roster", async () => {
@@ -273,6 +279,10 @@ describe("Admin App", () => {
           return new Response(JSON.stringify(users), { status: 200 });
         }
 
+        if (url.endsWith("/api/groups") && !init?.method) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+
         if (url.endsWith("/api/users") && init?.method === "POST") {
           const payload = JSON.parse(String(init.body)) as {
             username: string;
@@ -315,7 +325,10 @@ describe("Admin App", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Sign into admin" }));
 
-    expect(await screen.findByText("Signed in as Chuck")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Sign Out" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Users" }));
+    expect(await screen.findByRole("heading", { name: "Users" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText("Chuck")).toHaveLength(2));
 
     fireEvent.change(screen.getByLabelText("Display name"), {
       target: { value: "Camera 1" },
@@ -408,6 +421,10 @@ describe("Admin App", () => {
         return new Response(JSON.stringify(users), { status: 200 });
       }
 
+      if (url.endsWith("/api/groups") && !init?.method) {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+
       if (url.endsWith("/api/users/usr-2/force-mute") && init?.method === "POST") {
         return new Response(null, { status: 204 });
       }
@@ -430,7 +447,10 @@ describe("Admin App", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Sign into admin" }));
 
-    expect(await screen.findByText("Signed in as Chuck")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Sign Out" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Users" }));
+    expect(await screen.findByRole("heading", { name: "Users" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText("Chuck")).toHaveLength(2));
     await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
 
     const socket = MockWebSocket.instances[0];
@@ -611,6 +631,10 @@ describe("Admin App", () => {
           return new Response(JSON.stringify(users), { status: 200 });
         }
 
+        if (url.endsWith("/api/groups") && !init?.method) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+
         if (url.endsWith("/api/channels") && init?.method === "POST") {
           const payload = JSON.parse(String(init.body)) as {
             color: string;
@@ -671,7 +695,9 @@ describe("Admin App", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Sign into admin" }));
 
-    expect(await screen.findByText("Signed in as Chuck")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Sign Out" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Channels" }));
+    expect(await screen.findByRole("heading", { name: "Channels" })).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Channel name"), {
       target: { value: "Front of House" },

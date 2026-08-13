@@ -8,6 +8,8 @@ import { WEB_CLIENT_PREFERENCES_KEY } from "./preferences.js";
 const mediaControllerState = vi.hoisted(() => {
   const created: Array<{
     close: ReturnType<typeof vi.fn>;
+    disableSidetone: ReturnType<typeof vi.fn>;
+    enableSidetone: ReturnType<typeof vi.fn>;
     handleServerMessage: ReturnType<typeof vi.fn>;
     options: {
       onInputDevicesChange?: (devices: Array<{ deviceId: string; label: string }>) => void;
@@ -47,6 +49,8 @@ vi.mock("./media/web-media-controller.js", () => ({
   }) => {
     const controller = {
       close: vi.fn(async () => undefined),
+      disableSidetone: vi.fn(),
+      enableSidetone: vi.fn(),
       handleServerMessage: vi.fn(async () => undefined),
       options,
       resetConnection: vi.fn(),
@@ -261,7 +265,7 @@ describe("Web Client App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Main Church")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Join local intercom" })).toBeInTheDocument();
     expect(await screen.findAllByText("http://10.0.0.25:3000/")).not.toHaveLength(0);
 
     fireEvent.change(screen.getByLabelText("Operator name"), {
@@ -287,7 +291,7 @@ describe("Web Client App", () => {
       },
     ]);
     expect(screen.getByText("Assigned channels")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Arm audio context" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Arm audio" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Mic input")).not.toBeInTheDocument();
 
     socket?.emitMessage({
@@ -317,7 +321,6 @@ describe("Web Client App", () => {
     });
 
     expect(await screen.findAllByText("Live linked")).not.toHaveLength(0);
-    expect(await screen.findByText("2 live operators on this server.")).toBeInTheDocument();
     await waitFor(() =>
       expect(socket?.sent.map((entry) => JSON.parse(entry))).toContainEqual({
         type: "listen:toggle",
@@ -330,12 +333,14 @@ describe("Web Client App", () => {
     expect(screen.getAllByRole("button", { name: "Listening" })[0]).toBeDisabled();
     expect(screen.queryByLabelText("Master monitor volume")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Arm audio context" }));
+    fireEvent.click(screen.getByRole("button", { name: "Arm audio" }));
 
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Arm audio context" })).not.toBeInTheDocument(),
+      expect(screen.queryByRole("button", { name: "Arm audio" })).not.toBeInTheDocument(),
     );
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     expect(screen.getByText("Audio armed for comms")).toBeInTheDocument();
+    expect(screen.getByText("2 live operators on this server.")).toBeInTheDocument();
     expect(await screen.findByText("38%")).toBeInTheDocument();
     expect(screen.getByLabelText("Mic input")).toHaveValue("mic-2");
     expect(screen.getByLabelText("Master monitor volume")).toHaveValue("65");

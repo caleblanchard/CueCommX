@@ -10,6 +10,7 @@ import { WebSocket } from "ws";
 import { hashPin } from "../src/auth/pin.js";
 import { createApp } from "../src/app.js";
 import { DatabaseService } from "../src/db/database.js";
+import type { RealtimeMediaService } from "../src/media/service.js";
 
 function toWebSocketUrl(address: string): string {
   return address.replace("http://", "ws://").replace(/\/$/, "");
@@ -900,6 +901,314 @@ describe("createApp", () => {
 
     socket.close();
     await once(socket, "close");
+
+    const replacementSocket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    await once(replacementSocket, "open");
+    replacementSocket.send(
+      JSON.stringify({
+        type: "session:authenticate",
+        payload: {
+          sessionToken: loginBody.sessionToken,
+        },
+      }),
+    );
+
+    const replacementReady = await waitForJsonMessage<{
+      payload: {
+        operatorState: {
+          listenChannelIds: string[];
+        };
+      };
+      type: string;
+    }>(replacementSocket, "session:ready");
+
+    expect(replacementReady.payload.operatorState.listenChannelIds).toEqual(["ch-production"]);
+
+    replacementSocket.close();
+    await once(replacementSocket, "close");
+    await app.close();
+  });
+
+  it("routes channel chat through realtime and replays chat history on reconnect", async () => {
+    const directorId = database.createUser({
+      username: "Director",
+      role: "operator",
+      pinHash: hashPin("1111"),
+    });
+    const cameraId = database.createUser({
+      username: "Camera 1",
+      role: "operator",
+      pinHash: hashPin("2222"),
+    });
+    database.grantChannelPermissions(directorId, [
+      {
+        channelId: "ch-production",
+        canTalk: true,
+        canListen: true,
+      },
+    ]);
+    database.grantChannelPermissions(cameraId, [
+      {
+        channelId: "ch-production",
+        canTalk: false,
+        canListen: true,
+      },
+    ]);
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church",
+        host: "127.0.0.1",
+        port: 0,
+        rtcMinPort: 40000,
+        rtcMaxPort: 41000,
+        announcedIp: undefined,
+        dataDir: workingDirectory,
+        dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"),
+        maxUsers: 30,
+        maxChannels: 16,
+        logLevel: "info",
+        httpsPort: 3443,
+      },
+      database,
+    });
+
+    const directorLogin = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: {
+        username: "Director",
+        pin: "1111",
+      },
+    });
+    const cameraLogin = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: {
+        username: "Camera 1",
+        pin: "2222",
+      },
+    });
+
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+    const directorSocket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const directorMessages = createJsonMessageCollector(directorSocket);
+    await once(directorSocket, "open");
+    directorSocket.send(JSON.stringify({
+      type: "session:authenticate",
+      payload: {
+        sessionToken: directorLogin.json().sessionToken,
+      },
+    }));
+    await withTimeout(directorMessages.next("session:ready"), "director session ready");
+
+    const cameraSocket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const cameraMessages = createJsonMessageCollector(cameraSocket);
+    await once(cameraSocket, "open");
+    cameraSocket.send(JSON.stringify({
+      type: "session:authenticate",
+      payload: {
+        sessionToken: cameraLogin.json().sessionToken,
+      },
+    }));
+    await withTimeout(cameraMessages.next("session:ready"), "camera session ready");
+
+    directorSocket.send(JSON.stringify({
+      type: "chat:send",
+      payload: {
+        channelId: "ch-production",
+        text: "Stand by on production.",
+      },
+    }));
+
+    const directorChat = await withTimeout(
+      directorMessages.next<{ payload: { text: string; username: string }; type: string }>("chat:message"),
+      "director chat message",
+    );
+    const cameraChat = await withTimeout(
+      cameraMessages.next<{ payload: { text: string; username: string }; type: string }>("chat:message"),
+      "camera chat message",
+    );
+
+    expect(directorChat.payload).toMatchObject({
+      text: "Stand by on production.",
+      username: "Director",
+    });
+    expect(cameraChat.payload).toMatchObject({
+      text: "Stand by on production.",
+      username: "Director",
+    });
+
+    cameraSocket.close();
+    await once(cameraSocket, "close");
+    cameraMessages.stop();
+
+    const cameraReconnectSocket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+    const cameraReconnectMessages = createJsonMessageCollector(cameraReconnectSocket);
+    await once(cameraReconnectSocket, "open");
+    cameraReconnectSocket.send(JSON.stringify({
+      type: "session:authenticate",
+      payload: {
+        sessionToken: cameraLogin.json().sessionToken,
+      },
+    }));
+    await withTimeout(cameraReconnectMessages.next("session:ready"), "camera reconnect session ready");
+
+    const chatHistory = await withTimeout(
+      cameraReconnectMessages.next<{
+        payload: {
+          channelId: string;
+          messages: Array<{ text: string; username: string }>;
+        };
+        type: string;
+      }>("chat:history"),
+      "camera chat history",
+    );
+
+    expect(chatHistory.payload).toMatchObject({
+      channelId: "ch-production",
+      messages: [
+        expect.objectContaining({
+          text: "Stand by on production.",
+          username: "Director",
+        }),
+      ],
+    });
+
+    directorSocket.close();
+    cameraReconnectSocket.close();
+    await Promise.all([once(directorSocket, "close"), once(cameraReconnectSocket, "close")]);
+    directorMessages.stop();
+    cameraReconnectMessages.stop();
+    await app.close();
+  });
+
+  it("routes media requests through realtime and returns media responses", async () => {
+    const operatorId = database.createUser({
+      username: "A2",
+      role: "operator",
+      pinHash: hashPin("2468"),
+    });
+    database.grantChannelPermissions(operatorId, [
+      {
+        channelId: "ch-production",
+        canTalk: true,
+        canListen: true,
+      },
+    ]);
+
+    let sessionToken = "";
+
+    const mediaService: RealtimeMediaService = {
+      async close() {
+        return;
+      },
+      async handleRequest(session, message) {
+        expect(session.sessionToken).toBe(sessionToken);
+        expect(message).toEqual({
+          type: "media:capabilities:get",
+          payload: { requestId: "req-1" },
+        });
+
+        return [{
+          sessionToken: session.sessionToken,
+          message: {
+            type: "media:capabilities",
+            payload: {
+              requestId: "req-1",
+              routerRtpCapabilities: {
+                codecs: [],
+                headerExtensions: [],
+              },
+            },
+          },
+        }];
+      },
+      async refreshSession() {
+        return [];
+      },
+      async registerSession() {
+        return [];
+      },
+      async unregisterSession() {
+        return [];
+      },
+      async updateOperatorState() {
+        return [];
+      },
+    };
+
+    const app = createApp({
+      config: {
+        serverName: "Main Church",
+        host: "127.0.0.1",
+        port: 0,
+        rtcMinPort: 40000,
+        rtcMaxPort: 41000,
+        announcedIp: undefined,
+        dataDir: workingDirectory,
+        dbFile: "cuecommx.db",
+        dbPath: join(workingDirectory, "cuecommx.db"),
+        maxUsers: 30,
+        maxChannels: 16,
+        logLevel: "info",
+        httpsPort: 3443,
+      },
+      database,
+      mediaService,
+    });
+
+    const loginResponse = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: {
+        username: "A2",
+        pin: "2468",
+      },
+    });
+    const loginBody = loginResponse.json();
+    sessionToken = loginBody.sessionToken as string;
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+    const socket = new WebSocket(`${toWebSocketUrl(address)}/ws`);
+
+    await once(socket, "open");
+    socket.send(JSON.stringify({
+      type: "session:authenticate",
+      payload: {
+        sessionToken: loginBody.sessionToken,
+      },
+    }));
+    await waitForJsonMessage(socket, "session:ready");
+
+    socket.send(JSON.stringify({
+      type: "media:capabilities:get",
+      payload: {
+        requestId: "req-1",
+      },
+    }));
+
+    const response = await waitForJsonMessage<{
+      payload: {
+        requestId: string;
+        routerRtpCapabilities: { codecs: unknown[]; headerExtensions: unknown[] };
+      };
+      type: string;
+    }>(socket, "media:capabilities");
+
+    expect(response).toEqual({
+      type: "media:capabilities",
+      payload: {
+        requestId: "req-1",
+        routerRtpCapabilities: {
+          codecs: [],
+          headerExtensions: [],
+        },
+      },
+    });
+
+    socket.close();
+    await once(socket, "close");
     await app.close();
   });
 
@@ -1007,7 +1316,8 @@ describe("createApp", () => {
       code: "capacity-reached",
       message: "CueCommX is at capacity (1 active session).",
     });
-    await secondSocketClosed;
+    const [capacityCloseCode] = await secondSocketClosed;
+    expect(capacityCloseCode).toBe(4429);
 
     const saturatedStatusResponse = await app.inject({
       method: "GET",

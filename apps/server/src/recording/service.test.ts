@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, type WriteStream } from "node:fs";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RecordingService } from "./service.js";
 
@@ -42,6 +42,28 @@ describe("RecordingService", () => {
     await service.startRecording("ch-1", "Production");
 
     expect(service.getActiveRecordings()).toHaveLength(1);
+  });
+
+  it("notifies when an active recording stream fails", async () => {
+    const onError = vi.fn();
+    let stream: WriteStream | undefined;
+    service = new RecordingService(TEST_DIR, {
+      createWriteStream: (filePath) => {
+        stream = createWriteStream(filePath, { flags: "a", encoding: "utf-8" });
+        return stream;
+      },
+      onError,
+    });
+
+    await service.startRecording("ch-1", "Production");
+    const failure = new Error("disk full");
+    stream!.emit("error", failure);
+
+    await vi.waitFor(() => {
+      expect(onError).toHaveBeenCalledWith("ch-1", failure);
+    });
+    expect(service.isRecording("ch-1")).toBe(false);
+    stream!.destroy();
   });
 
   it("stopRecording closes file and returns result", async () => {
@@ -118,7 +140,7 @@ describe("RecordingService", () => {
 
     const filename = result!.filePath.split("/").pop()!;
     const deleted = await service.deleteRecording(filename);
-    expect(deleted).toBe(true);
+    expect(deleted).toBe("deleted");
 
     const files = await service.listRecordings();
     expect(files).toHaveLength(0);
@@ -126,18 +148,28 @@ describe("RecordingService", () => {
 
   it("deleteRecording rejects path traversal", async () => {
     const deleted = await service.deleteRecording("../../../etc/passwd");
-    expect(deleted).toBe(false);
+    expect(deleted).toBe("invalid");
   });
 
   it("deleteRecording rejects non-jsonl files", async () => {
     const deleted = await service.deleteRecording("malicious.sh");
-    expect(deleted).toBe(false);
+    expect(deleted).toBe("invalid");
   });
 
-  it("deleteRecording returns false for nonexistent file", async () => {
+  it("deleteRecording returns not-found for nonexistent file", async () => {
     await service.ensureDirectory();
     const deleted = await service.deleteRecording("nonexistent.jsonl");
-    expect(deleted).toBe(false);
+    expect(deleted).toBe("not-found");
+  });
+
+  it("deleteRecording refuses to delete an active recording file", async () => {
+    await service.startRecording("ch-1", "Production");
+
+    const activeFile = await service.listRecordings();
+    const deleted = await service.deleteRecording(activeFile[0]!.filename);
+
+    expect(deleted).toBe("active");
+    expect(service.getActiveRecordings()).toHaveLength(1);
   });
 
   it("pruneOlderThan removes old files", async () => {

@@ -88,6 +88,7 @@ export function buildDiscoveryResponse(
   options: BuildDiscoveryResponseOptions = {},
 ): DiscoveryResponse {
   const protocol = options.protocol === "https" ? "https" : "http";
+  const port = protocol === "https" ? config.httpsPort : config.port;
   const browserHost = parseHostFromHeader(options.headersHost);
   const targets: DiscoveryTarget[] = [];
   const seenUrls = new Set<string>();
@@ -98,7 +99,7 @@ export function buildDiscoveryResponse(
     label: string,
     idPrefix: string,
   ): void => {
-    const url = buildBaseUrl(protocol, host, config.port);
+    const url = buildBaseUrl(protocol, host, port);
 
     if (seenUrls.has(url)) {
       return;
@@ -136,7 +137,7 @@ export function buildDiscoveryResponse(
   const detectedInterfaces = lanHosts.map((host) => ({
     address: host.address,
     name: host.name,
-    url: buildBaseUrl(protocol, host.address, config.port),
+    url: buildBaseUrl(protocol, host.address, port),
   }));
 
   for (const host of lanHosts) {

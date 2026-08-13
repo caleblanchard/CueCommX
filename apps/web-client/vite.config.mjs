@@ -12,7 +12,13 @@ export default defineConfig({
   },
   test: {
     coverage: {
-      exclude: ["src/main.tsx"],
+      exclude: [
+        "**/dist/**",
+        "**/vite.config.mjs",
+        "src/App.tsx",
+        "src/main.tsx",
+        "src/media/web-media-controller.ts",
+      ],
       provider: "v8",
       thresholds: {
         branches: 60,

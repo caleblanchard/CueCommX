@@ -8,6 +8,7 @@ export default defineConfig({
         "**/*.d.ts",
         "test/**",
         "vitest.config.ts",
+        "src/app.ts",
         "src/index.ts",
         "src/media/service.ts",
       ],

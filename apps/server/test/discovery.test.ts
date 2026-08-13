@@ -129,23 +129,23 @@ describe("buildDiscoveryResponse", () => {
       protocol: "https",
     });
 
-    expect(response.primaryUrl).toBe("https://cuecommx.local:3000/");
+    expect(response.primaryUrl).toBe("https://cuecommx.local:3443/");
     expect(response.detectedInterfaces).toEqual([
       {
         address: "10.0.0.25",
         name: "en0",
-        url: "https://10.0.0.25:3000/",
+        url: "https://10.0.0.25:3443/",
       },
     ]);
     expect(response.connectTargets).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           kind: "browser",
-          url: "https://cuecommx.local:3000/",
+          url: "https://cuecommx.local:3443/",
         }),
         expect.objectContaining({
           kind: "lan",
-          url: "https://10.0.0.25:3000/",
+          url: "https://10.0.0.25:3443/",
         }),
       ]),
     );

@@ -90,6 +90,18 @@ function createSuccessResponse(
   });
 }
 
+export function handleOscMuteUserCommand(
+  realtimeService: Pick<RealtimeService, "forceMuteUser">,
+  userId: string,
+  muted: boolean,
+): void {
+  if (!muted) {
+    return;
+  }
+
+  void realtimeService.forceMuteUser(userId);
+}
+
 function createManagedUserResponse(
   database: DatabaseService,
   realtimeService: RealtimeService,
@@ -142,14 +154,18 @@ export function createApp(options: CreateAppOptions) {
     new CueCommXMediaService({
       announcedIp: mediaAnnouncedHost,
       logLevel: options.config.logLevel,
-      onWorkerDied: () => {
-        realtimeService.disconnectAllUsers("CueCommX media worker restarted. Reconnect the client.");
+       onWorkerDied: async () => {
+         await realtimeService.disconnectAllUsers("CueCommX media worker restarted. Reconnect the client.");
       },
       rtcMaxPort: options.config.rtcMaxPort,
       rtcMinPort: options.config.rtcMinPort,
     });
 
-  const recordingService = new RecordingService();
+  const recordingService = new RecordingService({
+    onError: () => {
+      realtimeService.broadcastRecordingState();
+    },
+  });
 
   const oscConfig = buildOscConfig(process.env);
   const oscService = new OscService(oscConfig);
@@ -196,8 +212,8 @@ export function createApp(options: CreateAppOptions) {
   });
 
   oscService.setCallbacks({
-    onMuteUser: (userId) => {
-      void realtimeService.forceMuteUser(userId);
+    onMuteUser: (userId, muted) => {
+      handleOscMuteUserCommand(realtimeService, userId, muted);
     },
   });
 
@@ -366,6 +382,7 @@ export function createApp(options: CreateAppOptions) {
           user,
           channels: database.listAssignedChannels(user.id),
           groups: database.listGroups(),
+          preferences: database.getUserPreferences(user.id),
         }),
       );
     });
@@ -376,6 +393,7 @@ export function createApp(options: CreateAppOptions) {
 
       if (scheme === "Bearer" && token) {
         sessionStore.delete(token);
+         await realtimeService.disconnectSession(token, "Session logged out.", "logout");
       }
 
       return reply.code(204).send();
@@ -621,7 +639,7 @@ export function createApp(options: CreateAppOptions) {
       }
 
       database.deleteUser(userId);
-      realtimeService.disconnectUser(userId, "User removed by admin");
+       await realtimeService.disconnectUser(userId, "User removed by admin");
       try { database.logEvent({ event_type: "user:deleted", username: existingUser.username, user_id: userId }); } catch { /* never crash */ }
 
       return reply.code(204).send();
@@ -877,9 +895,20 @@ export function createApp(options: CreateAppOptions) {
         return reply.code(400).send(createFailureResponse("Filename is required."));
       }
 
-      const deleted = await recordingService.deleteRecording(filename);
-      if (!deleted) {
-        return reply.code(404).send(createFailureResponse("Recording not found or could not be deleted."));
+      const deletionResult = await recordingService.deleteRecording(filename);
+
+      if (deletionResult === "invalid") {
+        return reply.code(400).send(createFailureResponse("Invalid filename."));
+      }
+
+      if (deletionResult === "active") {
+        return reply
+          .code(409)
+          .send(createFailureResponse("Active recordings cannot be deleted while recording is in progress."));
+      }
+
+      if (deletionResult === "not-found") {
+        return reply.code(404).send(createFailureResponse("Recording not found."));
       }
 
       return reply.code(204).send();
@@ -938,7 +967,7 @@ export function createApp(options: CreateAppOptions) {
         if (!body.userId) return reply.code(400).send({ error: "userId required for disconnect" });
         const user = database.getUser(body.userId);
         if (!user) return reply.code(404).send({ error: "User not found" });
-        realtimeService.disconnectUser(body.userId, "Disconnected via StreamDeck/Companion");
+         await realtimeService.disconnectUser(body.userId, "Disconnected via StreamDeck/Companion");
         return { ok: true };
       }
 

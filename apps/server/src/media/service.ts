@@ -68,7 +68,7 @@ export interface RealtimeMediaService {
 export interface CueCommXMediaServiceOptions {
   announcedIp?: string;
   logLevel: "debug" | "info" | "warn" | "error";
-  onWorkerDied?: (error: Error) => void;
+  onWorkerDied?: (error: Error) => void | Promise<void>;
   rtcMaxPort: number;
   rtcMinPort: number;
 }
@@ -697,7 +697,7 @@ export class CueCommXMediaService implements RealtimeMediaService {
     this.sessions.clear();
     this.router = undefined;
     this.worker = undefined;
-    this.options.onWorkerDied?.(error);
+    await this.options.onWorkerDied?.(error);
     this.readyPromise = this.initialize();
     await this.readyPromise;
   }

@@ -158,6 +158,78 @@ describe("CueCommXRealtimeClient", () => {
     });
   });
 
+  it("sends admin telemetry, direct-call, IFB, and chat messages", () => {
+    const socket = new FakeWebSocket();
+
+    const client = new CueCommXRealtimeClient({
+      baseUrl: "http://127.0.0.1:3000",
+      createWebSocket: () => socket as never,
+      sessionToken: "sess-telemetry",
+    });
+
+    client.connect();
+    socket.open();
+
+    client.reportConnectionQuality({
+      grade: "good",
+      jitterMs: 8,
+      packetLossPercent: 1,
+      roundTripTimeMs: 32,
+    });
+    client.reportPreflightResult("passed");
+    client.requestDirectCall("usr-2");
+    client.acceptDirectCall("call-1");
+    client.rejectDirectCall("call-2");
+    client.endDirectCall("call-3");
+    client.startIFB("usr-3");
+    client.stopIFB();
+    client.sendChatMessage("ch-production", "Ready");
+
+    const sent = socket.sent.map((entry) => JSON.parse(entry));
+
+    expect(sent[1]).toEqual({
+      type: "quality:report",
+      payload: {
+        grade: "good",
+        jitterMs: 8,
+        packetLossPercent: 1,
+        roundTripTimeMs: 32,
+      },
+    });
+    expect(sent[2]).toEqual({
+      type: "preflight:result",
+      payload: { status: "passed" },
+    });
+    expect(sent[3]).toEqual({
+      type: "direct:request",
+      payload: { targetUserId: "usr-2" },
+    });
+    expect(sent[4]).toEqual({
+      type: "direct:accept",
+      payload: { callId: "call-1" },
+    });
+    expect(sent[5]).toEqual({
+      type: "direct:reject",
+      payload: { callId: "call-2" },
+    });
+    expect(sent[6]).toEqual({
+      type: "direct:end",
+      payload: { callId: "call-3" },
+    });
+    expect(sent[7]).toEqual({
+      type: "ifb:start",
+      payload: { targetUserId: "usr-3" },
+    });
+    expect(sent[8]).toEqual({
+      type: "ifb:stop",
+      payload: {},
+    });
+    expect(sent[9]).toEqual({
+      type: "chat:send",
+      payload: { channelId: "ch-production", text: "Ready" },
+    });
+  });
+
   it("reconnects with backoff after an unexpected close", () => {
     const sockets = [new FakeWebSocket(), new FakeWebSocket()];
     const states: string[] = [];
