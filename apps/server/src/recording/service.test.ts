@@ -12,7 +12,7 @@ describe("RecordingService", () => {
 
   beforeEach(() => {
     rmSync(TEST_DIR, { recursive: true, force: true });
-    service = new RecordingService(TEST_DIR);
+    service = new RecordingService({ recordingsDir: TEST_DIR });
   });
 
   afterEach(async () => {
@@ -47,7 +47,8 @@ describe("RecordingService", () => {
   it("notifies when an active recording stream fails", async () => {
     const onError = vi.fn();
     let stream: WriteStream | undefined;
-    service = new RecordingService(TEST_DIR, {
+    service = new RecordingService({
+      recordingsDir: TEST_DIR,
       createWriteStream: (filePath) => {
         stream = createWriteStream(filePath, { flags: "a", encoding: "utf-8" });
         return stream;

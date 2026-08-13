@@ -6,12 +6,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { SessionStore } from "../src/auth/session-store.js";
 import { DatabaseService } from "../src/db/database.js";
-import {
-  type OperatorSessionProjectionSession,
-  type OperatorSessionCoordinationResult,
-  type OperatorSessionCoordinationStep,
-  OperatorSessionCoordination,
-} from "../src/realtime/operator-session-coordination.js";
+import { OperatorSessionCoordination } from "../src/realtime/operator-session-coordination.js";
+import type {
+  CoordinationSession,
+  OperatorSessionCoordinationResult,
+  OperatorSessionCoordinationStep,
+} from "../src/realtime/types.js";
 
 function transportMessages(
   result: OperatorSessionCoordinationResult,
@@ -38,10 +38,19 @@ function mediaSteps(
   );
 }
 
+function directorySteps(
+  result: OperatorSessionCoordinationResult,
+): Array<Extract<OperatorSessionCoordinationStep, { adapter: "directory" }>> {
+  return result.steps.filter(
+    (step): step is Extract<OperatorSessionCoordinationStep, { adapter: "directory" }> =>
+      step.adapter === "directory",
+  );
+}
+
 function projectionSession(
   coordinator: OperatorSessionCoordination,
   sessionToken: string,
-): OperatorSessionProjectionSession | undefined {
+): CoordinationSession | undefined {
   return coordinator.readProjectionSnapshot().sessions.find((session) => session.sessionToken === sessionToken);
 }
 
@@ -148,6 +157,50 @@ describe("OperatorSessionCoordination", () => {
         payload: { users: [{ id: operatorId, username: "Director" }] },
       },
     ]);
+
+    const [directory] = directorySteps(result);
+    expect(directory).toMatchObject({
+      kind: "sync",
+      role: "operator",
+      sessionToken,
+      userId: operatorId,
+      username: "Director",
+    });
+    expect([...directory.channelIds].sort()).toEqual(["ch-audio", "ch-production"]);
+  });
+
+  it("re-emits the directory step with current channels when sessions refresh", () => {
+    const operatorId = database.createUser({
+      username: "Director",
+      role: "operator",
+    });
+    database.grantChannelPermissions(operatorId, [
+      { channelId: "ch-production", canTalk: true, canListen: true },
+    ]);
+
+    const coordinator = createCoordinator();
+    const sessionToken = createSessionToken(operatorId);
+    attach(coordinator, sessionToken);
+
+    database.grantChannelPermissions(operatorId, [
+      { channelId: "ch-production", canTalk: true, canListen: true },
+      { channelId: "ch-audio", canTalk: false, canListen: true },
+    ]);
+
+    const result = coordinator.lifecycle({
+      at: Date.now(),
+      change: { type: "all.refresh" },
+    });
+
+    const [directory] = directorySteps(result);
+    expect(directory).toMatchObject({
+      kind: "sync",
+      role: "operator",
+      sessionToken,
+      userId: operatorId,
+      username: "Director",
+    });
+    expect([...directory.channelIds].sort()).toEqual(["ch-audio", "ch-production"]);
   });
 
   it("restores other operators when the all-page initiator disconnects", () => {

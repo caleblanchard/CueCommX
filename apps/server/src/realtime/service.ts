@@ -1,7 +1,5 @@
-import { lookup } from "node:dns/promises";
 import type { IncomingMessage, Server as HttpServer } from "node:http";
 import type { Server as HttpsServer } from "node:https";
-import { isIP } from "node:net";
 import type { Socket } from "node:net";
 
 import {
@@ -25,31 +23,32 @@ import type { RecordingService } from "../recording/service.js";
 import type { TallyService } from "../tally/service.js";
 
 import { ChannelChatModule, type ChannelChatResult } from "./channel-chat.js";
-import { MediaRoutingModule, type MediaRoutingResult } from "./media-routing.js";
+import { CloseCodes } from "./close-codes.js";
 import {
-  OperatorSessionCoordination,
-  type OperatorSessionAdminCommand,
-  type OperatorSessionCommand,
-  type OperatorSessionCoordinationResult,
-  type OperatorSessionCoordinationStep,
-  type OperatorSessionDetachReason,
-  type OperatorSessionLifecycleChange,
-} from "./operator-session-coordination.js";
+  ConnectionRegistry,
+  DEFAULT_HEARTBEAT_INTERVAL_MS,
+  isUsableMediaHost,
+  parseRequestHost,
+  resolveMediaHost,
+  type ConnectionRecord,
+} from "./connections.js";
+import { toCoordinationCommand } from "./commands.js";
+import { MediaRoutingModule, type MediaRoutingResult } from "./media-routing.js";
+import { OperatorSessionCoordination } from "./operator-session-coordination.js";
+import type {
+  OperatorSessionAdminCommand,
+  OperatorSessionCoordinationResult,
+  OperatorSessionCoordinationStep,
+  OperatorSessionDetachReason,
+  OperatorSessionLifecycleChange,
+  RejectionCode,
+} from "./types.js";
 import {
   buildAdminDashboardSnapshot,
   buildStreamDeckPublicState,
   type StreamDeckPublicState,
 } from "./projections.js";
-
-interface ConnectionRecord {
-  authenticationAttempted: boolean;
-  authenticationPromise?: Promise<void>;
-  cleanupPromise?: Promise<void>;
-  isAlive: boolean;
-  requestHost?: string;
-  sessionToken?: string;
-  socket: WebSocket;
-}
+import { buildSignalError } from "./signal-error.js";
 
 interface SessionDirectoryEntry {
   channelIds: string[];
@@ -71,56 +70,14 @@ export interface RealtimeServiceOptions {
   onStateChange?: () => void;
 }
 
-const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 const DEFAULT_PATH = "/ws";
-
-function parseRequestHost(headersHost?: string): string | undefined {
-  if (!headersHost) {
-    return undefined;
-  }
-
-  try {
-    return new URL(`http://${headersHost}`).hostname;
-  } catch {
-    return undefined;
-  }
-}
-
-function isUsableMediaHost(host?: string): host is string {
-  if (!host) {
-    return false;
-  }
-
-  if (host === "localhost" || host === "::1" || host.startsWith("127.")) {
-    return false;
-  }
-
-  if (host === "0.0.0.0" || host === "::") {
-    return false;
-  }
-
-  return true;
-}
-
-async function resolveMediaHost(host: string): Promise<string> {
-  if (isIP(host) > 0) {
-    return host;
-  }
-
-  try {
-    const result = await lookup(host, { family: 4 });
-    return result.address;
-  } catch {
-    return host;
-  }
-}
 
 export class RealtimeService {
   private readonly chat = new ChannelChatModule();
 
   private closing = false;
 
-  private readonly connections = new Map<WebSocket, ConnectionRecord>();
+  private readonly connections: ConnectionRegistry;
 
   private readonly coordination: OperatorSessionCoordination;
 
@@ -129,8 +86,6 @@ export class RealtimeService {
   private outcomeQueue: Promise<void> = Promise.resolve();
 
   private readonly sessionDirectory = new Map<string, SessionDirectoryEntry>();
-
-  private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 
   private readonly path: string;
 
@@ -153,6 +108,9 @@ export class RealtimeService {
       mediaService: options.mediaService,
     });
     this.path = options.path ?? DEFAULT_PATH;
+    this.connections = new ConnectionRegistry(
+      options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS,
+    );
     this.server.on("connection", (socket: WebSocket, request: IncomingMessage) =>
       this.handleConnection(socket, request),
     );
@@ -172,17 +130,13 @@ export class RealtimeService {
   async close(): Promise<void> {
     this.closing = true;
 
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = undefined;
-    }
-
+    this.connections.stopHeartbeat();
     this.clearAllTimers();
 
-    const closingConnections = [...this.connections.values()];
+    const closingConnections = this.connections.values();
 
     for (const connection of closingConnections) {
-      connection.socket.close(1001, "server shutdown");
+      connection.socket.close(CloseCodes.serverShutdown, "server shutdown");
     }
 
     await Promise.all(closingConnections.map((connection) =>
@@ -207,9 +161,9 @@ export class RealtimeService {
 
   async forceMuteUser(userId: string): Promise<void> {
     await this.enqueueOutcome(() => this.coordination.admin({
-        at: Date.now(),
-        command: { type: "force-mute-user", targetUserId: userId },
-      }));
+      at: Date.now(),
+      command: { type: "force-mute-user", targetUserId: userId },
+    }));
   }
 
   getConnectedUserIds(): string[] {
@@ -228,7 +182,7 @@ export class RealtimeService {
     reason: string = "Disconnected by server",
     detachReason: OperatorSessionDetachReason = "disconnect",
   ): Promise<void> {
-    const connections = [...this.connections.values()].filter((connection) => connection.sessionToken);
+    const connections = this.connections.authenticated();
     await Promise.all(connections.map((connection) =>
       this.disconnectConnection(connection, reason, detachReason),
     ));
@@ -239,7 +193,7 @@ export class RealtimeService {
     reason: string = "Session revoked",
     detachReason: OperatorSessionDetachReason = "revoked",
   ): Promise<void> {
-    const connections = [...this.connections.values()].filter(
+    const connections = this.connections.values().filter(
       (connection) => connection.sessionToken === sessionToken,
     );
     await Promise.all(connections.map((connection) =>
@@ -248,7 +202,7 @@ export class RealtimeService {
   }
 
   async disconnectUser(userId: string, reason: string = "Disconnected by admin"): Promise<void> {
-    const connections = [...this.connections.values()].filter((connection) => {
+    const connections = this.connections.values().filter((connection) => {
       if (!connection.sessionToken) {
         return false;
       }
@@ -262,16 +216,16 @@ export class RealtimeService {
 
   async refreshAllSessions(): Promise<void> {
     await this.enqueueOutcome(() => this.coordination.lifecycle({
-        at: Date.now(),
-        change: { type: "all.refresh" },
-      }));
+      at: Date.now(),
+      change: { type: "all.refresh" },
+    }));
   }
 
   async refreshUserSessions(userId: string): Promise<void> {
     await this.enqueueOutcome(() => this.coordination.lifecycle({
-        at: Date.now(),
-        change: { type: "user.refresh", userId },
-      }));
+      at: Date.now(),
+      change: { type: "user.refresh", userId },
+    }));
   }
 
   async startChannelRecording(channelId: string): Promise<void> {
@@ -298,9 +252,9 @@ export class RealtimeService {
 
   async unlatchChannel(channelId: string): Promise<void> {
     await this.enqueueOutcome(() => this.coordination.admin({
-        at: Date.now(),
-        command: { channelId, type: "unlatch-channel" },
-      }));
+      at: Date.now(),
+      command: { channelId, type: "unlatch-channel" },
+    }));
   }
 
   broadcastRecordingState(): void {
@@ -311,11 +265,7 @@ export class RealtimeService {
       payload: { activeChannelIds },
     };
 
-    for (const connection of this.connections.values()) {
-      if (!connection.sessionToken) {
-        continue;
-      }
-
+    for (const connection of this.connections.authenticated()) {
       this.sendMessage(connection.socket, message);
     }
   }
@@ -326,11 +276,7 @@ export class RealtimeService {
       payload: { sources },
     };
 
-    for (const connection of this.connections.values()) {
-      if (!connection.sessionToken) {
-        continue;
-      }
-
+    for (const connection of this.connections.authenticated()) {
       this.sendMessage(connection.socket, message);
     }
   }
@@ -382,11 +328,16 @@ export class RealtimeService {
   }
 
   private enqueueOutcome(
-    factory: () => OperatorSessionCoordinationResult,
+    factory: () => OperatorSessionCoordinationResult | undefined,
     authContext?: { sessionToken: string; socket: WebSocket },
   ): Promise<void> {
     const operation = this.outcomeQueue.then(async () => {
       const result = factory();
+
+      if (!result) {
+        return;
+      }
+
       await this.applyOutcomeSteps(result, authContext);
     });
 
@@ -408,6 +359,9 @@ export class RealtimeService {
       switch (step.adapter) {
         case "transport":
           this.applyTransportStep(step, authContext);
+          break;
+        case "directory":
+          this.applyDirectoryStep(step);
           break;
         case "media-routing": {
           const mediaResult = await this.mediaRouting.applyCoordinationStep(
@@ -448,8 +402,24 @@ export class RealtimeService {
 
   private closeSessionForMediaFailure(sessionToken: string, message: string): void {
     for (const socket of this.findSocketsForTransport(sessionToken)) {
-      socket.close(1011, message.slice(0, 123));
+      socket.close(CloseCodes.mediaFailure, message.slice(0, 123));
     }
+  }
+
+  private applyDirectoryStep(step: Extract<OperatorSessionCoordinationStep, { adapter: "directory" }>): void {
+    const entry = {
+      channelIds: step.channelIds,
+      role: step.role,
+      userId: step.userId,
+      username: step.username,
+    };
+
+    this.sessionDirectory.set(step.sessionToken, entry);
+    this.chat.syncSession(step.sessionToken, {
+      channelIds: entry.channelIds,
+      userId: entry.userId,
+      username: entry.username,
+    });
   }
 
   private applyProjectionStep(step: Extract<OperatorSessionCoordinationStep, { adapter: "projection" }>): void {
@@ -535,10 +505,6 @@ export class RealtimeService {
       return;
     }
 
-    if (step.message.type === "session:ready") {
-      this.updateSessionDirectory(step.sessionToken, step.message);
-    }
-
     const targetSockets = this.findSocketsForTransport(step.sessionToken, authContext);
     for (const socket of targetSockets) {
       this.sendMessage(socket, step.message);
@@ -555,11 +521,7 @@ export class RealtimeService {
       payload: this.buildAdminDashboardSnapshot(),
     };
 
-    for (const connection of this.connections.values()) {
-      if (!connection.sessionToken) {
-        continue;
-      }
-
+    for (const connection of this.connections.authenticated()) {
       const role = this.sessionDirectory.get(connection.sessionToken)?.role;
 
       if (role !== "admin" && role !== "operator") {
@@ -664,49 +626,24 @@ export class RealtimeService {
         connection.socket.readyState === WebSocket.OPEN ||
         connection.socket.readyState === WebSocket.CONNECTING
       ) {
-        connection.socket.close(4403, reason);
+        connection.socket.close(CloseCodes.forbidden, reason);
       }
     }
   }
 
   private findSocketBySessionToken(sessionToken: string): WebSocket | undefined {
-    for (const connection of this.connections.values()) {
-      if (connection.sessionToken === sessionToken) {
-        return connection.socket;
-      }
-    }
-
-    return undefined;
+    return this.connections.findSocketBySessionToken(sessionToken);
   }
 
   private findSocketsForTransport(
     sessionToken: string,
     authContext?: { sessionToken: string; socket: WebSocket },
   ): WebSocket[] {
-    const sockets = [...this.connections.values()]
-      .filter((connection) => connection.sessionToken === sessionToken)
-      .map((connection) => connection.socket);
-
-    if (sockets.length > 0) {
-      return sockets;
-    }
-
-    if (authContext?.sessionToken === sessionToken) {
-      return [authContext.socket];
-    }
-
-    return [];
+    return this.connections.socketsForSession(sessionToken, authContext);
   }
 
   private handleConnection(socket: WebSocket, request?: IncomingMessage): void {
-    const connection: ConnectionRecord = {
-      authenticationAttempted: false,
-      isAlive: true,
-      requestHost: parseRequestHost(request?.headers.host),
-      socket,
-    };
-
-    this.connections.set(socket, connection);
+    const connection = this.connections.add(socket, parseRequestHost(request?.headers.host));
 
     socket.on("close", () => {
       void this.cleanupConnection(socket).catch((error) => {
@@ -732,9 +669,9 @@ export class RealtimeService {
       : { signalId: key, type: "signal.expire" };
 
     await this.enqueueOutcome(() => this.coordination.lifecycle({
-        at: Date.now(),
-        change,
-      }));
+      at: Date.now(),
+      change,
+    }));
   }
 
   private async handleMediaRequest(
@@ -774,7 +711,7 @@ export class RealtimeService {
         return;
       }
 
-      const command = this.toCoordinationCommand(parsed);
+      const command = toCoordinationCommand(parsed);
 
       if (!command) {
         this.sendSignalError(connection.socket, "invalid-message", "That realtime message is not supported.");
@@ -783,10 +720,10 @@ export class RealtimeService {
 
       const sessionToken = connection.sessionToken;
       await this.enqueueOutcome(() => this.coordination.command({
-          actorSessionToken: sessionToken,
-          at: Date.now(),
-          command,
-        }));
+        actorSessionToken: sessionToken,
+        at: Date.now(),
+        command,
+      }));
     } catch (error) {
       this.sendSignalError(
         connection.socket,
@@ -864,11 +801,7 @@ export class RealtimeService {
 
     await this.enqueueOutcome(() => {
       if (!this.isConnectionActive(connection)) {
-        return {
-          decision: "noop",
-          revision: 0,
-          steps: [],
-        } satisfies OperatorSessionCoordinationResult;
+        return undefined;
       }
 
       const result = this.coordination.lifecycle({
@@ -964,127 +897,11 @@ export class RealtimeService {
     socket.send(JSON.stringify(message));
   }
 
-  private sendSignalError(target: WebSocket, code: string, message: string, requestId?: string): void {
-    this.sendMessage(target, {
-      type: "signal:error",
-      payload: {
-        code,
-        message,
-        ...(requestId ? { requestId } : {}),
-      },
-    });
-  }
-
-  private updateSessionDirectory(
-    sessionToken: string,
-    message: Extract<ServerSignalingMessage, { type: "session:ready" }>,
-  ): void {
-    const entry = {
-      channelIds: message.payload.channels.map((channel) => channel.id),
-      role: message.payload.user.role,
-      userId: message.payload.user.id,
-      username: message.payload.user.username,
-    };
-
-    this.sessionDirectory.set(sessionToken, entry);
-    this.chat.syncSession(sessionToken, {
-      channelIds: entry.channelIds,
-      userId: entry.userId,
-      username: entry.username,
-    });
+  private sendSignalError(target: WebSocket, code: RejectionCode, message: string, requestId?: string): void {
+    this.sendMessage(target, buildSignalError(code, message, requestId));
   }
 
   private startHeartbeat(): void {
-    if (this.heartbeatTimer) {
-      return;
-    }
-
-    this.heartbeatTimer = setInterval(() => {
-      for (const connection of this.connections.values()) {
-        if (!connection.isAlive) {
-          connection.socket.terminate();
-          continue;
-        }
-
-        connection.isAlive = false;
-        connection.socket.ping();
-      }
-    }, this.options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS);
-  }
-
-  private toCoordinationCommand(message: ClientSignalingMessage): OperatorSessionCommand | undefined {
-    switch (message.type) {
-      case "listen:toggle":
-        return {
-          channelId: message.payload.channelId,
-          listening: message.payload.listening,
-          type: "listen.set",
-        };
-      case "talk:start":
-        return {
-          channelIds: [...message.payload.channelIds],
-          type: "talk.start",
-        };
-      case "talk:stop":
-        return {
-          channelIds: [...message.payload.channelIds],
-          type: "talk.stop",
-        };
-      case "quality:report":
-        return {
-          quality: message.payload,
-          type: "quality.report",
-        };
-      case "preflight:result":
-        return {
-          status: message.payload.status,
-          type: "preflight.report",
-        };
-      case "allpage:start":
-        return { type: "all-page.start" };
-      case "allpage:stop":
-        return { type: "all-page.stop" };
-      case "signal:send":
-        return {
-          signalType: message.payload.signalType,
-          targetChannelId: message.payload.targetChannelId,
-          targetUserId: message.payload.targetUserId,
-          type: "signal.send",
-        };
-      case "signal:ack":
-        return {
-          signalId: message.payload.signalId,
-          type: "signal.ack",
-        };
-      case "direct:request":
-        return {
-          targetUserId: message.payload.targetUserId,
-          type: "direct-call.request",
-        };
-      case "direct:accept":
-        return {
-          callId: message.payload.callId,
-          type: "direct-call.accept",
-        };
-      case "direct:reject":
-        return {
-          callId: message.payload.callId,
-          type: "direct-call.reject",
-        };
-      case "direct:end":
-        return {
-          callId: message.payload.callId,
-          type: "direct-call.end",
-        };
-      case "ifb:start":
-        return {
-          targetUserId: message.payload.targetUserId,
-          type: "ifb.start",
-        };
-      case "ifb:stop":
-        return { type: "ifb.stop" };
-      default:
-        return undefined;
-    }
+    this.connections.startHeartbeat();
   }
 }

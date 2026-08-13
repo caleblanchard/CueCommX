@@ -85,15 +85,11 @@ export class RecordingService {
   private readonly createWriteStream: (filePath: string) => WriteStream;
   private readonly onError?: RecordingErrorHandler;
 
-  constructor(recordingsDirOrOptions?: string | RecordingServiceOptions, options: RecordingServiceOptions = {}) {
-    const resolved = typeof recordingsDirOrOptions === "string"
-      ? { recordingsDir: recordingsDirOrOptions, ...options }
-      : recordingsDirOrOptions ?? {};
-
-    this.recordingsDir = resolved.recordingsDir ?? path.join(process.cwd(), "data", "recordings");
-    this.createWriteStream = resolved.createWriteStream ?? ((filePath) =>
+  constructor(options: RecordingServiceOptions = {}) {
+    this.recordingsDir = options.recordingsDir ?? path.join(process.cwd(), "data", "recordings");
+    this.createWriteStream = options.createWriteStream ?? ((filePath) =>
       createWriteStream(filePath, { flags: "a", encoding: "utf-8" }));
-    this.onError = resolved.onError;
+    this.onError = options.onError;
   }
 
   async ensureDirectory(): Promise<void> {

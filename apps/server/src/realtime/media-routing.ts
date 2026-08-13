@@ -9,7 +9,9 @@ import type {
 import type {
   OperatorSessionCoordinationStep,
   OperatorSessionMediaRoutingContext,
-} from "./operator-session-coordination.js";
+  RejectionCode,
+} from "./types.js";
+import { buildSignalError } from "./signal-error.js";
 
 type MediaRoutingCoordinationStep = Extract<OperatorSessionCoordinationStep, { adapter: "media-routing" }>;
 
@@ -23,7 +25,7 @@ type MediaRoutingTransportStep = {
 export interface MediaRoutingResult {
   decision: "accepted" | "noop" | "rejected";
   rejection?: {
-    code: "media-error" | "unauthorized";
+    code: RejectionCode;
     message: string;
   };
   steps: readonly MediaRoutingTransportStep[];
@@ -128,7 +130,7 @@ export class MediaRoutingModule {
   }
 
   private reject(
-    code: "media-error" | "unauthorized",
+    code: RejectionCode,
     message: string,
     sessionToken: string,
     requestId?: string,
@@ -140,14 +142,7 @@ export class MediaRoutingModule {
         adapter: "transport",
         kind: "send",
         sessionToken,
-        message: {
-          type: "signal:error",
-          payload: {
-            code,
-            message,
-            ...(requestId ? { requestId } : {}),
-          },
-        },
+        message: buildSignalError(code, message, requestId),
       }],
     };
   }

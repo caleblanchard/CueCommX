@@ -6,9 +6,8 @@ import type {
 
 import type { DatabaseService } from "../db/database.js";
 
-import type {
-  OperatorSessionProjectionSnapshot,
-} from "./operator-session-coordination.js";
+import { sortIds } from "./arrays.js";
+import type { OperatorSessionProjectionSnapshot } from "./types.js";
 
 export interface StreamDeckUserState {
   id: string;
@@ -79,9 +78,7 @@ export function buildAdminDashboardSnapshot(
     channels: database.listChannels(),
     groups: database.listGroups(),
     users: database.listUsers().map((user) => {
-      const activeTalkChannelIds = [...(talkChannelsByUser.get(user.id) ?? new Set<string>())].sort(
-        (left, right) => left.localeCompare(right),
-      );
+      const activeTalkChannelIds = sortIds(talkChannelsByUser.get(user.id) ?? new Set<string>());
 
       return {
         ...user,

@@ -5,13 +5,14 @@ import type {
   ServerSignalingMessage,
 } from "@cuecommx/protocol";
 
+import { buildSignalError } from "./signal-error.js";
+import type { RejectionCode } from "./types.js";
+
 export interface ChannelChatParticipant {
   channelIds: string[];
   userId: string;
   username: string;
 }
-
-type ChannelChatRejectionCode = "forbidden" | "unauthorized";
 
 type ChannelChatTransportStep = {
   adapter: "transport";
@@ -33,7 +34,7 @@ export type ChannelChatStep = ChannelChatAuditStep | ChannelChatTransportStep;
 export interface ChannelChatResult {
   decision: "accepted" | "noop" | "rejected";
   rejection?: {
-    code: ChannelChatRejectionCode;
+    code: RejectionCode;
     message: string;
   };
   steps: readonly ChannelChatStep[];
@@ -177,7 +178,7 @@ export class ChannelChatModule {
   }
 
   private reject(
-    code: ChannelChatRejectionCode,
+    code: RejectionCode,
     message: string,
     sessionToken?: string,
   ): ChannelChatResult {
@@ -188,10 +189,7 @@ export class ChannelChatModule {
         adapter: "transport",
         kind: "send",
         sessionToken,
-        message: {
-          type: "signal:error",
-          payload: { code, message },
-        },
+        message: buildSignalError(code, message),
       });
     }
 

@@ -9,7 +9,7 @@ import {
   MediaRoutingModule,
   type MediaRoutingResult,
 } from "../src/realtime/media-routing.js";
-import type { OperatorSessionMediaRoutingContext } from "../src/realtime/operator-session-coordination.js";
+import type { OperatorSessionMediaRoutingContext } from "../src/realtime/types.js";
 
 function transportMessages(
   result: MediaRoutingResult,

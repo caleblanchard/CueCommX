@@ -1,264 +1,36 @@
-import {
-  PROTOCOL_VERSION,
-  type CallSignalType,
-  type ChannelInfo,
-  type ConnectionQuality,
-  type OperatorState,
-  type PreflightStatus,
-  type ServerSignalingMessage,
-  type UserInfo,
-} from "@cuecommx/protocol";
+import { PROTOCOL_VERSION, type OperatorState, type UserInfo } from "@cuecommx/protocol";
 
-import { SessionStore } from "../auth/session-store.js";
-import { DatabaseService } from "../db/database.js";
-
-type RejectionCode =
-  | "capacity-reached"
-  | "conflict"
-  | "forbidden"
-  | "invalid-message"
-  | "invalid-state"
-  | "not-found"
-  | "unauthorized";
-
-export type OperatorSessionDetachReason = "disconnect" | "logout" | "revoked" | "shutdown";
-type TimerType = "direct-call-timeout" | "signal-expire";
-type MediaReason =
-  | "all-page"
-  | "direct-call"
-  | "force-mute"
-  | "ifb"
-  | "listen"
-  | "refresh"
-  | "session-attach"
-  | "talk"
-  | "unlatch";
-
-interface CoordinationSession {
-  channels: ChannelInfo[];
-  connectHost?: string;
-  connectionQuality?: ConnectionQuality;
-  preflightStatus?: PreflightStatus;
-  sessionToken: string;
-  state: OperatorState;
-  user: UserInfo;
-}
-
-interface AllPageState {
-  previousListenStates: Map<string, string[]>;
-  sessionToken: string;
-  userId: string;
-  username: string;
-}
-
-interface ActiveSignal {
-  fromUserId: string;
-  fromUsername: string;
-  signalId: string;
-  signalType: CallSignalType;
-  targetChannelId?: string;
-  targetUserId?: string;
-}
-
-interface DirectCall {
-  callId: string;
-  initiatorSessionToken: string;
-  initiatorUserId: string;
-  initiatorUsername: string;
-  state: "active" | "ringing";
-  targetSessionToken: string;
-  targetUserId: string;
-  targetUsername: string;
-}
-
-interface IFBState {
-  directorSessionToken: string;
-  directorUserId: string;
-  directorUsername: string;
-  duckLevel: number;
-  targetSessionToken: string;
-  targetUserId: string;
-}
-
-type TransportStep =
-  | { adapter: "transport"; kind: "disconnect"; code: number; reason: string; sessionToken: string }
-  | { adapter: "transport"; kind: "send"; message: ServerSignalingMessage; sessionToken: string };
-
-type MediaRoutingStep =
-  | { adapter: "media-routing"; kind: "reconcile"; reason: MediaReason; sessionToken: string }
-  | { adapter: "media-routing"; kind: "register"; sessionToken: string }
-  | { adapter: "media-routing"; kind: "unregister"; sessionToken: string };
-
-type ProjectionStep =
-  | { adapter: "projection"; projection: "admin-dashboard" }
-  | { adapter: "projection"; projection: "public-state" };
-
-type AuditStep = {
-  adapter: "audit";
-  channelId?: string;
-  details?: string;
-  eventType: string;
-  userId?: string;
-  username?: string;
-};
-
-type OscStep =
-  | { adapter: "osc"; kind: "all-page-start"; username: string }
-  | { adapter: "osc"; kind: "all-page-stop" }
-  | { adapter: "osc"; kind: "user-offline"; userId: string; username: string }
-  | { adapter: "osc"; kind: "user-online"; userId: string; username: string }
-  | { adapter: "osc"; channelIds: string[]; kind: "user-stopped"; userId: string }
-  | { adapter: "osc"; channelId: string; kind: "user-talking"; userId: string };
-
-type RecordingStep = {
-  adapter: "recording";
-  channelIds: string[];
-  mode: "start" | "stop";
-  userId: string;
-  username: string;
-};
-
-type TimerStep =
-  | { adapter: "timer"; key: string; kind: "cancel"; timerType: TimerType }
-  | { adapter: "timer"; delayMs: number; key: string; kind: "schedule"; timerType: TimerType };
-
-export type OperatorSessionCoordinationStep =
-  | AuditStep
-  | MediaRoutingStep
-  | OscStep
-  | ProjectionStep
-  | RecordingStep
-  | TimerStep
-  | TransportStep;
-
-export interface OperatorSessionCoordinationResult {
-  decision: "accepted" | "noop" | "rejected";
-  rejection?: { code: RejectionCode; message: string };
-  revision: number;
-  steps: readonly OperatorSessionCoordinationStep[];
-}
-
-export type OperatorSessionCommand =
-  | { type: "all-page.start" }
-  | { type: "all-page.stop" }
-  | { type: "direct-call.accept"; callId: string }
-  | { type: "direct-call.end"; callId: string }
-  | { type: "direct-call.reject"; callId: string }
-  | { type: "direct-call.request"; targetUserId: string }
-  | { type: "ifb.start"; targetUserId: string }
-  | { type: "ifb.stop" }
-  | { type: "listen.set"; channelId: string; listening: boolean }
-  | { type: "preflight.report"; status: PreflightStatus }
-  | { type: "quality.report"; quality: ConnectionQuality }
-  | {
-      type: "signal.send";
-      signalType: CallSignalType;
-      targetChannelId?: string;
-      targetUserId?: string;
-    }
-  | { type: "signal.ack"; signalId: string }
-  | { type: "talk.start"; channelIds: string[] }
-  | { type: "talk.stop"; channelIds: string[] };
-
-export type OperatorSessionLifecycleChange =
-  | { type: "all.refresh" }
-  | { type: "direct-call.timeout"; callId: string }
-  | { reason: OperatorSessionDetachReason; sessionToken: string; type: "session.detach" }
-  | { connectHost?: string; sessionToken: string; type: "session.attach" }
-  | { sessionToken: string; type: "session.refresh" }
-  | { signalId: string; type: "signal.expire" }
-  | { type: "user.refresh"; userId: string };
-
-export type OperatorSessionAdminCommand =
-  | { type: "force-mute-user"; targetUserId: string }
-  | { channelId: string; type: "unlatch-channel" };
-
-export interface OperatorSessionProjectionSession {
-  channels: ChannelInfo[];
-  connectHost?: string;
-  connectionQuality?: ConnectionQuality;
-  preflightStatus?: PreflightStatus;
-  sessionToken: string;
-  state: OperatorState;
-  user: UserInfo;
-}
-
-export interface OperatorSessionProjectionSnapshot {
-  allPage: { sessionToken: string; userId: string; username: string } | null;
-  directCalls: Array<{
-    callId: string;
-    initiatorSessionToken: string;
-    initiatorUserId: string;
-    initiatorUsername: string;
-    state: "active" | "ringing";
-    targetSessionToken: string;
-    targetUserId: string;
-    targetUsername: string;
-  }>;
-  ifb: {
-    directorSessionToken: string;
-    directorUserId: string;
-    directorUsername: string;
-    duckLevel: number;
-    targetSessionToken: string;
-    targetUserId: string;
-  } | null;
-  sessions: OperatorSessionProjectionSession[];
-}
-
-export interface OperatorSessionMediaRoutingContext {
-  channels: ChannelInfo[];
-  connectHost?: string;
-  directCallPeerSessionToken?: string;
-  ifbPeerSessionToken?: string;
-  sessionToken: string;
-  state: OperatorState;
-  user: UserInfo;
-}
-
-export interface OperatorSessionCoordinationOptions {
-  database: DatabaseService;
-  maxUsers?: number;
-  sessionStore: SessionStore;
-}
-
-class StepBuilder {
-  private readonly projectionKeys = new Set<string>();
-  readonly steps: OperatorSessionCoordinationStep[] = [];
-
-  push(step: OperatorSessionCoordinationStep): void {
-    if (step.adapter === "projection") {
-      const key = step.projection;
-
-      if (this.projectionKeys.has(key)) {
-        return;
-      }
-
-      this.projectionKeys.add(key);
-    }
-
-    this.steps.push(step);
-  }
-}
-
-function sortIds(ids: Iterable<string>): string[] {
-  return [...ids].sort((left, right) => left.localeCompare(right));
-}
+import { AllPageFeature } from "./all-page.js";
+import { CloseCodes } from "./close-codes.js";
+import { DirectCallFeature } from "./direct-call.js";
+import { IFBFeature } from "./ifb.js";
+import { buildSignalError } from "./signal-error.js";
+import { sortIds } from "./arrays.js";
+import { StepBuilder } from "./steps.js";
+import type {
+  ActiveSignal,
+  CoordinationSession,
+  FeatureContext,
+  MediaReason,
+  OperatorSessionAdminCommand,
+  OperatorSessionCommand,
+  OperatorSessionCoordinationOptions,
+  OperatorSessionCoordinationResult,
+  OperatorSessionDetachReason,
+  OperatorSessionLifecycleChange,
+  OperatorSessionMediaRoutingContext,
+  OperatorSessionProjectionSnapshot,
+  RejectionCode,
+} from "./types.js";
 
 export class OperatorSessionCoordination {
-  private static readonly DEFAULT_IFB_DUCK_LEVEL = 0.1;
-
-  private allPageState: AllPageState | undefined;
-
   private readonly activeSignals = new Map<string, ActiveSignal>();
 
-  private readonly directCalls = new Map<string, DirectCall>();
+  private readonly allPage: AllPageFeature;
 
-  private directCallSequence = 0;
+  private readonly directCalls: DirectCallFeature;
 
-  private ifbState: IFBState | undefined;
-
-  private revision = 0;
+  private readonly ifb: IFBFeature;
 
   private readonly sessions = new Map<string, CoordinationSession>();
 
@@ -266,7 +38,23 @@ export class OperatorSessionCoordination {
 
   private signalSequence = 0;
 
-  constructor(private readonly options: OperatorSessionCoordinationOptions) {}
+  constructor(private readonly options: OperatorSessionCoordinationOptions) {
+    const context: FeatureContext = {
+      sessions: this.sessions,
+      accept: (build) => this.accept(build),
+      noop: () => this.noop(),
+      reject: (code, message, sessionToken) => this.reject(code, message, sessionToken),
+      appendMediaRefresh: (steps, sessionToken, reason) => this.appendMediaRefresh(steps, sessionToken, reason),
+      appendOperatorState: (steps, sessionToken) => this.appendOperatorState(steps, sessionToken),
+      buildOperatorState: (user, priorState) => this.buildOperatorState(user, priorState),
+      findSessionByUserId: (userId) => this.findSessionByUserId(userId),
+      refreshProjections: (steps) => this.refreshProjections(steps),
+    };
+
+    this.allPage = new AllPageFeature(context);
+    this.directCalls = new DirectCallFeature(context);
+    this.ifb = new IFBFeature(context);
+  }
 
   admin(input: {
     actorSessionToken?: string;
@@ -319,25 +107,25 @@ export class OperatorSessionCoordination {
           this.refreshAdminDashboard(steps);
         });
       case "all-page.start":
-        return this.handleAllPageStart(session);
+        return this.allPage.start(session);
       case "all-page.stop":
-        return this.handleAllPageStop(session);
+        return this.allPage.stop(session);
       case "signal.send":
         return this.handleSignalSend(session, input.command);
       case "signal.ack":
         return this.handleSignalAcknowledge(input.command.signalId);
       case "direct-call.request":
-        return this.handleDirectCallRequest(session, input.command.targetUserId);
+        return this.directCalls.request(session, input.command.targetUserId);
       case "direct-call.accept":
-        return this.handleDirectCallAccept(session, input.command.callId);
+        return this.directCalls.accept(session, input.command.callId);
       case "direct-call.reject":
-        return this.handleDirectCallReject(session, input.command.callId);
+        return this.directCalls.reject(session, input.command.callId);
       case "direct-call.end":
-        return this.handleDirectCallEnd(session, input.command.callId);
+        return this.directCalls.end(session, input.command.callId);
       case "ifb.start":
-        return this.handleIfbStart(session, input.command.targetUserId);
+        return this.ifb.start(session, input.command.targetUserId);
       case "ifb.stop":
-        return this.handleIfbStop(session);
+        return this.ifb.stop(session);
     }
   }
 
@@ -357,15 +145,9 @@ export class OperatorSessionCoordination {
 
   readProjectionSnapshot(): OperatorSessionProjectionSnapshot {
     return {
-      allPage: this.allPageState
-        ? {
-            sessionToken: this.allPageState.sessionToken,
-            userId: this.allPageState.userId,
-            username: this.allPageState.username,
-          }
-        : null,
-      directCalls: [...this.directCalls.values()].map((call) => ({ ...call })),
-      ifb: this.ifbState ? { ...this.ifbState } : null,
+      allPage: this.allPage.snapshot(),
+      directCalls: this.directCalls.snapshot(),
+      ifb: this.ifb.snapshot(),
       sessions: [...this.sessions.values()].map((session) => this.toProjectionSession(session)),
     };
   }
@@ -379,8 +161,6 @@ export class OperatorSessionCoordination {
         return this.attachSession(input.change.sessionToken, input.change.connectHost);
       case "session.detach":
         return this.detachSession(input.change.sessionToken, input.change.reason);
-      case "session.refresh":
-        return this.refreshSession(input.change.sessionToken);
       case "user.refresh":
         return this.refreshUserSessions(input.change.userId);
       case "all.refresh":
@@ -388,19 +168,29 @@ export class OperatorSessionCoordination {
       case "signal.expire":
         return this.expireSignal(input.change.signalId);
       case "direct-call.timeout":
-        return this.timeoutDirectCall(input.change.callId);
+        return this.directCalls.timeout(input.change.callId);
     }
   }
 
   private accept(apply: (steps: StepBuilder) => void): OperatorSessionCoordinationResult {
     const steps = new StepBuilder();
     apply(steps);
-    this.revision += 1;
     return {
       decision: "accepted",
-      revision: this.revision,
       steps: steps.steps,
     };
+  }
+
+  private appendDirectorySync(steps: StepBuilder, session: CoordinationSession): void {
+    steps.push({
+      adapter: "directory",
+      kind: "sync",
+      channelIds: session.channels.map((channel) => channel.id),
+      role: session.user.role,
+      sessionToken: session.sessionToken,
+      userId: session.user.id,
+      username: session.user.username,
+    });
   }
 
   private appendMediaRefresh(steps: StepBuilder, sessionToken: string, reason: MediaReason): void {
@@ -496,14 +286,7 @@ export class OperatorSessionCoordination {
       adapter: "transport",
       kind: "send",
       sessionToken,
-      message: {
-        type: "signal:error",
-        payload: {
-          code,
-          message,
-          ...(requestId ? { requestId } : {}),
-        },
-      },
+      message: buildSignalError(code, message, requestId),
     });
   }
 
@@ -543,7 +326,7 @@ export class OperatorSessionCoordination {
     channelIds: string[],
     mode: "start" | "stop",
   ): OperatorSessionCoordinationResult {
-    if (mode === "start" && this.allPageState && this.allPageState.sessionToken !== session.sessionToken) {
+    if (mode === "start" && this.allPage.blocksTalkFor(session.sessionToken)) {
       return this.reject("forbidden", "Talk is disabled during All-Page broadcast.", session.sessionToken);
     }
 
@@ -625,14 +408,6 @@ export class OperatorSessionCoordination {
     });
   }
 
-  private arraysEqual(left: readonly string[], right: readonly string[]): boolean {
-    if (left.length !== right.length) {
-      return false;
-    }
-
-    return left.every((value, index) => value === right[index]);
-  }
-
   private cloneOperatorState(state: OperatorState): OperatorState {
     return {
       ...state,
@@ -656,6 +431,7 @@ export class OperatorSessionCoordination {
 
       return this.accept((steps) => {
         this.appendSessionReady(steps, sessionToken);
+        this.appendDirectorySync(steps, existing);
       });
     }
 
@@ -684,17 +460,19 @@ export class OperatorSessionCoordination {
     const channels = this.options.database.listAssignedChannels(user.id);
     const nextState = this.buildOperatorState(user, this.retainedOperatorStates.get(sessionToken));
 
-    this.sessions.set(sessionToken, {
+    const record: CoordinationSession = {
       channels,
       connectHost,
       sessionToken,
       state: nextState,
       user,
-    });
+    };
+    this.sessions.set(sessionToken, record);
     this.retainedOperatorStates.delete(sessionToken);
 
     return this.accept((steps) => {
       this.appendSessionReady(steps, sessionToken);
+      this.appendDirectorySync(steps, record);
       steps.push({
         adapter: "media-routing",
         kind: "register",
@@ -749,15 +527,15 @@ export class OperatorSessionCoordination {
     return {
       channels: [...session.channels],
       connectHost: session.connectHost,
-      directCallPeerSessionToken: this.getDirectCallPeerSessionToken(session.sessionToken),
-      ifbPeerSessionToken: this.getIfbPeerSessionToken(session.sessionToken),
+      directCallPeerSessionToken: this.directCalls.peerSessionTokenFor(session.sessionToken),
+      ifbPeerSessionToken: this.ifb.peerSessionTokenFor(session.sessionToken),
       sessionToken: session.sessionToken,
       state: this.cloneOperatorState(session.state),
       user: this.cloneUser(session.user),
     };
   }
 
-  private toProjectionSession(session: CoordinationSession): OperatorSessionProjectionSession {
+  private toProjectionSession(session: CoordinationSession): CoordinationSession {
     return {
       channels: [...session.channels],
       connectHost: session.connectHost,
@@ -808,38 +586,9 @@ export class OperatorSessionCoordination {
     }
 
     return this.accept((steps) => {
-      if (this.allPageState?.sessionToken === sessionToken) {
-        this.restoreAllPageListeners(this.allPageState.previousListenStates, sessionToken, steps);
-        this.allPageState = undefined;
-
-        for (const current of this.sessions.values()) {
-          if (current.sessionToken === sessionToken) {
-            continue;
-          }
-
-          steps.push({
-            adapter: "transport",
-            kind: "send",
-            sessionToken: current.sessionToken,
-            message: {
-              type: "allpage:inactive",
-              payload: {},
-            },
-          });
-        }
-      }
-
-      const activeCall = this.findDirectCallForSession(sessionToken);
-      if (activeCall) {
-        this.endDirectCall(activeCall.callId, "ended", steps);
-      }
-
-      if (
-        this.ifbState &&
-        (this.ifbState.directorSessionToken === sessionToken || this.ifbState.targetSessionToken === sessionToken)
-      ) {
-        this.endIfb(steps);
-      }
+      this.allPage.detach(sessionToken, steps);
+      this.directCalls.endForSession(sessionToken, steps);
+      this.ifb.endForSession(sessionToken, steps);
 
       for (const signal of [...this.activeSignals.values()]) {
         if (signal.targetUserId === session.user.id || signal.fromUserId === session.user.id) {
@@ -881,77 +630,6 @@ export class OperatorSessionCoordination {
     });
   }
 
-  private endDirectCall(
-    callId: string,
-    reason: "busy" | "ended" | "rejected" | "unavailable",
-    steps: StepBuilder,
-  ): void {
-    const call = this.directCalls.get(callId);
-
-    if (!call) {
-      return;
-    }
-
-    const wasActive = call.state === "active";
-    this.directCalls.delete(callId);
-    steps.push({
-      adapter: "timer",
-      key: callId,
-      kind: "cancel",
-      timerType: "direct-call-timeout",
-    });
-
-    const sessionTokens = [call.initiatorSessionToken, call.targetSessionToken];
-    for (const sessionToken of sessionTokens) {
-      if (!this.sessions.has(sessionToken)) {
-        continue;
-      }
-
-      steps.push({
-        adapter: "transport",
-        kind: "send",
-        sessionToken,
-        message: {
-          type: "direct:ended",
-          payload: { callId, reason },
-        },
-      });
-    }
-
-    if (wasActive) {
-      for (const sessionToken of sessionTokens) {
-        this.appendMediaRefresh(steps, sessionToken, "direct-call");
-      }
-
-      this.refreshProjections(steps);
-    }
-  }
-
-  private endIfb(steps: StepBuilder): void {
-    if (!this.ifbState) {
-      return;
-    }
-
-    const current = this.ifbState;
-    this.ifbState = undefined;
-
-    if (this.sessions.has(current.targetSessionToken)) {
-      steps.push({
-        adapter: "transport",
-        kind: "send",
-        sessionToken: current.targetSessionToken,
-        message: {
-          type: "ifb:inactive",
-          payload: {},
-        },
-      });
-      this.appendMediaRefresh(steps, current.targetSessionToken, "ifb");
-    }
-
-    this.appendMediaRefresh(steps, current.directorSessionToken, "ifb");
-    this.refreshProjections(steps);
-  }
-
   private expireSignal(signalId: string): OperatorSessionCoordinationResult {
     if (!this.activeSignals.has(signalId)) {
       return this.noop();
@@ -960,12 +638,6 @@ export class OperatorSessionCoordination {
     return this.accept((steps) => {
       this.clearSignal(signalId, steps);
     });
-  }
-
-  private findDirectCallForSession(sessionToken: string): DirectCall | undefined {
-    return [...this.directCalls.values()].find(
-      (call) => call.initiatorSessionToken === sessionToken || call.targetSessionToken === sessionToken,
-    );
   }
 
   private findSessionByUserId(userId: string): CoordinationSession | undefined {
@@ -1002,406 +674,6 @@ export class OperatorSessionCoordination {
       }
 
       this.refreshProjections(steps);
-    });
-  }
-
-  private getDirectCallPeerSessionToken(sessionToken: string): string | undefined {
-    const call = this.findDirectCallForSession(sessionToken);
-
-    if (!call || call.state !== "active") {
-      return undefined;
-    }
-
-    return call.initiatorSessionToken === sessionToken
-      ? call.targetSessionToken
-      : call.initiatorSessionToken;
-  }
-
-  private getIfbPeerSessionToken(sessionToken: string): string | undefined {
-    if (this.ifbState?.targetSessionToken === sessionToken) {
-      return this.ifbState.directorSessionToken;
-    }
-
-    return undefined;
-  }
-
-  private handleAllPageStart(session: CoordinationSession): OperatorSessionCoordinationResult {
-    if (session.user.role !== "admin" && session.user.role !== "operator") {
-      return this.reject("forbidden", "Only admins and operators can start All-Page.", session.sessionToken);
-    }
-
-    if (this.allPageState) {
-      return this.reject("conflict", "An All-Page broadcast is already active.", session.sessionToken);
-    }
-
-    const previousListenStates = new Map<string, string[]>();
-
-    return this.accept((steps) => {
-      for (const current of this.sessions.values()) {
-        if (current.sessionToken === session.sessionToken) {
-          continue;
-        }
-
-        if (current.state.talkChannelIds.length > 0) {
-          current.state = {
-            ...current.state,
-            talkChannelIds: [],
-            talking: false,
-          };
-          this.appendOperatorState(steps, current.sessionToken);
-          this.appendMediaRefresh(steps, current.sessionToken, "all-page");
-        }
-      }
-
-      this.allPageState = {
-        previousListenStates,
-        sessionToken: session.sessionToken,
-        userId: session.user.id,
-        username: session.user.username,
-      };
-
-      const allTalkChannelIds = sortIds(
-        session.user.channelPermissions
-          .filter((permission) => permission.canTalk)
-          .map((permission) => permission.channelId),
-      );
-      if (!this.arraysEqual(allTalkChannelIds, session.state.talkChannelIds)) {
-        session.state = {
-          ...session.state,
-          talkChannelIds: allTalkChannelIds,
-          talking: allTalkChannelIds.length > 0,
-        };
-        this.appendOperatorState(steps, session.sessionToken);
-        this.appendMediaRefresh(steps, session.sessionToken, "all-page");
-      }
-
-      for (const current of this.sessions.values()) {
-        if (current.sessionToken === session.sessionToken) {
-          continue;
-        }
-
-        previousListenStates.set(current.sessionToken, [...current.state.listenChannelIds]);
-        const allListenChannelIds = sortIds(
-          new Set(
-            current.user.channelPermissions
-              .filter((permission) => permission.canListen)
-              .map((permission) => permission.channelId),
-          ),
-        );
-        const merged = sortIds(new Set([...current.state.listenChannelIds, ...allListenChannelIds]));
-
-        if (!this.arraysEqual(merged, current.state.listenChannelIds)) {
-          current.state = {
-            ...current.state,
-            listenChannelIds: merged,
-          };
-          this.appendMediaRefresh(steps, current.sessionToken, "all-page");
-        }
-      }
-
-      for (const current of this.sessions.values()) {
-        steps.push({
-          adapter: "transport",
-          kind: "send",
-          sessionToken: current.sessionToken,
-          message: {
-            type: "allpage:active",
-            payload: {
-              userId: session.user.id,
-              username: session.user.username,
-            },
-          },
-        });
-      }
-
-      this.refreshProjections(steps);
-      steps.push({
-        adapter: "audit",
-        eventType: "allpage:start",
-        userId: session.user.id,
-        username: session.user.username,
-      });
-      steps.push({
-        adapter: "osc",
-        kind: "all-page-start",
-        username: session.user.username,
-      });
-    });
-  }
-
-  private handleAllPageStop(session: CoordinationSession): OperatorSessionCoordinationResult {
-    if (!this.allPageState) {
-      return this.reject("invalid-state", "No All-Page broadcast is active.", session.sessionToken);
-    }
-
-    if (this.allPageState.sessionToken !== session.sessionToken && session.user.role !== "admin") {
-      return this.reject("forbidden", "Only the pager or an admin can stop All-Page.", session.sessionToken);
-    }
-
-    return this.accept((steps) => {
-      const pager = this.sessions.get(this.allPageState!.sessionToken);
-      if (pager) {
-        pager.state = {
-          ...pager.state,
-          talkChannelIds: [],
-          talking: false,
-        };
-        this.appendOperatorState(steps, pager.sessionToken);
-        this.appendMediaRefresh(steps, pager.sessionToken, "all-page");
-      }
-
-      this.restoreAllPageListeners(this.allPageState!.previousListenStates, this.allPageState!.sessionToken, steps);
-      this.allPageState = undefined;
-
-      for (const current of this.sessions.values()) {
-        steps.push({
-          adapter: "transport",
-          kind: "send",
-          sessionToken: current.sessionToken,
-          message: {
-            type: "allpage:inactive",
-            payload: {},
-          },
-        });
-      }
-
-      this.refreshProjections(steps);
-      steps.push({
-        adapter: "audit",
-        eventType: "allpage:stop",
-        userId: session.user.id,
-        username: session.user.username,
-      });
-      steps.push({
-        adapter: "osc",
-        kind: "all-page-stop",
-      });
-    });
-  }
-
-  private handleDirectCallAccept(session: CoordinationSession, callId: string): OperatorSessionCoordinationResult {
-    const call = this.directCalls.get(callId);
-
-    if (!call || call.state !== "ringing") {
-      return this.reject("invalid-state", "No ringing call found with that ID.", session.sessionToken);
-    }
-
-    if (call.targetSessionToken !== session.sessionToken) {
-      return this.reject("forbidden", "Only the call target can accept.", session.sessionToken);
-    }
-
-    return this.accept((steps) => {
-      call.state = "active";
-      steps.push({
-        adapter: "timer",
-        key: callId,
-        kind: "cancel",
-        timerType: "direct-call-timeout",
-      });
-
-      if (this.sessions.has(call.initiatorSessionToken)) {
-        steps.push({
-          adapter: "transport",
-          kind: "send",
-          sessionToken: call.initiatorSessionToken,
-          message: {
-            type: "direct:active",
-            payload: {
-              callId,
-              peerUserId: session.user.id,
-              peerUsername: session.user.username,
-            },
-          },
-        });
-        this.appendMediaRefresh(steps, call.initiatorSessionToken, "direct-call");
-      }
-
-      steps.push({
-        adapter: "transport",
-        kind: "send",
-        sessionToken: session.sessionToken,
-        message: {
-          type: "direct:active",
-          payload: {
-            callId,
-            peerUserId: call.initiatorUserId,
-            peerUsername: call.initiatorUsername,
-          },
-        },
-      });
-      this.appendMediaRefresh(steps, session.sessionToken, "direct-call");
-      this.refreshProjections(steps);
-    });
-  }
-
-  private handleDirectCallEnd(session: CoordinationSession, callId: string): OperatorSessionCoordinationResult {
-    const call = this.directCalls.get(callId);
-
-    if (!call) {
-      return this.reject("invalid-state", "No call found with that ID.", session.sessionToken);
-    }
-
-    if (call.initiatorSessionToken !== session.sessionToken && call.targetSessionToken !== session.sessionToken) {
-      return this.reject("forbidden", "You are not part of this call.", session.sessionToken);
-    }
-
-    return this.accept((steps) => {
-      this.endDirectCall(callId, "ended", steps);
-    });
-  }
-
-  private handleDirectCallReject(session: CoordinationSession, callId: string): OperatorSessionCoordinationResult {
-    const call = this.directCalls.get(callId);
-
-    if (!call || call.state !== "ringing") {
-      return this.reject("invalid-state", "No ringing call found with that ID.", session.sessionToken);
-    }
-
-    if (call.targetSessionToken !== session.sessionToken) {
-      return this.reject("forbidden", "Only the call target can reject.", session.sessionToken);
-    }
-
-    return this.accept((steps) => {
-      this.endDirectCall(callId, "rejected", steps);
-    });
-  }
-
-  private handleDirectCallRequest(session: CoordinationSession, targetUserId: string): OperatorSessionCoordinationResult {
-    if (targetUserId === session.user.id) {
-      return this.reject("invalid-message", "Cannot call yourself.", session.sessionToken);
-    }
-
-    if (this.findDirectCallForSession(session.sessionToken)) {
-      return this.reject("conflict", "You are already in a direct call.", session.sessionToken);
-    }
-
-    const target = this.findSessionByUserId(targetUserId);
-
-    if (!target) {
-      return this.accept((steps) => {
-        steps.push({
-          adapter: "transport",
-          kind: "send",
-          sessionToken: session.sessionToken,
-          message: {
-            type: "direct:ended",
-            payload: { callId: "", reason: "unavailable" },
-          },
-        });
-      });
-    }
-
-    if (this.findDirectCallForSession(target.sessionToken)) {
-      return this.accept((steps) => {
-        steps.push({
-          adapter: "transport",
-          kind: "send",
-          sessionToken: session.sessionToken,
-          message: {
-            type: "direct:ended",
-            payload: { callId: "", reason: "busy" },
-          },
-        });
-      });
-    }
-
-    return this.accept((steps) => {
-      this.directCallSequence += 1;
-      const callId = `dc-${this.directCallSequence}-${Date.now()}`;
-
-      this.directCalls.set(callId, {
-        callId,
-        initiatorSessionToken: session.sessionToken,
-        initiatorUserId: session.user.id,
-        initiatorUsername: session.user.username,
-        state: "ringing",
-        targetSessionToken: target.sessionToken,
-        targetUserId,
-        targetUsername: target.user.username,
-      });
-
-      steps.push({
-        adapter: "timer",
-        delayMs: 30_000,
-        key: callId,
-        kind: "schedule",
-        timerType: "direct-call-timeout",
-      });
-      steps.push({
-        adapter: "transport",
-        kind: "send",
-        sessionToken: target.sessionToken,
-        message: {
-          type: "direct:incoming",
-          payload: {
-            callId,
-            fromUserId: session.user.id,
-            fromUsername: session.user.username,
-          },
-        },
-      });
-    });
-  }
-
-  private handleIfbStart(session: CoordinationSession, targetUserId: string): OperatorSessionCoordinationResult {
-    if (session.user.role !== "admin" && session.user.role !== "operator") {
-      return this.reject("forbidden", "Only admins and operators can use IFB.", session.sessionToken);
-    }
-
-    if (targetUserId === session.user.id) {
-      return this.reject("invalid-message", "Cannot IFB yourself.", session.sessionToken);
-    }
-
-    if (this.ifbState) {
-      return this.reject("conflict", "An IFB session is already active.", session.sessionToken);
-    }
-
-    const target = this.findSessionByUserId(targetUserId);
-
-    if (!target) {
-      return this.reject("invalid-state", "Target user is not online.", session.sessionToken);
-    }
-
-    return this.accept((steps) => {
-      this.ifbState = {
-        directorSessionToken: session.sessionToken,
-        directorUserId: session.user.id,
-        directorUsername: session.user.username,
-        duckLevel: OperatorSessionCoordination.DEFAULT_IFB_DUCK_LEVEL,
-        targetSessionToken: target.sessionToken,
-        targetUserId,
-      };
-
-      steps.push({
-        adapter: "transport",
-        kind: "send",
-        sessionToken: target.sessionToken,
-        message: {
-          type: "ifb:active",
-          payload: {
-            fromUserId: session.user.id,
-            fromUsername: session.user.username,
-            duckLevel: OperatorSessionCoordination.DEFAULT_IFB_DUCK_LEVEL,
-          },
-        },
-      });
-      this.appendMediaRefresh(steps, session.sessionToken, "ifb");
-      this.appendMediaRefresh(steps, target.sessionToken, "ifb");
-      this.refreshProjections(steps);
-    });
-  }
-
-  private handleIfbStop(session: CoordinationSession): OperatorSessionCoordinationResult {
-    if (!this.ifbState) {
-      return this.reject("invalid-state", "No IFB session is active.", session.sessionToken);
-    }
-
-    if (this.ifbState.directorSessionToken !== session.sessionToken && session.user.role !== "admin") {
-      return this.reject("forbidden", "Only the IFB director or an admin can stop IFB.", session.sessionToken);
-    }
-
-    return this.accept((steps) => {
-      this.endIfb(steps);
     });
   }
 
@@ -1512,7 +784,6 @@ export class OperatorSessionCoordination {
   private noop(): OperatorSessionCoordinationResult {
     return {
       decision: "noop",
-      revision: this.revision,
       steps: [],
     };
   }
@@ -1549,16 +820,6 @@ export class OperatorSessionCoordination {
     });
   }
 
-  private refreshSession(sessionToken: string): OperatorSessionCoordinationResult {
-    if (!this.sessions.has(sessionToken)) {
-      return this.noop();
-    }
-
-    return this.accept((steps) => {
-      this.refreshSessionInPlace(sessionToken, steps);
-    });
-  }
-
   private refreshSessionInPlace(sessionToken: string, steps: StepBuilder): void {
     const current = this.sessions.get(sessionToken);
 
@@ -1571,7 +832,7 @@ export class OperatorSessionCoordination {
     if (!user) {
       steps.push({
         adapter: "transport",
-        code: 4404,
+        code: CloseCodes.notFound,
         kind: "disconnect",
         reason: "Session user was removed.",
         sessionToken,
@@ -1584,6 +845,7 @@ export class OperatorSessionCoordination {
     current.state = this.buildOperatorState(user, current.state);
 
     this.appendSessionReady(steps, sessionToken);
+    this.appendDirectorySync(steps, current);
     this.appendMediaRefresh(steps, sessionToken, "refresh");
     this.refreshProjections(steps);
   }
@@ -1619,7 +881,7 @@ export class OperatorSessionCoordination {
       if (disconnect) {
         steps.push({
           adapter: "transport",
-          code: code === "capacity-reached" ? 4429 : 4401,
+          code: code === "capacity-reached" ? CloseCodes.capacityReached : CloseCodes.unauthorized,
           kind: "disconnect",
           reason: code === "capacity-reached" ? "Server at capacity" : "Unauthorized",
           sessionToken,
@@ -1630,55 +892,8 @@ export class OperatorSessionCoordination {
     return {
       decision: "rejected",
       rejection: { code, message },
-      revision: this.revision,
       steps: steps.steps,
     };
-  }
-
-  private restoreAllPageListeners(
-    previousListenStates: ReadonlyMap<string, string[]>,
-    pagerSessionToken: string,
-    steps: StepBuilder,
-  ): void {
-    for (const session of this.sessions.values()) {
-      if (session.sessionToken === pagerSessionToken) {
-        continue;
-      }
-
-      const restoredState = this.buildOperatorState(session.user, session.state);
-      const priorListenChannelIds = previousListenStates.get(session.sessionToken);
-
-      session.state = {
-        ...restoredState,
-        listenChannelIds: priorListenChannelIds
-          ? this.sanitizeListenChannelIds(session.user, priorListenChannelIds)
-          : restoredState.listenChannelIds,
-      };
-      this.appendOperatorState(steps, session.sessionToken);
-      this.appendMediaRefresh(steps, session.sessionToken, "all-page");
-    }
-  }
-
-  private sanitizeListenChannelIds(user: UserInfo, channelIds: readonly string[]): string[] {
-    const allowedListenChannelIds = new Set(
-      user.channelPermissions
-        .filter((permission) => permission.canListen)
-        .map((permission) => permission.channelId),
-    );
-
-    return sortIds(new Set(channelIds.filter((channelId) => allowedListenChannelIds.has(channelId))));
-  }
-
-  private timeoutDirectCall(callId: string): OperatorSessionCoordinationResult {
-    const call = this.directCalls.get(callId);
-
-    if (!call || call.state !== "ringing") {
-      return this.noop();
-    }
-
-    return this.accept((steps) => {
-      this.endDirectCall(callId, "unavailable", steps);
-    });
   }
 
   private unlatchChannel(channelId: string): OperatorSessionCoordinationResult {
@@ -1697,7 +912,7 @@ export class OperatorSessionCoordination {
         session.state = {
           ...session.state,
           talkChannelIds: updatedTalkChannelIds,
-          talking: updatedTalkChannelIds.length > 0 && session.state.talking,
+          talking: updatedTalkChannelIds.length > 0,
         };
         this.appendOperatorState(steps, session.sessionToken);
         steps.push({
